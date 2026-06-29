@@ -1,0 +1,20 @@
+# Pasar el header Authorization a PHP.
+# Sin esto, en muchos hostings los Bearer tokens NO llegan a la API.
+<IfModule mod_setenvif.c>
+    SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
+</IfModule>
+CGIPassAuth On
+
+RewriteEngine On
+
+# Respaldo: copiar Authorization a una variable de entorno accesible.
+RewriteCond %{HTTP:Authorization} ^(.+)$
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%1]
+
+# Si el archivo o carpeta existe físicamente, servirlo tal cual.
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+# Todo lo demás va al front controller.
+RewriteRule ^ index.php [L]

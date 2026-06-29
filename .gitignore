@@ -1,0 +1,19 @@
+# Dependencias
+node_modules/
+vendor/
+
+# Builds
+dist/
+build/
+.vite/
+
+# Configuración sensible (NUNCA subir)
+backend/config/config.php
+.env
+.env.*
+*.local
+
+# Sistema
+.DS_Store
+*.log
+coverage/

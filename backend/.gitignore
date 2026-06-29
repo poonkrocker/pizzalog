@@ -1,0 +1,10 @@
+# Configuración con credenciales reales: jamás al repo
+/config/config.php
+
+# Logs y basura
+*.log
+.DS_Store
+Thumbs.db
+
+# Dependencias (si en el futuro usás Composer)
+/vendor/
