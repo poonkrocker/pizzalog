@@ -12,7 +12,7 @@ return [
         'host'    => 'localhost',          // en Ferozo casi siempre es localhost
         'name'    => 'a0140456_app',
         'user'    => 'a0140456_app',
-        'pass'    => 'PONÉ_TU_PASSWORD_ACÁ',
+        'pass'    => 'PizzaPizza*798*',
         'charset' => 'utf8mb4',
     ],
 
