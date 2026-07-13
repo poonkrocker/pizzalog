@@ -2,9 +2,8 @@
 node_modules/
 vendor/
 
-# Builds
-dist/
-build/
+# Builds locales de desarrollo (los deployables viven en / y /app)
+frontend/apps/*/dist/
 .vite/
 
 # Capacitor (se generan en tu máquina con Android Studio)
