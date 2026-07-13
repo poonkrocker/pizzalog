@@ -37,6 +37,7 @@ class TableSessionRepository
                JOIN table_sessions s ON s.id = st.session_id
                JOIN tables t ON t.id = st.table_id
               WHERE s.business_id = ? AND s.status IN ('open','bill_requested')
+                AND t.kind = 'table'
                 AND st.table_id IN ($in) LIMIT 1"
         );
         $stmt->execute([$bid, ...$tableIds]);
@@ -48,15 +49,15 @@ class TableSessionRepository
         return ['ok' => true];
     }
 
-    public function openSession(int $bid, int $userId, array $tableIds, ?int $partySize, ?string $note): int
+    public function openSession(int $bid, int $userId, array $tableIds, ?int $partySize, ?string $note, ?string $label = null): int
     {
         $pdo = Database::pdo();
         $pdo->beginTransaction();
         try {
             $pdo->prepare(
-                'INSERT INTO table_sessions (business_id, status, party_size, opened_by, note)
-                 VALUES (?, "open", ?, ?, ?)'
-            )->execute([$bid, $partySize, $userId, $note]);
+                'INSERT INTO table_sessions (business_id, status, party_size, label, opened_by, note)
+                 VALUES (?, "open", ?, ?, ?, ?)'
+            )->execute([$bid, $partySize, $label, $userId, $note]);
             $sessionId = (int) $pdo->lastInsertId();
 
             $stmt = $pdo->prepare('INSERT INTO session_tables (session_id, table_id) VALUES (?, ?)');
@@ -77,7 +78,7 @@ class TableSessionRepository
     public function getSession(int $bid, int $id): ?array
     {
         $stmt = Database::pdo()->prepare(
-            'SELECT id, status, party_size, opened_by, opened_at, closed_at, note
+            'SELECT id, status, party_size, label, opened_by, opened_at, closed_at, note
                FROM table_sessions WHERE id = ? AND business_id = ? LIMIT 1'
         );
         $stmt->execute([$id, $bid]);
@@ -88,14 +89,17 @@ class TableSessionRepository
     public function listOpenSessions(int $bid): array
     {
         $stmt = Database::pdo()->prepare(
-            'SELECT s.id, s.status, s.party_size, s.opened_at,
+            'SELECT s.id, s.status, s.party_size, s.label, s.opened_at,
                     (SELECT COALESCE(SUM(i.qty * i.unit_price), 0)
                        FROM table_round_items i
                       WHERE i.session_id = s.id AND i.status = "ordered") AS subtotal,
                     (SELECT GROUP_CONCAT(t.label ORDER BY t.label SEPARATOR "+")
                        FROM session_tables st
                        JOIN tables t ON t.id = st.table_id
-                      WHERE st.session_id = s.id) AS tables_label
+                      WHERE st.session_id = s.id) AS tables_label,
+                    (SELECT GROUP_CONCAT(st.table_id)
+                       FROM session_tables st
+                      WHERE st.session_id = s.id) AS table_ids
                FROM table_sessions s
               WHERE s.business_id = ? AND s.status IN ("open", "bill_requested")
               ORDER BY s.opened_at'
@@ -107,9 +111,13 @@ class TableSessionRepository
                 'id'           => (int) $r['id'],
                 'status'       => $r['status'],
                 'party_size'   => $r['party_size'] !== null ? (int) $r['party_size'] : null,
+                'label'        => $r['label'],
                 'opened_at'    => $r['opened_at'],
                 'subtotal'     => (float) $r['subtotal'],
                 'tables_label' => $r['tables_label'],
+                'table_ids'    => $r['table_ids'] !== null
+                    ? array_map('intval', explode(',', (string) $r['table_ids']))
+                    : [],
             ];
         }, $stmt->fetchAll());
     }
@@ -201,11 +209,29 @@ class TableSessionRepository
         // Snapshot de productos.
         $ids = array_values(array_unique(array_map(static fn($i) => (int) $i['product_id'], $items)));
         $in  = implode(',', array_fill(0, count($ids), '?'));
-        $stmt = $pdo->prepare("SELECT id, name, price FROM products WHERE business_id = ? AND id IN ($in)");
+        $stmt = $pdo->prepare("SELECT id, name, price, has_variants, is_open_price FROM products WHERE business_id = ? AND id IN ($in)");
         $stmt->execute([$bid, ...$ids]);
         $catalog = [];
         foreach ($stmt->fetchAll() as $p) {
             $catalog[(int) $p['id']] = $p;
+        }
+
+        // Variantes referenciadas (precio y etiqueta).
+        $vids = [];
+        foreach ($items as $i) {
+            if (isset($i['variant_id']) && (int) $i['variant_id'] > 0) {
+                $vids[] = (int) $i['variant_id'];
+            }
+        }
+        $variants = [];
+        if ($vids !== []) {
+            $uniq = array_values(array_unique($vids));
+            $vin  = implode(',', array_fill(0, count($uniq), '?'));
+            $vstmt = $pdo->prepare("SELECT id, product_id, label, price FROM product_variants WHERE business_id = ? AND id IN ($vin)");
+            $vstmt->execute([$bid, ...$uniq]);
+            foreach ($vstmt->fetchAll() as $v) {
+                $variants[(int) $v['id']] = $v;
+            }
         }
 
         $pdo->beginTransaction();
@@ -222,18 +248,39 @@ class TableSessionRepository
 
             $stmt = $pdo->prepare(
                 'INSERT INTO table_round_items
-                    (business_id, session_id, round_id, product_id, name, qty, unit_price, note)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+                    (business_id, session_id, round_id, product_id, variant_id, name, qty, unit_price, note)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             foreach ($items as $it) {
                 $pid = (int) $it['product_id'];
                 if (!isset($catalog[$pid])) {
                     throw new \RuntimeException('El producto ' . $pid . ' no existe');
                 }
-                $qty = max(1, (int) $it['qty']);
+                $product   = $catalog[$pid];
+                $qty       = max(1, (int) $it['qty']);
+                $variantId = null;
+                $name      = $product['name'];
+                $price     = (float) $product['price'];
+
+                if ((int) $product['has_variants'] === 1) {
+                    $vid = (int) ($it['variant_id'] ?? 0);
+                    if ($vid <= 0 || !isset($variants[$vid]) || (int) $variants[$vid]['product_id'] !== $pid) {
+                        throw new \RuntimeException('Elegí una variante válida para ' . $product['name']);
+                    }
+                    $variantId = $vid;
+                    $price     = (float) $variants[$vid]['price'];
+                    $name      = $product['name'] . ' — ' . $variants[$vid]['label'];
+                } elseif ((int) $product['is_open_price'] === 1) {
+                    $up = $it['unit_price'] ?? null;
+                    if (!is_numeric($up) || (float) $up <= 0) {
+                        throw new \RuntimeException('Ingresá el precio de ' . $product['name']);
+                    }
+                    $price = (float) $up;
+                }
+
                 $stmt->execute([
-                    $bid, $sessionId, $roundId, $pid,
-                    $catalog[$pid]['name'], $qty, $catalog[$pid]['price'],
+                    $bid, $sessionId, $roundId, $pid, $variantId,
+                    $name, $qty, $price,
                     isset($it['note']) ? trim((string) $it['note']) : null,
                 ]);
             }
@@ -430,7 +477,7 @@ class TableSessionRepository
     public function getOrderedItems(int $bid, int $sessionId): array
     {
         $stmt = Database::pdo()->prepare(
-            'SELECT i.id, i.product_id, i.name, i.qty, i.unit_price,
+            'SELECT i.id, i.product_id, i.variant_id, i.name, i.qty, i.unit_price,
                     COALESCE(p.track_stock, 0) AS track_stock
                FROM table_round_items i
           LEFT JOIN products p ON p.id = i.product_id
@@ -442,6 +489,7 @@ class TableSessionRepository
             return [
                 'id'          => (int) $i['id'],
                 'product_id'  => $i['product_id'] !== null ? (int) $i['product_id'] : null,
+                'variant_id'  => $i['variant_id'] !== null ? (int) $i['variant_id'] : null,
                 'name'        => $i['name'],
                 'qty'         => (int) $i['qty'],
                 'unit_price'  => (float) $i['unit_price'],

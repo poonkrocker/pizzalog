@@ -61,8 +61,9 @@ class TableSessionController
         $partySize = $req->input('party_size');
         $partySize = is_numeric($partySize) ? (int) $partySize : null;
         $note      = trim((string) $req->input('note', '')) ?: null;
+        $label     = trim((string) $req->input('label', '')) ?: null;
 
-        $id = $this->repo->openSession($bid, (int) $req->auth['sub'], $tableIds, $partySize, $note);
+        $id = $this->repo->openSession($bid, (int) $req->auth['sub'], $tableIds, $partySize, $note, $label);
         Response::ok(['session' => $this->repo->getSessionDetail($bid, $id)], 201);
     }
 

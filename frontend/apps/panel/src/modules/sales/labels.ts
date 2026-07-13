@@ -2,6 +2,8 @@ import type { SaleChannel } from '@pizzalog/shared';
 
 export const CHANNEL_LABELS: Record<SaleChannel, string> = {
   counter: 'Mostrador',
+  takeaway: 'Para llevar',
+  delivery: 'Delivery',
   dine_in: 'Salón',
   web: 'Web',
   whatsapp: 'WhatsApp',

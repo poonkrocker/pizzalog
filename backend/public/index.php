@@ -21,6 +21,8 @@ use Pizzalog\Controllers\CustomerController;
 use Pizzalog\Controllers\FiscalController;
 use Pizzalog\Controllers\SupplierController;
 use Pizzalog\Controllers\SupplyController;
+use Pizzalog\Controllers\VariantController;
+use Pizzalog\Controllers\BusinessController;
 use Pizzalog\Controllers\ProductController;
 use Pizzalog\Controllers\SaleController;
 use Pizzalog\Controllers\TableAreaController;
@@ -52,11 +54,17 @@ $router->delete('/categories/{id}', [CategoryController::class, 'destroy'], [$au
 // --- Productos --------------------------------------------------------
 // Lectura: cualquier usuario autenticado. Escritura: admin o manager.
 $router->post('/products/preview-ingredients', [ProductController::class, 'previewIngredients'], [$auth]);
+$router->get('/business', [BusinessController::class, 'show'], [$auth]);
+$router->put('/business', [BusinessController::class, 'update'], [$auth, $admin]);
+
 $router->get('/products', [ProductController::class, 'index'], [$auth]);
 $router->get('/products/{id}', [ProductController::class, 'show'], [$auth]);
 $router->post('/products', [ProductController::class, 'store'], [$auth, $manage]);
 $router->put('/products/{id}', [ProductController::class, 'update'], [$auth, $manage]);
 $router->delete('/products/{id}', [ProductController::class, 'destroy'], [$auth, $manage]);
+$router->get('/products/{id}/variants', [VariantController::class, 'show'], [$auth]);
+$router->put('/products/{id}/options', [VariantController::class, 'setOptions'], [$auth, $manage]);
+$router->put('/products/{id}/variants', [VariantController::class, 'updateVariants'], [$auth, $manage]);
 
 // --- Ventas -----------------------------------------------------------
 // Registrar/listar/ver: cualquier usuario (el cajero vende). Anular: manager.

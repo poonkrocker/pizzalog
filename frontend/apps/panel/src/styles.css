@@ -216,11 +216,17 @@ button { font-family: inherit; }
 
 /* ---------- Responsive ---------- */
 @media (max-width: 720px) {
-  .shell { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
-  .shell__nav { flex-direction: row; align-items: center; gap: 12px; overflow-x: auto; }
-  .shell__menu { flex-direction: row; flex: 1; }
-  .shell__user { border-top: none; padding-top: 0; flex-direction: row; align-items: center; }
-  .shell__main { padding: 20px; }
+  .shell { grid-template-columns: 66px 1fr; }
+  .shell__nav { padding: 12px 6px; }
+  .shell__brand { font-size: 0; text-align: center; padding-bottom: 12px; }
+  .shell__brand::before { content: "P"; font-size: 24px; color: var(--red); font-weight: 800; }
+  .navitem { flex-direction: column; gap: 3px; padding: 9px 2px; text-align: center; font-size: 0; }
+  .navitem__icon { font-size: 20px; width: auto; }
+  .navitem__label { font-size: 9px; line-height: 1.15; }
+  .navitem--active { box-shadow: inset 0 -3px 0 var(--red); }
+  .shell__user { flex-direction: column; gap: 6px; padding-top: 10px; }
+  .shell__username { display: none; }
+  .shell__main { padding: 16px 14px; }
 }
 
 /* ---------- Encabezado de página ---------- */
@@ -506,3 +512,196 @@ button { font-family: inherit; }
 .stock-history__qty.is-neg { color: #f0a59b; }
 .stock-history__meta { color: var(--muted); font-size: 12px; }
 .muted-text { color: var(--muted); font-size: 14px; }
+
+/* ---------- Editor de variantes ---------- */
+.opt-list { display: grid; gap: 12px; margin: 8px 0 14px; }
+.opt-row {
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 12px;
+  background: var(--surface);
+}
+.opt-row__head { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; }
+.opt-row__head > :first-child { flex: 1; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 13px;
+}
+.chip button { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 12px; padding: 0; }
+.chip button:hover { color: var(--red); }
+.chip-input {
+  background: transparent;
+  border: 1px dashed var(--line);
+  border-radius: 999px;
+  padding: 5px 12px;
+  color: var(--text);
+  font-size: 13px;
+  min-width: 130px;
+}
+.opt-actions { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 8px; flex-wrap: wrap; }
+
+.variant-grid { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 12px; }
+.variant-grid__title { font-size: 14px; color: var(--cream); margin: 0 0 10px; }
+.variant-row {
+  display: grid;
+  grid-template-columns: 1fr 130px auto;
+  gap: 12px;
+  align-items: center;
+  padding: 6px 0;
+}
+.variant-row__label { font-size: 14px; font-weight: 500; }
+
+
+/* ---------- Badges y desplegable de variantes ---------- */
+.prod-name { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.prod-name__txt { font-weight: 500; }
+.badge {
+  font-size: 11px; padding: 2px 8px; border-radius: 999px;
+  background: var(--surface-2); color: var(--muted); border: 1px solid var(--line);
+  white-space: nowrap;
+}
+.badge--accent { background: rgba(253, 183, 64, 0.16); color: var(--ocre); border-color: transparent; }
+
+.table__exp, .table__exp-h { width: 40px; text-align: center; }
+.exp-btn {
+  background: none; border: none; color: var(--muted);
+  font-size: 14px; cursor: pointer; padding: 6px 8px; border-radius: 6px;
+}
+.exp-btn:hover { color: var(--cream); background: var(--surface-2); }
+
+.variant-peek { display: grid; gap: 5px; padding: 4px 0; }
+.variant-peek__row {
+  display: flex; justify-content: space-between; gap: 12px;
+  font-size: 13px; padding: 7px 12px; background: var(--bg);
+  border-radius: var(--r-sm);
+}
+.variant-peek__price { color: var(--ocre); white-space: nowrap; }
+.variant-peek__price em { color: var(--muted); font-style: normal; }
+.variant-peek__empty { color: var(--muted); font-size: 13px; margin: 0; }
+
+/* ---------- Tabla como tarjetas en celular ---------- */
+@media (max-width: 720px) {
+  .table-wrap { border: none; border-radius: 0; overflow: visible; }
+  .table { font-size: 14px; }
+  .table thead { display: none; }
+  .table, .table tbody { display: block; }
+  .table tr {
+    display: block; background: var(--surface);
+    border: 1px solid var(--line); border-radius: var(--r-md);
+    padding: 8px 14px; margin-bottom: 10px;
+  }
+  .table td {
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    text-align: right !important; padding: 7px 0; border: none;
+  }
+  .table td::before {
+    content: attr(data-label); color: var(--muted);
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+    text-align: left; flex-shrink: 0;
+  }
+  .table td:not([data-label])::before { content: ""; }
+  .table td:empty { display: none; }
+  .row-actions { justify-content: flex-end; gap: 16px; }
+  .table td.table__exp { justify-content: space-between; }
+  .table td.table__exp:not(:empty)::before { content: "Variantes"; }
+  .table td.table__exp .exp-btn { font-size: 16px; }
+  /* Fila con variantes desplegadas: se pega a su tarjeta */
+  .table tr.is-open { margin-bottom: 0; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+  .table tr.table__expand {
+    background: var(--surface); border: 1px solid var(--line); border-top: none;
+    border-radius: 0 0 var(--r-md) var(--r-md); padding: 0 14px 12px; margin-bottom: 10px;
+  }
+  .table tr.table__expand td { display: block; text-align: left !important; padding: 0; }
+  .table tr.table__expand td::before { content: none; }
+}
+
+/* ---------- Ajustes mobile-first (panel) ---------- */
+/* El croquis del salón es un lienzo fijo: en pantallas chicas se desplaza
+   de lado en vez de desbordar la página. */
+.floor-canvas { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
+
+@media (max-width: 720px) {
+  /* Modales cómodos en celular */
+  .modal__overlay { padding: 10px; align-items: flex-end; }
+  .modal { max-width: 100%; max-height: 94vh; }
+
+  /* Grilla del editor de variantes: apilada */
+  .variant-row {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      'label label'
+      'price active';
+  }
+  .variant-row__label { grid-area: label; }
+  .variant-row > .input, .variant-row input[type='number'] { grid-area: price; }
+  .variant-row .checkbox { grid-area: active; margin: 0; }
+
+  /* Toolbar del salón y chips: que envuelvan sin desbordar */
+  .floor-toolbar { flex-wrap: wrap; gap: 8px; }
+  .chips { max-width: 100%; }
+  .chip-input { min-width: 110px; flex: 1; }
+
+  /* La tarjeta de producto: el nombre manda */
+  .table td[data-label='Producto'] { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .table td[data-label='Producto']::before { font-size: 10px; }
+  .table td[data-label='Producto'] .prod-name { justify-content: flex-start; text-align: left; }
+  .prod-name__txt { font-size: 15px; font-weight: 600; }
+}
+
+/* ---------- Mi local ---------- */
+.business-form { max-width: 620px; }
+.slug-row { display: flex; align-items: center; gap: 0; }
+.slug-row__prefix {
+  padding: 0 10px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-right: none;
+  border-radius: var(--r-sm) 0 0 var(--r-sm);
+  color: var(--muted);
+  font-size: 14px;
+  white-space: nowrap;
+}
+.slug-row .input { border-radius: 0 var(--r-sm) var(--r-sm) 0; }
+.business-form__ok { color: var(--success, #6cc070); font-size: 14px; }
+
+/* ---------- Apariencia de la carta ---------- */
+.theme-block { border-top: 1px solid var(--line); margin-top: 18px; padding-top: 14px; }
+.theme-block__title { font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 0 0 10px; }
+.theme-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-top: 10px; }
+.color-input {
+  width: 100%;
+  height: 42px;
+  padding: 3px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+.theme-preview {
+  margin-top: 12px;
+  padding: 14px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--line);
+}
+.theme-preview__card {
+  background: #fff;
+  border: 3px outset #999;
+  padding: 10px 12px;
+  display: grid;
+  gap: 4px;
+  max-width: 300px;
+  font-family: Verdana, Tahoma, sans-serif;
+}
+.theme-preview__name { font-weight: bold; font-size: 15px; text-transform: uppercase; }
+.theme-preview__text { font-size: 12px; }
+.theme-preview a { text-decoration: underline; font-size: 12px; }

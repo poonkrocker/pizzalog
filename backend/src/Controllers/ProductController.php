@@ -6,14 +6,17 @@ use Pizzalog\Core\Request;
 use Pizzalog\Core\Response;
 use Pizzalog\Ingredients\ExtractorFactory;
 use Pizzalog\Repositories\IngredientRepository;
+use Pizzalog\Repositories\VariantRepository;
 
 class ProductController
 {
     private IngredientRepository $ingredients;
+    private VariantRepository $variants;
 
     public function __construct()
     {
         $this->ingredients = new IngredientRepository();
+        $this->variants    = new VariantRepository();
     }
 
     /**
@@ -37,7 +40,7 @@ class ProductController
     {
         $stmt = Database::pdo()->prepare(
             'SELECT id, category_id, name, description, price, cost, image_url,
-                    track_stock, stock_quantity, stock_min, is_active
+                    track_stock, stock_quantity, stock_min, is_active, has_variants, is_open_price
                FROM products
               WHERE business_id = ?
               ORDER BY name'
@@ -47,6 +50,11 @@ class ProductController
 
         foreach ($products as &$p) {
             $p['ingredients'] = $this->ingredients->forProduct((int) $p['id']);
+            if ((int) $p['has_variants'] === 1) {
+                $data = $this->variants->forProduct((int) $req->auth['business_id'], (int) $p['id']);
+                $p['options']  = $data['options'];
+                $p['variants'] = $data['variants'];
+            }
         }
         unset($p);
 
@@ -58,6 +66,11 @@ class ProductController
     {
         $product = $this->findOwned($req, (int) $req->param('id'));
         $product['ingredients'] = $this->ingredients->forProduct((int) $product['id']);
+        if ((int) $product['has_variants'] === 1) {
+            $data = $this->variants->forProduct((int) $req->auth['business_id'], (int) $product['id']);
+            $product['options']  = $data['options'];
+            $product['variants'] = $data['variants'];
+        }
         Response::ok(['product' => $product]);
     }
 
@@ -78,12 +91,13 @@ class ProductController
             $stmt = $pdo->prepare(
                 'INSERT INTO products
                     (business_id, category_id, name, description, price, cost,
-                     track_stock, stock_quantity, stock_min)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                     track_stock, stock_quantity, stock_min, is_open_price)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $stmt->execute([
                 $bid, $d['category_id'], $d['name'], $d['description'], $d['price'],
                 $d['cost'], $d['track_stock'], $d['stock_quantity'], $d['stock_min'],
+                $d['is_open_price'],
             ]);
             $productId = (int) $pdo->lastInsertId();
 
@@ -115,12 +129,12 @@ class ProductController
             $stmt = $pdo->prepare(
                 'UPDATE products
                     SET category_id = ?, name = ?, description = ?, price = ?, cost = ?,
-                        track_stock = ?, stock_quantity = ?, stock_min = ?
+                        track_stock = ?, stock_quantity = ?, stock_min = ?, is_open_price = ?
                   WHERE id = ? AND business_id = ?'
             );
             $stmt->execute([
                 $d['category_id'], $d['name'], $d['description'], $d['price'], $d['cost'],
-                $d['track_stock'], $d['stock_quantity'], $d['stock_min'], $id, $bid,
+                $d['track_stock'], $d['stock_quantity'], $d['stock_min'], $d['is_open_price'], $id, $bid,
             ]);
 
             $ids = $this->ingredients->resolveNames($bid, $d['ingredients']);
@@ -183,6 +197,7 @@ class ProductController
             'track_stock'    => (int) (bool) $req->input('track_stock', false),
             'stock_quantity' => (int) $req->input('stock_quantity', 0),
             'stock_min'      => (int) $req->input('stock_min', 0),
+            'is_open_price'  => (int) (bool) $req->input('is_open_price', false),
             'ingredients'    => is_array($ingredients) ? $ingredients : [],
         ];
     }
@@ -191,7 +206,7 @@ class ProductController
     {
         $stmt = Database::pdo()->prepare(
             'SELECT id, category_id, name, description, price, cost, image_url,
-                    track_stock, stock_quantity, stock_min, is_active
+                    track_stock, stock_quantity, stock_min, is_active, has_variants, is_open_price
                FROM products
               WHERE id = ? AND business_id = ?
               LIMIT 1'

@@ -64,12 +64,12 @@ class SaleService
         $saleId = (int) $pdo->lastInsertId();
 
         $itemStmt = $pdo->prepare(
-            'INSERT INTO sale_items (sale_id, product_id, product_name, unit_price, quantity, line_total)
-             VALUES (?, ?, ?, ?, ?, ?)'
+            'INSERT INTO sale_items (sale_id, product_id, variant_id, product_name, unit_price, quantity, line_total)
+             VALUES (?, ?, ?, ?, ?, ?, ?)'
         );
         foreach ($lines as $l) {
             $itemStmt->execute([
-                $saleId, $l['product_id'], $l['product_name'],
+                $saleId, $l['product_id'], $l['variant_id'] ?? null, $l['product_name'],
                 $l['unit_price'], $l['quantity'], $l['line_total'],
             ]);
             if (!empty($l['track_stock']) && $l['product_id'] !== null) {

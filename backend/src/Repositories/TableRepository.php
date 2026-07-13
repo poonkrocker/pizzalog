@@ -76,7 +76,7 @@ class TableRepository
 
     public function listTables(int $bid, ?int $areaId = null): array
     {
-        $sql    = 'SELECT id, area_id, label, capacity, shape, pos_x, pos_y, width, height,
+        $sql    = 'SELECT id, area_id, label, kind, capacity, shape, pos_x, pos_y, width, height,
                           rotation, is_active
                      FROM tables WHERE business_id = ?';
         $params = [$bid];
@@ -94,7 +94,7 @@ class TableRepository
     public function getTable(int $bid, int $id): ?array
     {
         $stmt = Database::pdo()->prepare(
-            'SELECT id, area_id, label, capacity, shape, pos_x, pos_y, width, height,
+            'SELECT id, area_id, label, kind, capacity, shape, pos_x, pos_y, width, height,
                     rotation, is_active
                FROM tables WHERE id = ? AND business_id = ? LIMIT 1'
         );
@@ -108,10 +108,10 @@ class TableRepository
         $pdo = Database::pdo();
         $pdo->prepare(
             'INSERT INTO tables
-                (business_id, area_id, label, capacity, shape, pos_x, pos_y, width, height, rotation)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                (business_id, area_id, label, kind, capacity, shape, pos_x, pos_y, width, height, rotation)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
-            $bid, $d['area_id'], $d['label'], $d['capacity'], $d['shape'],
+            $bid, $d['area_id'], $d['label'], $d['kind'], $d['capacity'], $d['shape'],
             $d['pos_x'], $d['pos_y'], $d['width'], $d['height'], $d['rotation'],
         ]);
         return (int) $pdo->lastInsertId();
@@ -121,11 +121,11 @@ class TableRepository
     {
         Database::pdo()->prepare(
             'UPDATE tables
-                SET area_id = ?, label = ?, capacity = ?, shape = ?, pos_x = ?, pos_y = ?,
+                SET area_id = ?, label = ?, kind = ?, capacity = ?, shape = ?, pos_x = ?, pos_y = ?,
                     width = ?, height = ?, rotation = ?, is_active = ?
               WHERE id = ? AND business_id = ?'
         )->execute([
-            $d['area_id'], $d['label'], $d['capacity'], $d['shape'], $d['pos_x'], $d['pos_y'],
+            $d['area_id'], $d['label'], $d['kind'], $d['capacity'], $d['shape'], $d['pos_x'], $d['pos_y'],
             $d['width'], $d['height'], $d['rotation'], $d['is_active'], $id, $bid,
         ]);
     }
@@ -188,12 +188,15 @@ class TableRepository
     {
         $stmt = Database::pdo()->prepare(
             'SELECT a.id AS area_id, a.name AS area_name, a.sort_order,
-                    t.id, t.label, t.capacity, t.shape, t.pos_x, t.pos_y,
+                    t.id, t.label, t.kind, t.capacity, t.shape, t.pos_x, t.pos_y,
                     t.width, t.height, t.rotation,
                     (SELECT s.id FROM session_tables st
                        JOIN table_sessions s ON s.id = st.session_id
                       WHERE st.table_id = t.id AND s.status IN ("open", "bill_requested")
-                      LIMIT 1) AS session_id
+                      LIMIT 1) AS session_id,
+                    (SELECT COUNT(*) FROM session_tables st
+                       JOIN table_sessions s ON s.id = st.session_id
+                      WHERE st.table_id = t.id AND s.status IN ("open", "bill_requested")) AS open_count
                FROM table_areas a
           LEFT JOIN tables t ON t.area_id = a.id AND t.is_active = 1
               WHERE a.business_id = ?
@@ -217,6 +220,7 @@ class TableRepository
             $areas[$areaId]['tables'][] = [
                 'id'         => (int) $r['id'],
                 'label'      => $r['label'],
+                'kind'       => $r['kind'],
                 'capacity'   => (int) $r['capacity'],
                 'shape'      => $r['shape'],
                 'pos_x'      => (int) $r['pos_x'],
@@ -224,7 +228,10 @@ class TableRepository
                 'width'      => (int) $r['width'],
                 'height'     => (int) $r['height'],
                 'rotation'   => (int) $r['rotation'],
-                'status'     => $r['session_id'] !== null ? 'occupied' : 'free',
+                'open_count' => (int) $r['open_count'],
+                'status'     => $r['kind'] === 'bar'
+                    ? 'bar'
+                    : ($r['session_id'] !== null ? 'occupied' : 'free'),
                 'session_id' => $r['session_id'] !== null ? (int) $r['session_id'] : null,
             ];
         }

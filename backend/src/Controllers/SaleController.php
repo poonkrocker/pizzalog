@@ -111,6 +111,13 @@ class SaleController
             Response::error('La sesión de caja no existe o está cerrada', 422);
         }
 
+        // Canal de la venta (mostrador, para llevar, delivery propio…).
+        $channel = (string) $req->input('channel', 'counter');
+        $allowedChannels = ['counter', 'takeaway', 'delivery', 'web', 'whatsapp', 'pedidosya', 'rappi', 'phone', 'dine_in'];
+        if (!in_array($channel, $allowedChannels, true)) {
+            Response::error('Canal de venta inválido', 422);
+        }
+
         // Validar ítems y cargar productos.
         $productIds = [];
         foreach ($items as $it) {
@@ -128,21 +135,54 @@ class SaleController
             }
         }
 
+        // Cargar variantes referenciadas, para tomar su precio y etiqueta.
+        $variantIds = [];
+        foreach ($items as $it) {
+            if (isset($it['variant_id']) && (int) $it['variant_id'] > 0) {
+                $variantIds[] = (int) $it['variant_id'];
+            }
+        }
+        $variants = $this->loadVariants($bid, array_values(array_unique($variantIds)));
+
         // Armar líneas con snapshots de nombre y precio.
         $lines    = [];
         $subtotal = 0.0;
         foreach ($items as $it) {
-            $pid       = (int) $it['product_id'];
-            $qty       = (float) $it['quantity'];
-            $product   = $products[$pid];
-            $unitPrice = (isset($it['unit_price']) && is_numeric($it['unit_price']))
-                ? (float) $it['unit_price']
-                : (float) $product['price'];
+            $pid     = (int) $it['product_id'];
+            $qty     = (float) $it['quantity'];
+            $product = $products[$pid];
+
+            $variantId   = null;
+            $productName = $product['name'];
+
+            if ((int) $product['has_variants'] === 1) {
+                // Producto con variantes: hay que elegir una válida.
+                $vid = (int) ($it['variant_id'] ?? 0);
+                if ($vid <= 0 || !isset($variants[$vid]) || (int) $variants[$vid]['product_id'] !== $pid) {
+                    Response::error("Elegí una variante válida para «{$product['name']}»", 422);
+                }
+                $variantId   = $vid;
+                $unitPrice   = (float) $variants[$vid]['price'];
+                $productName = $product['name'] . ' — ' . $variants[$vid]['label'];
+            } elseif ((int) $product['is_open_price'] === 1) {
+                // Precio abierto: el monto lo define el cajero al vender.
+                if (!isset($it['unit_price']) || !is_numeric($it['unit_price']) || (float) $it['unit_price'] <= 0) {
+                    Response::error("Ingresá el precio de «{$product['name']}»", 422);
+                }
+                $unitPrice = (float) $it['unit_price'];
+            } else {
+                // Producto normal.
+                $unitPrice = (isset($it['unit_price']) && is_numeric($it['unit_price']))
+                    ? (float) $it['unit_price']
+                    : (float) $product['price'];
+            }
+
             $lineTotal = round($unitPrice * $qty, 2);
             $subtotal += $lineTotal;
             $lines[]   = [
                 'product_id'   => $pid,
-                'product_name' => $product['name'],
+                'variant_id'   => $variantId,
+                'product_name' => $productName,
                 'unit_price'   => $unitPrice,
                 'quantity'     => $qty,
                 'line_total'   => $lineTotal,
@@ -160,7 +200,7 @@ class SaleController
         try {
             $saleId = $this->sales->create(
                 $bid, $userId, $lines, $paymentMethod, $discount,
-                'counter', $cashSessionId, $clientUuid, $note
+                $channel, $cashSessionId, $clientUuid, $note
             );
             $pdo->commit();
         } catch (\PDOException $e) {
@@ -231,7 +271,7 @@ class SaleController
     {
         $sale = $this->castSale($sale);
         $stmt = Database::pdo()->prepare(
-            'SELECT id, product_id, product_name, unit_price, quantity, line_total
+            'SELECT id, product_id, variant_id, product_name, unit_price, quantity, line_total
                FROM sale_items WHERE sale_id = ? ORDER BY id'
         );
         $stmt->execute([(int) $sale['id']]);
@@ -239,6 +279,7 @@ class SaleController
         $sale['items'] = array_map(static function (array $i): array {
             $i['id']         = (int) $i['id'];
             $i['product_id'] = $i['product_id'] !== null ? (int) $i['product_id'] : null;
+            $i['variant_id'] = $i['variant_id'] !== null ? (int) $i['variant_id'] : null;
             $i['unit_price'] = (float) $i['unit_price'];
             $i['quantity']   = (float) $i['quantity'];
             $i['line_total'] = (float) $i['line_total'];
@@ -298,12 +339,32 @@ class SaleController
         }
         $placeholders = implode(',', array_fill(0, count($ids), '?'));
         $stmt = Database::pdo()->prepare(
-            "SELECT id, name, price, track_stock
+            "SELECT id, name, price, track_stock, has_variants, is_open_price
                FROM products
               WHERE business_id = ? AND id IN ($placeholders)"
         );
         $stmt->execute(array_merge([$bid], $ids));
 
+        $map = [];
+        foreach ($stmt->fetchAll() as $row) {
+            $map[(int) $row['id']] = $row;
+        }
+        return $map;
+    }
+
+    /** @param int[] $ids @return array<int, array> mapa variant_id => fila */
+    private function loadVariants(int $bid, array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = Database::pdo()->prepare(
+            "SELECT id, product_id, label, price
+               FROM product_variants
+              WHERE business_id = ? AND id IN ($placeholders)"
+        );
+        $stmt->execute(array_merge([$bid], $ids));
         $map = [];
         foreach ($stmt->fetchAll() as $row) {
             $map[(int) $row['id']] = $row;

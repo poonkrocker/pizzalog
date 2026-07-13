@@ -23,6 +23,16 @@ El backend cubre el núcleo completo de operación de una pizzería:
 - **Salón** — áreas con croquis, mesas posicionadas, cuentas de mesa con
   rondas/comandas, juntar/transferir/dividir, cobro y vista de cocina (KDS).
 - **Operación** — empleados, asistencia por PIN, inventario con alertas.
+- **Variantes** — opciones combinables (Tamaño × Masa…) que generan variantes
+  con su propio precio, más productos de precio abierto (se ingresa al vender).
+- **Perfil del negocio** — `GET/PUT /business`: nombre, slug (la URL pública
+  `pizzalog.net/{slug}`), descripción, foto, redes, coordenadas del mapa y
+  **tema de la carta** (colores hex y patrón validados, estilo Fotolog).
+- **Canales del TPV** — la venta acepta y valida el canal (`counter`,
+  `takeaway`, `delivery`, apps…), que queda registrado para los reportes.
+- **Barras** — lugares tipo `bar` que admiten varias cuentas abiertas a la vez
+  (cada cuenta con nombre y cantidad de personas propia); el plano informa
+  `open_count` por barra. Las mesas conservan el comportamiento clásico.
 - **Abastecimiento** — proveedores, insumos (consumibles no vendibles, con
   su propio stock y movimientos) y clientes (CRM básico para delivery).
 - **Analytics** — resúmenes por canal, top de productos, márgenes y el
@@ -80,6 +90,11 @@ migration_002_pedidos.sql        <- OBLIGATORIA: las ventas usan 'channel'
 migration_003_facturacion.sql
 migration_004_salon.sql
 migration_005_abastecimiento.sql   <- proveedores, insumos, clientes
+migration_006_variantes.sql        <- opciones combinables, variantes, precio abierto
+migration_007_barras.sql           <- barras (varias cuentas por lugar) y nombre de cuenta
+migration_008_canales_tpv.sql      <- canales de venta del TPV: para llevar y delivery
+migration_009_perfil_negocio.sql   <- perfil público: foto, bio, redes, ubicación
+migration_010_tema_carta.sql       <- tema de la carta: colores y patrón por negocio
 ```
 
 > El orden importa: las migraciones 001–004 hacen `ALTER`/`CREATE` que dependen
@@ -150,6 +165,7 @@ Todos bajo `https://api.pizzalog.net`. Salvo los públicos, requieren
 | Salón · config | `GET/POST /table-areas`, `PUT/DELETE /table-areas/{id}`, `GET /floor`, `GET/POST /tables`, `PUT /tables/layout`, `GET/PUT/DELETE /tables/{id}` |
 | Salón · cuentas | `GET/POST /table-sessions`, `GET /table-sessions/{id}`, `POST /table-sessions/{id}/rounds`, `POST /table-sessions/{id}/request-bill`, `PUT /table-sessions/{id}/tables`, `POST /table-sessions/{id}/merge`, `POST /table-sessions/{id}/close`, `POST /table-sessions/{id}/cancel`, `DELETE /table-sessions/{id}/items/{itemId}` |
 | Cocina (KDS) | `GET /kitchen/rounds`, `PUT /kitchen/rounds/{id}/status`, `POST /kitchen/rounds/{id}/print` |
+| Variantes    | `GET /products/{id}/variants`, `PUT /products/{id}/options`, `PUT /products/{id}/variants` |
 | Proveedores  | `GET/POST /suppliers`, `GET/PUT/DELETE /suppliers/{id}` |
 | Insumos      | `GET/POST /supplies`, `GET /supplies/low-stock`, `GET/PUT/DELETE /supplies/{id}`, `GET /supplies/{id}/movements`, `POST /supplies/{id}/movement` |
 | Clientes     | `GET/POST /customers`, `GET/PUT/DELETE /customers/{id}` |

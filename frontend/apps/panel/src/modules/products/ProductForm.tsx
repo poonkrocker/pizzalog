@@ -20,6 +20,7 @@ export function ProductForm({ product, categories, onDone }: Props) {
     product?.category_id != null ? String(product.category_id) : '',
   );
   const [trackStock, setTrackStock] = useState(Boolean(product?.track_stock));
+  const [isOpenPrice, setIsOpenPrice] = useState(Boolean(product?.is_open_price));
   const [error, setError] = useState<string | null>(null);
 
   async function onSubmit(e: FormEvent) {
@@ -35,6 +36,7 @@ export function ProductForm({ product, categories, onDone }: Props) {
           cost: cost === '' ? null : Number(cost),
           category_id: categoryId === '' ? null : Number(categoryId),
           track_stock: trackStock ? 1 : 0,
+          is_open_price: isOpenPrice ? 1 : 0,
         },
       });
       onDone();
@@ -90,6 +92,11 @@ export function ProductForm({ product, categories, onDone }: Props) {
         label="Controlar stock de este producto"
         checked={trackStock}
         onChange={(e) => setTrackStock(e.target.checked)}
+      />
+      <Checkbox
+        label="Precio abierto (se ingresa al momento de vender)"
+        checked={isOpenPrice}
+        onChange={(e) => setIsOpenPrice(e.target.checked)}
       />
       {error && (
         <p className="login__error" role="alert">

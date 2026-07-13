@@ -49,7 +49,7 @@ export function FloorEditor({ tables, selectedId, onSelect, onMove }: Props) {
                   width={t.width}
                   height={t.height}
                   cornerRadius={isRound ? Math.min(t.width, t.height) / 2 : 8}
-                  fill={selected ? '#fdb740' : '#f0e6d0'}
+                  fill={selected ? '#fdb740' : t.kind === 'bar' ? '#58a6cf' : '#f0e6d0'}
                   stroke={selected ? '#d73828' : '#231f20'}
                   strokeWidth={selected ? 3 : 1.5}
                   shadowColor="#000"

@@ -53,6 +53,7 @@ class TableCheckoutService
                 $lines = array_map(static function (array $it): array {
                     return [
                         'product_id'   => $it['product_id'],
+                        'variant_id'   => $it['variant_id'] ?? null,
                         'product_name' => $it['name'],
                         'unit_price'   => $it['unit_price'],
                         'quantity'     => $it['qty'],

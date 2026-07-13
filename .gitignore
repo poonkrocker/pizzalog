@@ -7,6 +7,10 @@ dist/
 build/
 .vite/
 
+# Capacitor (se generan en tu máquina con Android Studio)
+frontend/apps/pos/android/
+frontend/apps/pos/ios/
+
 # Configuración sensible (NUNCA subir)
 backend/config/config.php
 .env

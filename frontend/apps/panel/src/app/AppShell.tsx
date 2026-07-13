@@ -27,7 +27,7 @@ export function AppShell() {
               <span className="navitem__icon" aria-hidden="true">
                 {m.icon}
               </span>
-              {m.title}
+              <span className="navitem__label">{m.title}</span>
             </NavLink>
           ))}
         </nav>

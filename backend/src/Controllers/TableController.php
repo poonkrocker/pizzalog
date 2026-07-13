@@ -13,6 +13,7 @@ use Pizzalog\Repositories\TableRepository;
 class TableController
 {
     private const SHAPES = ['round', 'square', 'rect'];
+    private const KINDS  = ['table', 'bar'];
 
     private TableRepository $repo;
 
@@ -130,9 +131,15 @@ class TableController
             Response::error('La capacidad debe ser mayor a 0', 422);
         }
 
+        $kind = (string) $req->input('kind', 'table');
+        if (!in_array($kind, self::KINDS, true)) {
+            Response::error('Tipo de lugar inválido', 422);
+        }
+
         return [
             'area_id'   => $areaId,
             'label'     => $label,
+            'kind'      => $kind,
             'capacity'  => $capacity,
             'shape'     => $shape,
             'pos_x'     => (int) $req->input('pos_x', 0),

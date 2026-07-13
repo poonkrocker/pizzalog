@@ -5,6 +5,7 @@ use Pizzalog\Core\Database;
 use Pizzalog\Core\Request;
 use Pizzalog\Core\Response;
 use Pizzalog\Services\OrderService;
+use Pizzalog\Repositories\VariantRepository;
 
 /**
  * Endpoints PÚBLICOS (sin token). El negocio se identifica por su slug.
@@ -19,10 +20,12 @@ class PublicController
     private const PAYMENT_METHODS = ['cash', 'card', 'transfer', 'mp', 'other'];
 
     private OrderService $orders;
+    private VariantRepository $variants;
 
     public function __construct()
     {
         $this->orders = new OrderService();
+        $this->variants = new VariantRepository();
     }
 
     /** GET /public/{slug}/menu */
@@ -39,7 +42,7 @@ class PublicController
         $cats->execute([(int) $business['id']]);
 
         $prods = $pdo->prepare(
-            'SELECT id, category_id, name, description, price, image_url
+            'SELECT id, category_id, name, description, price, image_url, has_variants, is_open_price
                FROM products
               WHERE business_id = ? AND is_active = 1
               ORDER BY name'
@@ -48,25 +51,50 @@ class PublicController
 
         Response::ok([
             'business' => [
-                'name'    => $business['name'],
-                'slug'    => $business['slug'],
-                'phone'   => $business['phone'],
-                'address' => $business['address'],
+                'name'        => $business['name'],
+                'slug'        => $business['slug'],
+                'phone'       => $business['phone'],
+                'address'     => $business['address'],
+                'description' => $business['description'],
+                'logo_url'    => $business['logo_url'],
+                'instagram'   => $business['instagram'],
+                'facebook'    => $business['facebook'],
+                'tiktok'      => $business['tiktok'],
+                'latitude'    => $business['latitude'] !== null ? (float) $business['latitude'] : null,
+                'longitude'   => $business['longitude'] !== null ? (float) $business['longitude'] : null,
+                'theme'       => $business['theme'] !== null ? json_decode((string) $business['theme'], true) : null,
             ],
             'categories' => array_map(static fn(array $c): array => [
                 'id'         => (int) $c['id'],
                 'name'       => $c['name'],
                 'sort_order' => (int) $c['sort_order'],
             ], $cats->fetchAll()),
-            'products' => array_map(static fn(array $p): array => [
-                'id'          => (int) $p['id'],
-                'category_id' => $p['category_id'] !== null ? (int) $p['category_id'] : null,
-                'name'        => $p['name'],
-                'description' => $p['description'],
-                'price'       => (float) $p['price'],
-                'image_url'   => $p['image_url'],
-            ], $prods->fetchAll()),
+            'products' => $this->buildMenuProducts((int) $business['id'], $prods->fetchAll()),
         ]);
+    }
+
+    private function buildMenuProducts(int $bid, array $rows): array
+    {
+        $out = [];
+        foreach ($rows as $p) {
+            $item = [
+                'id'            => (int) $p['id'],
+                'category_id'   => $p['category_id'] !== null ? (int) $p['category_id'] : null,
+                'name'          => $p['name'],
+                'description'   => $p['description'],
+                'price'         => (float) $p['price'],
+                'image_url'     => $p['image_url'],
+                'has_variants'  => (int) $p['has_variants'],
+                'is_open_price' => (int) $p['is_open_price'],
+            ];
+            if ((int) $p['has_variants'] === 1) {
+                $data = $this->variants->forProduct($bid, (int) $p['id']);
+                $item['options']  = $data['options'];
+                $item['variants'] = $data['variants'];
+            }
+            $out[] = $item;
+        }
+        return $out;
     }
 
     /**
@@ -160,7 +188,9 @@ class PublicController
     private function businessBySlug(string $slug): array
     {
         $stmt = Database::pdo()->prepare(
-            'SELECT id, name, slug, phone, address FROM businesses
+            'SELECT id, name, slug, phone, address, description, logo_url,
+                    instagram, facebook, tiktok, latitude, longitude, theme
+               FROM businesses
               WHERE slug = ? AND is_active = 1 LIMIT 1'
         );
         $stmt->execute([$slug]);

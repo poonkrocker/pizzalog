@@ -8,6 +8,7 @@ import { SalonPage } from './salon/SalonPage';
 import { SuppliesPage } from './supplies/SuppliesPage';
 import { SuppliersPage } from './suppliers/SuppliersPage';
 import { CustomersPage } from './customers/CustomersPage';
+import { BusinessPage } from './business/BusinessPage';
 
 // Registro central de módulos del panel.
 // Para sumar uno: crear su carpeta en modules/, importar su página y agregar
@@ -68,6 +69,14 @@ export const modules: ModuleDef[] = [
     roles: ['admin', 'manager'],
     element: <CustomersPage />,
     icon: '\u25CB',
+  },
+  {
+    id: 'business',
+    title: 'Mi local',
+    path: 'mi-local',
+    roles: ['admin'],
+    element: <BusinessPage />,
+    icon: '\u2302',
   },
   {
     id: 'categories',

@@ -29,12 +29,41 @@ export interface Product {
   track_stock: number;
   stock?: number;
   is_active: number;
+  has_variants: number;
+  is_open_price: number;
+  options?: ProductOption[];
+  variants?: ProductVariant[];
+}
+
+export interface ProductOptionValue {
+  id: number;
+  value: string;
+  sort_order: number;
+}
+
+export interface ProductOption {
+  id: number;
+  name: string;
+  sort_order: number;
+  values: ProductOptionValue[];
+}
+
+export interface ProductVariant {
+  id: number;
+  label: string;
+  price: number;
+  sku: string | null;
+  sort_order: number;
+  is_active: number;
+  option_value_ids: number[];
 }
 
 // --- Ventas ---------------------------------------------------------------
 
 export type SaleChannel =
   | 'counter'
+  | 'takeaway'
+  | 'delivery'
   | 'web'
   | 'whatsapp'
   | 'pedidosya'
@@ -44,6 +73,7 @@ export type SaleChannel =
 
 export interface SaleItemInput {
   product_id: number | null;
+  variant_id?: number;
   product_name: string;
   unit_price: number;
   quantity: number;
@@ -95,12 +125,38 @@ export interface TableArea {
   sort_order: number;
 }
 
+export interface BusinessTheme {
+  bg?: string;
+  accent?: string;
+  link?: string;
+  text?: string;
+  pattern?: 'mosaico' | 'liso' | 'rayas' | 'lunares';
+}
+
+export interface Business {
+  id: number;
+  name: string;
+  slug: string;
+  phone: string | null;
+  address: string | null;
+  description: string | null;
+  logo_url: string | null;
+  instagram: string | null;
+  facebook: string | null;
+  tiktok: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  theme: BusinessTheme | null;
+}
+
 export type TableShape = 'round' | 'square' | 'rect';
+export type TableKind = 'table' | 'bar';
 
 export interface Table {
   id: number;
   area_id: number;
   label: string;
+  kind: TableKind;
   capacity: number;
   shape: TableShape;
   pos_x: number;
@@ -114,6 +170,7 @@ export interface Table {
 export interface FloorTable {
   id: number;
   label: string;
+  kind: TableKind;
   capacity: number;
   shape: TableShape;
   pos_x: number;
@@ -121,7 +178,8 @@ export interface FloorTable {
   width: number;
   height: number;
   rotation: number;
-  status: 'free' | 'occupied';
+  status: 'free' | 'occupied' | 'bar';
+  open_count: number;
   session_id: number | null;
 }
 
@@ -166,6 +224,7 @@ export interface TableSession {
   id: number;
   status: SessionStatus;
   party_size: number | null;
+  label?: string | null;
   opened_at?: string;
   note: string | null;
   // Detalle (cuenta en vivo)
@@ -175,6 +234,7 @@ export interface TableSession {
   // Resumen (listado de cuentas abiertas)
   subtotal?: number;
   tables_label?: string;
+  table_ids?: number[];
 }
 
 // --- Cocina ---------------------------------------------------------------

@@ -3,6 +3,8 @@ import type { FloorArea, Round, Table, TableArea, TableSession } from '../types'
 
 export interface RoundItemInput {
   product_id: number;
+  variant_id?: number;
+  unit_price?: number;
   qty: number;
   note?: string;
 }
@@ -43,11 +45,13 @@ export function tablesApi(client: ApiClient) {
     // --- Cuentas ---
     openSessions: () => client.get<{ sessions: TableSession[] }>('/table-sessions'),
     session: (id: number) => client.get<{ session: TableSession }>(`/table-sessions/${id}`),
-    openSession: (tableIds: number[], partySize?: number, note?: string) =>
+    openSession: (
+      tableIds: number[],
+      extra?: { party_size?: number; note?: string; label?: string },
+    ) =>
       client.post<{ session: TableSession }>('/table-sessions', {
         table_ids: tableIds,
-        party_size: partySize,
-        note,
+        ...extra,
       }),
     addRound: (sessionId: number, items: RoundItemInput[], note?: string) =>
       client.post<{ round: Round }>(`/table-sessions/${sessionId}/rounds`, { items, note }),
