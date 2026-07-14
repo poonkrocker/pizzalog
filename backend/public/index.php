@@ -23,6 +23,7 @@ use Pizzalog\Controllers\SupplierController;
 use Pizzalog\Controllers\SupplyController;
 use Pizzalog\Controllers\VariantController;
 use Pizzalog\Controllers\BusinessController;
+use Pizzalog\Controllers\UploadController;
 use Pizzalog\Controllers\ProductController;
 use Pizzalog\Controllers\SaleController;
 use Pizzalog\Controllers\TableAreaController;
@@ -54,6 +55,8 @@ $router->delete('/categories/{id}', [CategoryController::class, 'destroy'], [$au
 // --- Productos --------------------------------------------------------
 // Lectura: cualquier usuario autenticado. Escritura: admin o manager.
 $router->post('/products/preview-ingredients', [ProductController::class, 'previewIngredients'], [$auth]);
+$router->post('/uploads/image', [UploadController::class, 'image'], [$auth, $manage]);
+
 $router->get('/business', [BusinessController::class, 'show'], [$auth]);
 $router->put('/business', [BusinessController::class, 'update'], [$auth, $admin]);
 
