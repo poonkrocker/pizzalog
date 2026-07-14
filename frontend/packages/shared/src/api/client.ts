@@ -68,6 +68,41 @@ export class ApiClient {
     return (payload['data'] ?? null) as T;
   }
 
+  /** Subida multipart (imágenes). El browser arma el boundary solo. */
+  async postFile<T>(path: string, file: Blob, field = 'image'): Promise<T> {
+    const token = await this.config.getToken();
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    const form = new FormData();
+    form.append(field, file, 'imagen.jpg');
+
+    let res: Response;
+    try {
+      res = await fetch(`${this.config.baseUrl}${path}`, { method: 'POST', headers, body: form });
+    } catch {
+      throw new ApiError('No se pudo conectar con el servidor', 0);
+    }
+    if (res.status === 401) {
+      this.config.onUnauthorized?.();
+      throw new ApiError('Sesión expirada', 401);
+    }
+    let payload: JsonObject;
+    try {
+      payload = (await res.json()) as JsonObject;
+    } catch {
+      throw new ApiError('Respuesta inválida del servidor', res.status);
+    }
+    if (payload['ok'] === false) {
+      throw new ApiError(String(payload['error'] ?? 'Error desconocido'), res.status);
+    }
+    if (!res.ok) {
+      throw new ApiError(`Error ${res.status}`, res.status);
+    }
+    return (payload['data'] ?? null) as T;
+  }
+
   get<T>(path: string): Promise<T> {
     return this.request<T>('GET', path);
   }

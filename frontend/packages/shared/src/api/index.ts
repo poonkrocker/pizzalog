@@ -8,6 +8,7 @@ import { suppliersApi } from './suppliers';
 import { suppliesApi } from './supplies';
 import { variantsApi } from './variants';
 import { businessApi } from './business';
+import { uploadsApi } from './uploads';
 import { tablesApi } from './tables';
 import { kitchenApi } from './kitchen';
 
@@ -23,6 +24,7 @@ export function createApi(config: ApiClientConfig) {
     products: productsApi(client),
     variants: variantsApi(client),
     business: businessApi(client),
+    uploads: uploadsApi(client),
     sales: salesApi(client),
     suppliers: suppliersApi(client),
     supplies: suppliesApi(client),
