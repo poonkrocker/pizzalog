@@ -206,22 +206,43 @@ class PublicController
         }
 
         // Precios SIEMPRE del servidor (el cliente no puede manipularlos).
+        //
+        // Nota sobre variantes: order_items no tiene columna variant_id (a
+        // diferencia de sale_items) — nunca la tuvo, ni antes de este prompt.
+        // Sin tocar el esquema, la variante elegida se resuelve acá contra
+        // VariantRepository y se hornea en el snapshot existente
+        // (product_name = "Nombre · Label", unit_price = precio de la
+        // variante), igual que ya se hace con el nombre y precio del producto.
         $lines = [];
         foreach ($items as $it) {
             $pid       = (int) $it['product_id'];
             $qty       = (float) $it['quantity'];
             $product   = $products[$pid];
+            $name      = $product['name'];
             $unitPrice = (float) $product['price'];
+
+            $variantId = isset($it['variant_id']) ? (int) $it['variant_id'] : null;
+            if ($variantId !== null) {
+                $variant = $this->findActiveVariant($bid, $pid, $variantId);
+                if ($variant === null) {
+                    Response::error(sprintf('La opción elegida de "%s" ya no está disponible', $name), 422);
+                }
+                $name      = $name . ' · ' . $variant['label'];
+                $unitPrice = $variant['price'];
+            } elseif ((int) $product['has_variants'] === 1) {
+                Response::error(sprintf('Elegí una opción de "%s"', $name), 422);
+            }
+
             $lineTotal = round($unitPrice * $qty, 2);
 
             $selections = $it['combo_selections'] ?? null;
             if ((int) $product['is_combo'] === 1 && !is_array($selections)) {
-                Response::error(sprintf('Elegí las opciones de "%s"', $product['name']), 422);
+                Response::error(sprintf('Elegí las opciones de "%s"', $name), 422);
             }
 
             $lines[] = [
                 'product_id'       => $pid,
-                'product_name'     => $product['name'],
+                'product_name'     => $name,
                 'unit_price'       => $unitPrice,
                 'quantity'         => $qty,
                 'line_total'       => $lineTotal,
@@ -300,6 +321,19 @@ class PublicController
             $map[(int) $row['id']] = $row;
         }
         return $map;
+    }
+
+    /** @return array{label:string, price:float}|null */
+    private function findActiveVariant(int $bid, int $productId, int $variantId): ?array
+    {
+        $stmt = Database::pdo()->prepare(
+            'SELECT label, price FROM product_variants
+              WHERE id = ? AND product_id = ? AND business_id = ? AND is_active = 1
+              LIMIT 1'
+        );
+        $stmt->execute([$variantId, $productId, $bid]);
+        $row = $stmt->fetch();
+        return $row ? ['label' => $row['label'], 'price' => (float) $row['price']] : null;
     }
 
     private function orderSummary(int $bid, int $orderId): array

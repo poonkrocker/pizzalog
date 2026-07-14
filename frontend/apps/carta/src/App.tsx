@@ -1,83 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-
-declare global {
-  interface Window {
-    __PIZZALOG_CONFIG__?: { apiUrl?: string; defaultSlug?: string; slug?: string };
-  }
-}
-
-const API =
-  window.__PIZZALOG_CONFIG__?.apiUrl ??
-  (import.meta.env.VITE_API_URL as string | undefined) ??
-  'https://api.pizzalog.net';
-
-/** El slug viene de la URL: pizzalog.net/{slug} (como los fotologs). */
-function slugFromPath(): string | null {
-  const seg = window.location.pathname.split('/').filter(Boolean)[0];
-  if (seg) return decodeURIComponent(seg).toLowerCase();
-  const fallback = window.__PIZZALOG_CONFIG__?.defaultSlug || window.__PIZZALOG_CONFIG__?.slug;
-  if (fallback) {
-    window.history.replaceState(null, '', `/${fallback}`);
-    return fallback;
-  }
-  return null;
-}
-
-interface Variant {
-  id: number;
-  label: string;
-  price: number;
-  is_active: number;
-}
-
-interface Product {
-  id: number;
-  category_id: number | null;
-  name: string;
-  description: string | null;
-  price: number;
-  image_url: string | null;
-  has_variants: number;
-  is_open_price: number;
-  variants?: Variant[];
-}
-
-interface Category {
-  id: number;
-  name: string;
-}
-
-interface BusinessTheme {
-  bg?: string;
-  accent?: string;
-  link?: string;
-  text?: string;
-  pattern?: string;
-}
-
-interface BusinessProfile {
-  name: string;
-  slug: string;
-  phone: string | null;
-  address: string | null;
-  description: string | null;
-  logo_url: string | null;
-  instagram: string | null;
-  facebook: string | null;
-  tiktok: string | null;
-  latitude: number | null;
-  longitude: number | null;
-  theme: BusinessTheme | null;
-}
-
-interface Menu {
-  business: BusinessProfile;
-  categories: Category[];
-  products: Product[];
-}
-
-const money = (n: number) =>
-  '$' + n.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+import type { BusinessTheme, Menu, Product } from './types';
+import { fetchMenu, money, routeFromPath } from './lib/api';
+import { useCart } from './lib/cart';
+import { SocialIcon, socialLabel } from './components/Icons';
+import { ProductModal } from './components/ProductModal';
+import { CartPanel } from './components/CartPanel';
 
 /** Contador de visitas nostálgico (honesto: cuenta TUS visitas en este teléfono). */
 function useVisitCount(): number {
@@ -102,49 +29,6 @@ function Placeholder({ name }: { name: string }) {
   );
 }
 
-function EntryModal({ product, onClose }: { product: Product; onClose: () => void }) {
-  const variants = (product.variants ?? []).filter((v) => v.is_active === 1);
-  return (
-    <div className="veil" onClick={onClose} role="dialog" aria-modal="true">
-      <article className="entry" onClick={(e) => e.stopPropagation()}>
-        <header className="entry__bar">
-          <span className="entry__bar-title">{product.name}</span>
-          <button className="entry__close" onClick={onClose} aria-label="Cerrar">
-            ✕
-          </button>
-        </header>
-
-        <div className="entry__photo">
-          {product.image_url ? (
-            <img src={product.image_url} alt={product.name} />
-          ) : (
-            <Placeholder name={product.name} />
-          )}
-        </div>
-
-        <div className="entry__body">
-          {variants.length === 0 && (
-            <p className="entry__price">{money(product.price)}</p>
-          )}
-          {product.description && <p className="entry__desc">{product.description}</p>}
-
-          {variants.length > 0 && (
-            <section className="comments">
-              <h3 className="comments__title">opciones ({variants.length})</h3>
-              {variants.map((v) => (
-                <div key={v.id} className="comment">
-                  <span className="comment__who">▸ {v.label}</span>
-                  <span className="comment__price">{money(v.price)}</span>
-                </div>
-              ))}
-            </section>
-          )}
-        </div>
-      </article>
-    </div>
-  );
-}
-
 /** El tema del local pinta la carta vía variables CSS, como los temas de Fotolog. */
 function applyTheme(theme: BusinessTheme | null) {
   const root = document.documentElement;
@@ -163,67 +47,32 @@ function applyTheme(theme: BusinessTheme | null) {
   document.body.dataset.pattern = theme?.pattern ?? 'mosaico';
 }
 
-function MapModal({ business, onClose }: { business: BusinessProfile; onClose: () => void }) {
-  const q =
-    business.latitude !== null && business.longitude !== null
-      ? `${business.latitude},${business.longitude}`
-      : (business.address ?? '');
-  const src = `https://maps.google.com/maps?q=${encodeURIComponent(q)}&z=16&output=embed`;
-  return (
-    <div className="veil" onClick={onClose} role="dialog" aria-modal="true">
-      <article className="entry" onClick={(e) => e.stopPropagation()}>
-        <header className="entry__bar">
-          <span className="entry__bar-title">¿dónde estamos?</span>
-          <button className="entry__close" onClick={onClose} aria-label="Cerrar">
-            ✕
-          </button>
-        </header>
-        <iframe
-          className="map-frame"
-          src={src}
-          title="Mapa"
-          loading="lazy"
-          referrerPolicy="no-referrer-when-downgrade"
-        />
-        <div className="entry__body">
-          {business.address && <p className="entry__desc">{business.address}</p>}
-          <a
-            className="map-link"
-            href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`}
-            target="_blank"
-            rel="noreferrer"
-          >
-            abrir en Google Maps →
-          </a>
-        </div>
-      </article>
-    </div>
-  );
-}
-
 export function App() {
+  const [route] = useState(() => routeFromPath());
+  const { slug, mode } = route;
+
   const [menu, setMenu] = useState<Menu | null>(null);
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [cat, setCat] = useState<number | 'all'>('all');
   const [open, setOpen] = useState<Product | null>(null);
-  const [mapOpen, setMapOpen] = useState(false);
-  const [slug] = useState<string | null>(() => slugFromPath());
+  const [cartOpen, setCartOpen] = useState(false);
   const visits = useVisitCount();
+
+  // En modo salón se mira, no se pide (el mozo toma la comanda).
+  const canOrder = mode !== 'salon';
+  const cart = useCart(slug ?? '_');
 
   useEffect(() => {
     if (!slug) return;
-    fetch(`${API}/public/${slug}/menu`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error('http'))))
-      .then((j) => {
-        const data = j.data as Menu;
+    fetchMenu(slug, mode)
+      .then((data) => {
         applyTheme(data.business.theme);
         setMenu(data);
       })
-      .catch(() => setError(true));
-  }, [slug]);
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : 'error'));
+  }, [slug, mode]);
 
-  // La carta muestra solo lo pedible: los de precio abierto son cargos
-  // internos (envío, propina) y no van al público.
+  // Los de precio abierto son cargos internos (envío, propina): no van al público.
   const products = useMemo(
     () => (menu?.products ?? []).filter((p) => p.is_open_price !== 1),
     [menu],
@@ -234,6 +83,7 @@ export function App() {
     return (menu?.categories ?? []).filter((c) => withProducts.has(c.id));
   }, [menu, products]);
 
+  // El orden lo manda el panel (sort_order): la carta NO reordena por nombre.
   const shown = useMemo(
     () => (cat === 'all' ? products : products.filter((p) => p.category_id === cat)),
     [products, cat],
@@ -254,7 +104,9 @@ export function App() {
     return (
       <div className="boot">
         <div className="boot__box">
-          no encontramos la carta de «{slug}» :(
+          {mode === 'secreta'
+            ? 'este link secreto no existe :('
+            : `no encontramos la carta de «${slug}» :(`}
           <br />
           revisá la dirección o probá más tarde
         </div>
@@ -269,71 +121,86 @@ export function App() {
     );
   }
 
-  const wa = menu.business.phone ? menu.business.phone.replace(/[^\d]/g, '') : null;
+  const b = menu.business;
 
   return (
-    <div className="page">
+    <div className={`page${canOrder && cart.count > 0 ? ' page--with-bar' : ''}`}>
       <header className="masthead">
         <div className="masthead__top">
           <div className="avatar">
-            {menu.business.logo_url ? (
-              <img src={menu.business.logo_url} alt={menu.business.name} />
+            {b.logo_url ? (
+              <img src={b.logo_url} alt={b.name} />
             ) : (
               <span className="avatar__glyph">🍕</span>
             )}
           </div>
           <div className="masthead__id">
-            <h1 className="masthead__name">{menu.business.name}</h1>
-            <p className="masthead__url">pizzalog.net/{menu.business.slug}</p>
+            <h1 className="masthead__name">{b.name}</h1>
+            <p className="masthead__url">pizzalog.net/{b.slug}</p>
           </div>
         </div>
 
-        {menu.business.description && (
-          <p className="masthead__bio">{menu.business.description}</p>
+        {b.description && <p className="masthead__bio">{b.description}</p>}
+
+        {b.social_links.length > 0 && (
+          <div className="masthead__links">
+            {b.social_links.map((l) => (
+              <a
+                key={l.platform + l.url}
+                className="plink plink--icon"
+                href={l.url}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <SocialIcon platform={l.platform} />
+                <span>{socialLabel(l.platform)}</span>
+              </a>
+            ))}
+          </div>
         )}
 
-        <div className="masthead__links">
-          {menu.business.instagram && (
-            <a href={`https://instagram.com/${menu.business.instagram}`} target="_blank" rel="noreferrer" className="plink">
-              instagram
-            </a>
-          )}
-          {menu.business.facebook && (
-            <a href={`https://facebook.com/${menu.business.facebook}`} target="_blank" rel="noreferrer" className="plink">
-              facebook
-            </a>
-          )}
-          {menu.business.tiktok && (
-            <a href={`https://tiktok.com/@${menu.business.tiktok}`} target="_blank" rel="noreferrer" className="plink">
-              tiktok
-            </a>
-          )}
-          {menu.business.phone && (
-            <a href={`tel:${menu.business.phone.replace(/[^+\d]/g, '')}`} className="plink">
-              ☎ {menu.business.phone}
-            </a>
-          )}
-        </div>
-
-        {menu.business.address && (
-          <button className="masthead__addr" onClick={() => setMapOpen(true)}>
-            📍 {menu.business.address} <span className="masthead__addr-hint">(ver mapa)</span>
-          </button>
+        {/* "Cómo llegar" abre Google Maps directo: sin iframe, sin API key, y en
+            el celular lo levanta la app nativa con la navegación lista. */}
+        {(b.google_maps_url || b.address) && (
+          <a
+            className="masthead__addr"
+            href={
+              b.google_maps_url ??
+              `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(b.address ?? '')}`
+            }
+            target="_blank"
+            rel="noreferrer"
+          >
+            📍 {b.address ?? 'ver ubicación'}{' '}
+            <span className="masthead__addr-hint">(cómo llegar)</span>
+          </a>
         )}
 
         <div className="masthead__widgets">
-          <span className="widget">
-            <b className="online-dot">●</b> online
-          </span>
+          {canOrder ? (
+            <span className="widget">
+              <b className={b.is_open_for_orders ? 'online-dot' : 'offline-dot'}>●</b>{' '}
+              {b.is_open_for_orders ? 'abierto' : 'cerrado'}
+            </span>
+          ) : (
+            <span className="widget">menú de salón</span>
+          )}
           <span className="widget">tu visita nº {visits}</span>
         </div>
+
+        {mode === 'secreta' && <p className="secret-note">🤫 carta secreta</p>}
+        {mode === 'salon' && (
+          <p className="secret-note">Mirá la carta y pedile al mozo. Acá no se toman pedidos.</p>
+        )}
+        {canOrder && !b.is_open_for_orders && (
+          <p className="secret-note">
+            Ahora está cerrado: podés mirar la carta, pero no pedir online.
+          </p>
+        )}
       </header>
 
       <nav className="cats" aria-label="Categorías">
-        <button
-          className={`cat${cat === 'all' ? ' cat--on' : ''}`}
-          onClick={() => setCat('all')}
-        >
+        <button className={`cat${cat === 'all' ? ' cat--on' : ''}`} onClick={() => setCat('all')}>
           todo
         </button>
         {visibleCats.map((c) => (
@@ -350,20 +217,32 @@ export function App() {
       <main className="wall">
         {shown.map((p) => {
           const variants = (p.variants ?? []).filter((v) => v.is_active === 1);
-          const from = variants.length
-            ? Math.min(...variants.map((v) => v.price))
-            : p.price;
+          const from = variants.length ? Math.min(...variants.map((v) => v.price)) : p.price;
           return (
-            <button key={p.id} className="post" onClick={() => setOpen(p)}>
+            <button
+              key={p.id}
+              className={`post${p.is_available_now ? '' : ' post--off'}`}
+              onClick={() => setOpen(p)}
+            >
               <div className="post__photo">
                 {p.image_url ? (
                   <img src={p.image_url} alt="" loading="lazy" />
                 ) : (
                   <Placeholder name={p.name} />
                 )}
+                {p.badge_text && <span className="post__badge">{p.badge_text}</span>}
+                {p.is_vegan_opt === 1 && (
+                  <span className="post__vegan" title="Tiene opción vegana">
+                    🌱
+                  </span>
+                )}
+                {!p.is_available_now && <span className="post__off">en otro horario</span>}
               </div>
               <div className="post__strip">
-                <span className="post__name">{p.name}</span>
+                <span className="post__name">
+                  {p.name}
+                  {p.is_combo === 1 && <em className="post__combo"> combo</em>}
+                </span>
                 <span className="post__price">
                   {variants.length > 0 && <em>desde </em>}
                   {money(from)}
@@ -376,22 +255,49 @@ export function App() {
       </main>
 
       <footer className="guest">
-        {wa && (
+        {b.phone && (
           <a
             className="guest__book"
-            href={`https://wa.me/${wa}`}
+            href={`https://wa.me/${b.phone.replace(/\D/g, '')}`}
             target="_blank"
             rel="noreferrer"
           >
-            ✍ firmá el libro de visitas (pedinos por WhatsApp)
+            ✍ firmá el libro de visitas (escribinos por WhatsApp)
           </a>
         )}
-        {menu.business.address && <p className="guest__addr">{menu.business.address}</p>}
+        {b.address && <p className="guest__addr">{b.address}</p>}
         <p className="guest__tag">hecho con Pizzalog © {new Date().getFullYear()}</p>
       </footer>
 
-      {open && <EntryModal product={open} onClose={() => setOpen(null)} />}
-      {mapOpen && <MapModal business={menu.business} onClose={() => setMapOpen(false)} />}
+      {/* Barra fija del carrito: solo si hay algo y se puede pedir. */}
+      {canOrder && cart.count > 0 && (
+        <button className="cartbar" onClick={() => setCartOpen(true)}>
+          <span className="cartbar__n">{cart.count}</span>
+          <span className="cartbar__txt">ver mi pedido</span>
+          <span className="cartbar__total">{money(cart.total)}</span>
+        </button>
+      )}
+
+      {open && (
+        <ProductModal
+          product={open}
+          canOrder={canOrder}
+          onAdd={(line, qty) => cart.add(line, qty)}
+          onClose={() => setOpen(null)}
+        />
+      )}
+
+      {cartOpen && (
+        <CartPanel
+          slug={slug}
+          lines={cart.lines}
+          total={cart.total}
+          isOpen={b.is_open_for_orders}
+          onSetQty={cart.setQty}
+          onClear={cart.clear}
+          onClose={() => setCartOpen(false)}
+        />
+      )}
     </div>
   );
 }
