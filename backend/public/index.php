@@ -11,6 +11,7 @@ use Pizzalog\Core\Router;
 use Pizzalog\Controllers\AnalyticsController;
 use Pizzalog\Controllers\AttendanceController;
 use Pizzalog\Controllers\CashController;
+use Pizzalog\Controllers\ComboController;
 use Pizzalog\Controllers\InventoryController;
 use Pizzalog\Controllers\KitchenController;
 use Pizzalog\Controllers\OrderController;
@@ -59,8 +60,15 @@ $router->post('/uploads/image', [UploadController::class, 'image'], [$auth, $man
 
 $router->get('/business', [BusinessController::class, 'show'], [$auth]);
 $router->put('/business', [BusinessController::class, 'update'], [$auth, $admin]);
+// Horarios de atención y redes: reemplazo total en cada PUT.
+$router->get('/business/hours', [BusinessController::class, 'hours'], [$auth]);
+$router->put('/business/hours', [BusinessController::class, 'updateHours'], [$auth, $manage]);
+$router->get('/business/social-links', [BusinessController::class, 'socialLinks'], [$auth]);
+$router->put('/business/social-links', [BusinessController::class, 'updateSocialLinks'], [$auth, $manage]);
 
 $router->get('/products', [ProductController::class, 'index'], [$auth]);
+// 'reorder' va antes de '{id}' para que no lo capture como id.
+$router->put('/products/reorder', [ProductController::class, 'reorder'], [$auth, $manage]);
 $router->get('/products/{id}', [ProductController::class, 'show'], [$auth]);
 $router->post('/products', [ProductController::class, 'store'], [$auth, $manage]);
 $router->put('/products/{id}', [ProductController::class, 'update'], [$auth, $manage]);
@@ -68,6 +76,8 @@ $router->delete('/products/{id}', [ProductController::class, 'destroy'], [$auth,
 $router->get('/products/{id}/variants', [VariantController::class, 'show'], [$auth]);
 $router->put('/products/{id}/options', [VariantController::class, 'setOptions'], [$auth, $manage]);
 $router->put('/products/{id}/variants', [VariantController::class, 'updateVariants'], [$auth, $manage]);
+$router->get('/products/{id}/combo', [ComboController::class, 'show'], [$auth]);
+$router->put('/products/{id}/combo', [ComboController::class, 'update'], [$auth, $manage]);
 
 // --- Ventas -----------------------------------------------------------
 // Registrar/listar/ver: cualquier usuario (el cajero vende). Anular: manager.
@@ -129,6 +139,8 @@ $router->post('/orders/{id}/cancel', [OrderController::class, 'cancel'], [$auth]
 
 // --- Menú público / checkout (SIN autenticación) ----------------------
 // El negocio se identifica por su slug. Precios siempre del servidor.
+// 'menu/secreta' va antes de 'menu' por claridad; son rutas distintas.
+$router->get('/public/{slug}/menu/secreta', [PublicController::class, 'secretMenu']);
 $router->get('/public/{slug}/menu', [PublicController::class, 'menu']);
 $router->post('/public/{slug}/orders', [PublicController::class, 'createOrder']);
 

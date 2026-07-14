@@ -40,6 +40,15 @@ $config = require $configFile;
 
 // --- Errores y excepciones -> respuesta JSON --------------------------
 set_exception_handler(function (\Throwable $e): void {
+    // Las reglas de negocio (ej. selección de combo inválida) viajan como
+    // DomainException y son error del cliente, no del servidor.
+    if ($e instanceof \DomainException) {
+        http_response_code(422);
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode(['ok' => false, 'error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
     error_log('[pizzalog] ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
     http_response_code(500);
     header('Content-Type: application/json; charset=utf-8');

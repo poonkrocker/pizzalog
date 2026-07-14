@@ -34,11 +34,14 @@ class AnalyticsController
         $stmt->execute([$bid, $fromDt, $toDt]);
         $s = $stmt->fetch();
 
+        // Las líneas hijas de un combo (parent_sale_item_id) no son unidades
+        // vendidas aparte: son lo que el combo incluye. No cuentan acá.
         $stmt = $pdo->prepare(
             'SELECT COALESCE(SUM(si.quantity), 0)
                FROM sale_items si
                JOIN sales s ON s.id = si.sale_id
               WHERE s.business_id = ? AND s.status = "completed"
+                AND si.parent_sale_item_id IS NULL
                 AND s.created_at BETWEEN ? AND ?'
         );
         $stmt->execute([$bid, $fromDt, $toDt]);
@@ -85,6 +88,9 @@ class AnalyticsController
     /**
      * GET /analytics/top-products?limit=10
      * Lo que más se vende, por unidades y por facturación.
+     *
+     * Las líneas hijas de los combos SÍ cuentan acá: son la popularidad real
+     * de cada sabor. No inflan la facturación porque entran con line_total 0.
      */
     public function topProducts(Request $req): void
     {
@@ -135,6 +141,7 @@ class AnalyticsController
                JOIN sales s ON s.id = si.sale_id
                JOIN products p ON p.id = si.product_id
               WHERE s.business_id = ? AND s.status = "completed"
+                AND si.parent_sale_item_id IS NULL
                 AND s.created_at BETWEEN ? AND ?
               GROUP BY si.product_id, p.cost
               ORDER BY profit DESC'
