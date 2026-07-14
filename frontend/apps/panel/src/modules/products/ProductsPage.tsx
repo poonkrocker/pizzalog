@@ -6,6 +6,8 @@ import { useCategories } from '../categories/hooks';
 import { useDeleteProduct, useProducts } from './hooks';
 import { ProductForm } from './ProductForm';
 import { VariantsModal } from './VariantsModal';
+import { ComboModal } from './ComboModal';
+import { ReorderModal } from './ReorderModal';
 
 export function ProductsPage() {
   const products = useProducts();
@@ -14,6 +16,8 @@ export function ProductsPage() {
   const [editing, setEditing] = useState<Product | null>(null);
   const [creating, setCreating] = useState(false);
   const [variantsFor, setVariantsFor] = useState<Product | null>(null);
+  const [comboFor, setComboFor] = useState<Product | null>(null);
+  const [reordering, setReordering] = useState(false);
 
   const categoryName = useMemo(() => {
     const map = new Map<number, string>();
@@ -34,7 +38,10 @@ export function ProductsPage() {
           {p.has_variants === 1 && (
             <span className="badge badge--accent">{p.variants?.length ?? 0} var.</span>
           )}
+          {p.is_combo === 1 && <span className="badge badge--accent">combo</span>}
           {p.is_open_price === 1 && <span className="badge">$ abierto</span>}
+          {p.show_online !== 1 && <span className="badge">fuera de la carta</span>}
+          {p.is_secret === 1 && <span className="badge">🤫 secreta</span>}
         </div>
       ),
     },
@@ -62,6 +69,9 @@ export function ProductsPage() {
           <button className="link" onClick={() => setVariantsFor(p)}>
             Variantes
           </button>
+          <button className="link" onClick={() => setComboFor(p)}>
+            Combo
+          </button>
           <button
             className="link link--danger"
             onClick={() => {
@@ -82,7 +92,14 @@ export function ProductsPage() {
       <PageHeader
         eyebrow="Catálogo"
         title="Productos"
-        actions={<Button onClick={() => setCreating(true)}>Nuevo producto</Button>}
+        actions={
+          <>
+            <Button variant="ghost" onClick={() => setReordering(true)}>
+              Ordenar carta
+            </Button>
+            <Button onClick={() => setCreating(true)}>Nuevo producto</Button>
+          </>
+        }
       />
 
       {products.isLoading ? (
@@ -136,6 +153,16 @@ export function ProductsPage() {
           }}
         />
       </Modal>
+
+      {comboFor && <ComboModal product={comboFor} onClose={() => setComboFor(null)} />}
+
+      {reordering && (
+        <ReorderModal
+          products={products.data ?? []}
+          categories={categories.data ?? []}
+          onClose={() => setReordering(false)}
+        />
+      )}
 
       {variantsFor && (
         <VariantsModal product={variantsFor} onClose={() => setVariantsFor(null)} />
