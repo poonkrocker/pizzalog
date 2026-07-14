@@ -91,13 +91,13 @@ class ProductController
             $stmt = $pdo->prepare(
                 'INSERT INTO products
                     (business_id, category_id, name, description, price, cost,
-                     track_stock, stock_quantity, stock_min, is_open_price)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                     track_stock, stock_quantity, stock_min, is_open_price, image_url)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $stmt->execute([
                 $bid, $d['category_id'], $d['name'], $d['description'], $d['price'],
                 $d['cost'], $d['track_stock'], $d['stock_quantity'], $d['stock_min'],
-                $d['is_open_price'],
+                $d['is_open_price'], $d['image_url'],
             ]);
             $productId = (int) $pdo->lastInsertId();
 
@@ -129,12 +129,14 @@ class ProductController
             $stmt = $pdo->prepare(
                 'UPDATE products
                     SET category_id = ?, name = ?, description = ?, price = ?, cost = ?,
-                        track_stock = ?, stock_quantity = ?, stock_min = ?, is_open_price = ?
+                        track_stock = ?, stock_quantity = ?, stock_min = ?, is_open_price = ?,
+                        image_url = ?
                   WHERE id = ? AND business_id = ?'
             );
             $stmt->execute([
                 $d['category_id'], $d['name'], $d['description'], $d['price'], $d['cost'],
-                $d['track_stock'], $d['stock_quantity'], $d['stock_min'], $d['is_open_price'], $id, $bid,
+                $d['track_stock'], $d['stock_quantity'], $d['stock_min'], $d['is_open_price'],
+                $d['image_url'], $id, $bid,
             ]);
 
             $ids = $this->ingredients->resolveNames($bid, $d['ingredients']);
@@ -198,6 +200,7 @@ class ProductController
             'stock_quantity' => (int) $req->input('stock_quantity', 0),
             'stock_min'      => (int) $req->input('stock_min', 0),
             'is_open_price'  => (int) (bool) $req->input('is_open_price', false),
+            'image_url'      => substr(trim((string) $req->input('image_url', '')), 0, 300) ?: null,
             'ingredients'    => is_array($ingredients) ? $ingredients : [],
         ];
     }
