@@ -1,8 +1,11 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { ApiError, type Category, type Product } from '@pizzalog/shared';
+import { useRef } from 'react';
 import { Button, Checkbox, Field, Input, Select, Textarea } from '@/ui';
+import { useApi } from '@/lib/auth';
 import { useSaveProduct } from './hooks';
+import { ImageCropModal } from './ImageCropModal';
 
 interface Props {
   product: Product | null; // null = alta
@@ -23,6 +26,27 @@ export function ProductForm({ product, categories, onDone }: Props) {
   const [isOpenPrice, setIsOpenPrice] = useState(Boolean(product?.is_open_price));
   const [error, setError] = useState<string | null>(null);
 
+  // Foto del producto: recorte 4:3 y subida al backend.
+  const api = useApi();
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [imageUrl, setImageUrl] = useState<string | null>(product?.image_url ?? null);
+  const [cropFile, setCropFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+
+  async function uploadCropped(blob: Blob) {
+    setCropFile(null);
+    setUploading(true);
+    setError(null);
+    try {
+      const { url } = await api.uploads.image(blob);
+      setImageUrl(url);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'No se pudo subir la foto');
+    } finally {
+      setUploading(false);
+    }
+  }
+
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
@@ -37,6 +61,7 @@ export function ProductForm({ product, categories, onDone }: Props) {
           category_id: categoryId === '' ? null : Number(categoryId),
           track_stock: trackStock ? 1 : 0,
           is_open_price: isOpenPrice ? 1 : 0,
+          image_url: imageUrl,
         },
       });
       onDone();
@@ -50,6 +75,48 @@ export function ProductForm({ product, categories, onDone }: Props) {
       <Field label="Nombre">
         <Input value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
       </Field>
+      <Field label="Foto del producto" hint="Es la imagen que aparece en tu carta. Se encuadra en 4:3 y se comprime sola.">
+        <div className="photo-field">
+          <div className="photo-field__thumb">
+            {imageUrl ? <img src={imageUrl} alt="" /> : <span aria-hidden="true">🍕</span>}
+          </div>
+          <div className="photo-field__actions">
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={uploading}
+              onClick={() => fileInput.current?.click()}
+            >
+              {uploading ? 'Subiendo…' : imageUrl ? 'Cambiar foto' : 'Subir foto'}
+            </Button>
+            {imageUrl && (
+              <button type="button" className="link link--danger" onClick={() => setImageUrl(null)}>
+                Quitar
+              </button>
+            )}
+          </div>
+          <input
+            ref={fileInput}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) setCropFile(f);
+              e.target.value = '';
+            }}
+          />
+        </div>
+      </Field>
+
+      {cropFile && (
+        <ImageCropModal
+          file={cropFile}
+          onDone={(blob) => void uploadCropped(blob)}
+          onClose={() => setCropFile(null)}
+        />
+      )}
+
       <Field label="Descripción" hint="De acá se extraen los ingredientes para los reportes.">
         <Textarea
           value={description}

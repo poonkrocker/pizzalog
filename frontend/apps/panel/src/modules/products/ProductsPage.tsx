@@ -27,6 +27,9 @@ export function ProductsPage() {
       header: 'Producto',
       render: (p) => (
         <div className="prod-name">
+          <span className="prod-thumb">
+            {p.image_url ? <img src={p.image_url} alt="" loading="lazy" /> : '🍕'}
+          </span>
           <span className="prod-name__txt">{p.name}</span>
           {p.has_variants === 1 && (
             <span className="badge badge--accent">{p.variants?.length ?? 0} var.</span>
