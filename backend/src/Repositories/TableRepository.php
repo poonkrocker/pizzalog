@@ -76,9 +76,11 @@ class TableRepository
 
     public function listTables(int $bid, ?int $areaId = null): array
     {
+        // Filtra is_active: el borrado de mesas es baja lógica (deactivateTable).
+        // Sin este filtro la mesa borrada volvía a aparecer en el editor de salón.
         $sql    = 'SELECT id, area_id, label, kind, capacity, shape, pos_x, pos_y, width, height,
                           rotation, is_active
-                     FROM tables WHERE business_id = ?';
+                     FROM tables WHERE business_id = ? AND is_active = 1';
         $params = [$bid];
         if ($areaId !== null) {
             $sql     .= ' AND area_id = ?';
