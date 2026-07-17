@@ -79,6 +79,8 @@ export function BusinessPage() {
         google_maps_url: form.google_maps_url || null,
         logo_url: form.logo_url || null,
         accepts_online_orders: form.accepts_online_orders,
+        transfer_alias: form.transfer_alias || null,
+        card_surcharge_pct: form.card_surcharge_pct ?? 0,
         theme: custom ? theme : null,
       });
       setSaved(true);
@@ -159,6 +161,39 @@ export function BusinessPage() {
           Interruptor general, aparte del horario: destildalo para cerrar los pedidos por hoy sin
           tocar las franjas horarias.
         </p>
+
+        <div className="pay-block">
+          <h2 className="theme-block__title">Cobros en la carta online</h2>
+
+          <Field
+            label="Datos para transferencia"
+            hint="Se muestra en el checkout cuando el cliente elige Transferencia. Ej: «Transferí al alias RRBBPIZZA a nombre de Ezequiel Urquidi»."
+          >
+            <Input
+              value={form.transfer_alias ?? ''}
+              onChange={(e) => set('transfer_alias', e.target.value)}
+              placeholder="Alias RRBBPIZZA — Ezequiel Urquidi"
+            />
+          </Field>
+
+          <Field
+            label="Recargo por pago con tarjeta (%)"
+            hint="Se suma al total y se avisa al cliente cuando elige tarjeta. Poné 0 si no cobrás recargo."
+          >
+            <Input
+              type="number"
+              min="0"
+              max="100"
+              step="0.5"
+              value={String(form.card_surcharge_pct ?? 0)}
+              onChange={(e) =>
+                setForm((f) =>
+                  f ? { ...f, card_surcharge_pct: Math.max(0, Math.min(100, Number(e.target.value) || 0)) } : f,
+                )
+              }
+            />
+          </Field>
+        </div>
 
         <div className="theme-block">
           <h2 className="theme-block__title">Apariencia de tu carta</h2>

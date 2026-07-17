@@ -20,7 +20,7 @@ use Pizzalog\Repositories\BusinessRepository;
 final class BusinessController
 {
     private const FIELDS = 'id, name, slug, phone, address, google_maps_url, description,
-                            logo_url, theme, accepts_online_orders';
+                            logo_url, theme, accepts_online_orders, transfer_alias, card_surcharge_pct';
 
     private const THEME_COLORS   = ['bg', 'accent', 'link', 'text'];
     private const THEME_PATTERNS = ['mosaico', 'liso', 'rayas', 'lunares'];
@@ -111,6 +111,18 @@ final class BusinessController
             }
         }
 
+        // Datos de pago del checkout (migración 017).
+        $transferAlias = trim((string) ($req->input('transfer_alias', '') ?? ''));
+        if (mb_strlen($transferAlias) > 255) {
+            Response::error('El texto de transferencia es demasiado largo (máx. 255)', 422);
+        }
+
+        $surcharge = $req->input('card_surcharge_pct');
+        $surcharge = ($surcharge === null || $surcharge === '') ? 0.0 : (float) $surcharge;
+        if ($surcharge < 0 || $surcharge > 100) {
+            Response::error('El recargo por tarjeta debe estar entre 0 y 100', 422);
+        }
+
         $opt = static fn (string $k) => (static function ($v) {
             $v = trim((string) $v);
             return $v === '' ? null : $v;
@@ -119,12 +131,14 @@ final class BusinessController
         Database::pdo()->prepare(
             'UPDATE businesses
                 SET name = ?, slug = ?, phone = ?, address = ?, google_maps_url = ?,
-                    description = ?, logo_url = ?, theme = ?, accepts_online_orders = ?
+                    description = ?, logo_url = ?, theme = ?, accepts_online_orders = ?,
+                    transfer_alias = ?, card_surcharge_pct = ?
               WHERE id = ?'
         )->execute([
             $name, $slug, $opt('phone'), $opt('address'), $maps !== '' ? $maps : null,
             $opt('description'), $opt('logo_url'), $theme,
             (int) (bool) $req->input('accepts_online_orders', true),
+            $transferAlias !== '' ? $transferAlias : null, $surcharge,
             $bid,
         ]);
 
@@ -263,6 +277,8 @@ final class BusinessController
             'description'           => $b['description'],
             'logo_url'              => $b['logo_url'],
             'accepts_online_orders' => (int) $b['accepts_online_orders'],
+            'transfer_alias'        => $b['transfer_alias'],
+            'card_surcharge_pct'    => (float) $b['card_surcharge_pct'],
             'theme'                 => $b['theme'] !== null ? json_decode((string) $b['theme'], true) : null,
         ];
     }

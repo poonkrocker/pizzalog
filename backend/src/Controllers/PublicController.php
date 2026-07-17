@@ -31,7 +31,8 @@ class PublicController
     private const PAYMENT_METHODS = ['cash', 'card', 'transfer', 'mp', 'other'];
 
     private const BUSINESS_FIELDS = 'id, name, slug, phone, address, google_maps_url, description,
-                                     logo_url, theme, accepts_online_orders';
+                                     logo_url, theme, accepts_online_orders,
+                                     transfer_alias, card_surcharge_pct';
 
     private const PRODUCT_FIELDS = 'id, category_id, sort_order, name, description, price, image_url,
                                     has_variants, is_combo, is_open_price, is_vegan_opt, badge_text,
@@ -105,6 +106,8 @@ class PublicController
                     'url'      => $l['url'],
                 ], $this->businesses->socialLinks($bid)),
                 'is_open_for_orders' => $this->businesses->isOpenForOrders($business, $now),
+                'transfer_alias'     => $business['transfer_alias'],
+                'card_surcharge_pct' => (float) $business['card_surcharge_pct'],
             ],
             'categories' => array_map(static fn (array $c): array => [
                 'id'         => (int) $c['id'],

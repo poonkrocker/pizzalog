@@ -186,6 +186,8 @@ export interface Business {
   description: string | null;
   logo_url: string | null;
   accepts_online_orders: number;
+  transfer_alias: string | null;
+  card_surcharge_pct: number;
   theme: BusinessTheme | null;
 }
 

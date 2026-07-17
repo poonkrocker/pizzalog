@@ -290,6 +290,7 @@ export function App() {
       {cartOpen && (
         <CartPanel
           slug={slug}
+          business={b}
           lines={cart.lines}
           total={cart.total}
           isOpen={b.is_open_for_orders}

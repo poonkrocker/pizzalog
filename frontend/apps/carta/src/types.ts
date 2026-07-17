@@ -75,6 +75,8 @@ export interface BusinessProfile {
   theme: BusinessTheme | null;
   social_links: SocialLink[];
   is_open_for_orders: boolean;
+  transfer_alias: string | null;
+  card_surcharge_pct: number;
 }
 
 export interface Menu {
@@ -83,7 +85,7 @@ export interface Menu {
   products: Product[];
 }
 
-export const PAYMENT_METHODS = ['cash', 'card', 'transfer', 'mp', 'other'] as const;
+export const PAYMENT_METHODS = ['cash', 'card', 'transfer', 'mp'] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
 export const PAYMENT_LABELS: Record<PaymentMethod, string> = {
@@ -91,7 +93,6 @@ export const PAYMENT_LABELS: Record<PaymentMethod, string> = {
   card: 'Tarjeta',
   transfer: 'Transferencia',
   mp: 'Mercado Pago',
-  other: 'Otro',
 };
 
 // --- Selecciones de combo en el carrito ------------------------------------

@@ -570,3 +570,31 @@ body[data-pattern='lunares'] {
 /* ---------- íconos de redes ---------- */
 .plink--icon { display: inline-flex; align-items: center; gap: 5px; }
 .plink--icon svg { display: block; }
+
+/* --- Checkout: leyendas de pago y subtotales ------------------------- */
+.checkout { margin-top: 14px; }
+.pay-note {
+  margin: -4px 0 12px;
+  padding: 9px 11px;
+  font-size: 13px;
+  line-height: 1.4;
+  border: 1px solid;
+}
+.pay-note--transfer {
+  color: #14487a;
+  background: #eaf2fb;
+  border-color: #b3d0ea;
+}
+.pay-note--card {
+  color: #7a4a10;
+  background: #fdf3e6;
+  border-color: #e6c79a;
+}
+.cart__subtotal {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--gris);
+}
+.cart__subtotal span { font-variant-numeric: tabular-nums; }
