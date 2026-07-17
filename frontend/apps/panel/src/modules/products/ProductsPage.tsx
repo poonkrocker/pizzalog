@@ -3,7 +3,7 @@ import { formatARS, type Product } from '@pizzalog/shared';
 import { Button, DataTable, EmptyState, ErrorState, Loading, Modal, PageHeader } from '@/ui';
 import type { Column } from '@/ui';
 import { useCategories } from '../categories/hooks';
-import { useDeleteProduct, useProducts } from './hooks';
+import { useDeleteProduct, useProducts, useToggleAvailability } from './hooks';
 import { ProductForm } from './ProductForm';
 import { VariantsModal } from './VariantsModal';
 import { ComboModal } from './ComboModal';
@@ -13,6 +13,7 @@ export function ProductsPage() {
   const products = useProducts();
   const categories = useCategories();
   const del = useDeleteProduct();
+  const toggleAvail = useToggleAvailability();
   const [editing, setEditing] = useState<Product | null>(null);
   const [creating, setCreating] = useState(false);
   const [variantsFor, setVariantsFor] = useState<Product | null>(null);
@@ -68,6 +69,9 @@ export function ProductsPage() {
           {p.is_combo === 1 && <span className="badge badge--accent">combo</span>}
           {p.is_open_price === 1 && <span className="badge">$ abierto</span>}
           {p.show_online !== 1 && <span className="badge">fuera de la carta</span>}
+          {p.show_online === 1 && p.is_available !== 1 && (
+            <span className="badge badge--warn">agotado</span>
+          )}
           {p.is_secret === 1 && <span className="badge">🤫 secreta</span>}
         </div>
       ),
@@ -90,6 +94,20 @@ export function ProductsPage() {
       align: 'right',
       render: (p) => (
         <div className="row-actions">
+          {p.show_online === 1 && (
+            <button
+              className={`avail-toggle${p.is_available === 1 ? ' avail-toggle--on' : ' avail-toggle--off'}`}
+              disabled={toggleAvail.isPending}
+              onClick={() => toggleAvail.mutate({ id: p.id, isAvailable: p.is_available !== 1 })}
+              title={
+                p.is_available === 1
+                  ? 'Disponible en la carta. Clic para marcar agotado.'
+                  : 'Agotado: no aparece en la carta. Clic para reponer.'
+              }
+            >
+              {p.is_available === 1 ? '● disponible' : '○ agotado'}
+            </button>
+          )}
           <button className="link" onClick={() => setEditing(p)}>
             Editar
           </button>

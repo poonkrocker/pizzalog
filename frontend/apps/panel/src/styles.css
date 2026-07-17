@@ -969,3 +969,27 @@ button { font-family: inherit; }
   flex-wrap: wrap;
   gap: 8px 20px;
 }
+
+/* --- Toggle rápido de disponibilidad en el listado ------------------- */
+.avail-toggle {
+  padding: 4px 10px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.avail-toggle--on {
+  color: #1c7a3e;
+  background: #e9f7ef;
+  border-color: #a9d8bd;
+}
+.avail-toggle--off {
+  color: #8a5a00;
+  background: #fdf3e2;
+  border-color: #e6c98a;
+}
+.avail-toggle:disabled { opacity: 0.5; cursor: default; }
+.badge--warn { background: #fdf3e2; color: #8a5a00; }

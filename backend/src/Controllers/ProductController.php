@@ -15,7 +15,7 @@ class ProductController
     /** Columnas del producto para el panel (gestión interna: se ve todo siempre). */
     private const FIELDS = 'id, category_id, sort_order, name, description, price, cost, image_url,
                             track_stock, stock_quantity, stock_min, is_active, has_variants, is_combo,
-                            is_open_price, show_online, is_secret, is_vegan_opt, badge_text,
+                            is_open_price, show_online, is_available, is_secret, is_vegan_opt, badge_text,
                             visible_days, visible_from, visible_until';
 
     private IngredientRepository $ingredients;
@@ -101,15 +101,15 @@ class ProductController
                 'INSERT INTO products
                     (business_id, category_id, sort_order, name, description, price, cost,
                      track_stock, stock_quantity, stock_min, is_open_price, image_url,
-                     show_online, is_secret, is_vegan_opt, badge_text,
+                     show_online, is_available, is_secret, is_vegan_opt, badge_text,
                      visible_days, visible_from, visible_until)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $stmt->execute([
                 $bid, $d['category_id'], $sortOrder, $d['name'], $d['description'], $d['price'],
                 $d['cost'], $d['track_stock'], $d['stock_quantity'], $d['stock_min'],
                 $d['is_open_price'], $d['image_url'],
-                $d['show_online'], $d['is_secret'], $d['is_vegan_opt'], $d['badge_text'],
+                $d['show_online'], $d['is_available'], $d['is_secret'], $d['is_vegan_opt'], $d['badge_text'],
                 $d['visible_days'], $d['visible_from'], $d['visible_until'],
             ]);
             $productId = (int) $pdo->lastInsertId();
@@ -141,14 +141,14 @@ class ProductController
                 'UPDATE products
                     SET category_id = ?, name = ?, description = ?, price = ?, cost = ?,
                         track_stock = ?, stock_quantity = ?, stock_min = ?, is_open_price = ?,
-                        image_url = ?, show_online = ?, is_secret = ?, is_vegan_opt = ?,
+                        image_url = ?, show_online = ?, is_available = ?, is_secret = ?, is_vegan_opt = ?,
                         badge_text = ?, visible_days = ?, visible_from = ?, visible_until = ?
                   WHERE id = ? AND business_id = ?'
             );
             $stmt->execute([
                 $d['category_id'], $d['name'], $d['description'], $d['price'], $d['cost'],
                 $d['track_stock'], $d['stock_quantity'], $d['stock_min'], $d['is_open_price'],
-                $d['image_url'], $d['show_online'], $d['is_secret'], $d['is_vegan_opt'],
+                $d['image_url'], $d['show_online'], $d['is_available'], $d['is_secret'], $d['is_vegan_opt'],
                 $d['badge_text'], $d['visible_days'], $d['visible_from'], $d['visible_until'],
                 $id, $bid,
             ]);
@@ -220,6 +220,27 @@ class ProductController
     }
 
     /** DELETE /products/{id}  (baja lógica: preserva históricos de venta) */
+    /**
+     * PATCH /products/{id}/availability   Body: { is_available: bool }
+     * Toggle rápido de disponibilidad, para el botón del listado. No toca
+     * nada más del producto: solo prende/apaga is_available.
+     */
+    public function setAvailability(Request $req): void
+    {
+        $bid = (int) $req->auth['business_id'];
+        $id  = (int) $req->param('id');
+        $this->findOwned($req, $id);
+
+        $available = (int) (bool) $req->input('is_available', true);
+
+        Database::pdo()
+            ->prepare('UPDATE products SET is_available = ? WHERE id = ? AND business_id = ?')
+            ->execute([$available, $id, $bid]);
+
+        Response::ok(['product' => $this->hydrate($bid, $this->findOwned($req, $id))]);
+    }
+
+    /** DELETE /products/{id}  (baja lógica: preserva históricos de venta) */
     public function destroy(Request $req): void
     {
         $bid = (int) $req->auth['business_id'];
@@ -252,6 +273,14 @@ class ProductController
         $p['visible_days']  = ProductVisibility::decodeDays($p['visible_days'] ?? null);
         $p['visible_from']  = $p['visible_from'] !== null ? substr((string) $p['visible_from'], 0, 5) : null;
         $p['visible_until'] = $p['visible_until'] !== null ? substr((string) $p['visible_until'], 0, 5) : null;
+
+        // Flags como int para que el front pueda comparar con === 1 sin dudas.
+        foreach (['is_active', 'has_variants', 'is_combo', 'is_open_price',
+                  'show_online', 'is_available', 'is_secret', 'is_vegan_opt'] as $flag) {
+            if (isset($p[$flag])) {
+                $p[$flag] = (int) $p[$flag];
+            }
+        }
 
         return $p;
     }
@@ -297,6 +326,7 @@ class ProductController
             'image_url'      => substr(trim((string) $req->input('image_url', '')), 0, 300) ?: null,
             'ingredients'    => is_array($ingredients) ? $ingredients : [],
             'show_online'    => (int) (bool) $req->input('show_online', true),
+            'is_available'   => (int) (bool) $req->input('is_available', true),
             'is_secret'      => (int) (bool) $req->input('is_secret', false),
             'is_vegan_opt'   => (int) (bool) $req->input('is_vegan_opt', false),
             'badge_text'     => $badge !== '' ? $badge : null,
