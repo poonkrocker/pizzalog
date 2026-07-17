@@ -1,18 +1,25 @@
 -- =====================================================================
---  Migración 017 · Datos de pago para el checkout de la carta
+--  Migración 017 · Datos de pago y modalidades del checkout
 -- =====================================================================
---  Dos datos que hoy estaban hardcodeados en la web propia de Arrabbiata
---  y que ahora se configuran por negocio desde el panel:
+--  Datos que en la web propia de Arrabbiata estaban hardcodeados y que
+--  ahora se configuran por negocio desde el panel:
 --
 --   - transfer_alias: qué mostrar cuando el cliente elige Transferencia
---     (el alias + a nombre de quién). Texto libre para que entre la
---     leyenda completa, no solo el alias.
---   - card_surcharge_pct: recargo por pago con tarjeta, en porcentaje.
---     0 = sin recargo. La carta lo suma al total y lo avisa; por ahora
---     es solo informativo de cara al cliente (no se persiste en el
---     pedido todavía).
+--     (alias + a nombre de quién). Texto libre.
+--   - card_surcharge_pct: recargo por pago con tarjeta, en %. 0 = sin
+--     recargo. La carta lo suma al total y lo avisa (informativo por ahora,
+--     no se persiste en el pedido).
+--   - pay_methods_pickup / pay_methods_delivery: qué formas de pago acepta
+--     el negocio en cada modalidad (retiro en local / envío a domicilio).
+--     JSON con claves de 'cash','card','transfer','mp'. NULL = todas.
+--     Reemplaza la regla fija de Arrabbiata (delivery = solo transferencia):
+--     ahora cada negocio decide, y hasta puede diferir entre retiro y envío.
 -- =====================================================================
 
 ALTER TABLE businesses
-    ADD COLUMN transfer_alias     VARCHAR(255)  NULL              AFTER accepts_online_orders,
-    ADD COLUMN card_surcharge_pct DECIMAL(5,2)  NOT NULL DEFAULT 0 AFTER transfer_alias;
+    ADD COLUMN transfer_alias        VARCHAR(255) NULL               AFTER accepts_online_orders,
+    ADD COLUMN card_surcharge_pct    DECIMAL(5,2) NOT NULL DEFAULT 0 AFTER transfer_alias,
+    ADD COLUMN pay_methods_pickup    JSON         NULL               AFTER card_surcharge_pct,
+    ADD COLUMN pay_methods_delivery  JSON         NULL               AFTER pay_methods_pickup;
+    -- NULL en cualquiera de los dos = se aceptan todos los métodos en esa
+    -- modalidad. Formato: ["cash","transfer"]  (subconjunto de los válidos)

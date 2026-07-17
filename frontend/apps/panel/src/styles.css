@@ -925,3 +925,47 @@ button { font-family: inherit; }
   padding-top: 18px;
   border-top: 1px solid var(--border, #e2e2e2);
 }
+
+/* --- Filtros por categoría en Productos ------------------------------ */
+.cat-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.cat-filter__chip {
+  padding: 6px 12px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--fg, #222);
+  background: var(--surface, #fff);
+  border: 1px solid var(--line, #ddd);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.cat-filter__chip--on {
+  color: #fff;
+  background: var(--accent, #c0392b);
+  border-color: var(--accent, #c0392b);
+  font-weight: 600;
+}
+
+/* --- Logo cuadrado en Mi local --------------------------------------- */
+.photo-field__thumb--logo {
+  width: 88px;
+  height: 88px;
+  border-radius: var(--r-sm, 8px);
+  overflow: hidden;
+}
+.photo-field__thumb--logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* --- Métodos de pago por modalidad ----------------------------------- */
+.pay-methods {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}

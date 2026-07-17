@@ -28,11 +28,12 @@ use Pizzalog\Services\OrderService;
  */
 class PublicController
 {
-    private const PAYMENT_METHODS = ['cash', 'card', 'transfer', 'mp', 'other'];
+    private const PAYMENT_METHODS = ['cash', 'card', 'transfer', 'mp'];
 
     private const BUSINESS_FIELDS = 'id, name, slug, phone, address, google_maps_url, description,
                                      logo_url, theme, accepts_online_orders,
-                                     transfer_alias, card_surcharge_pct';
+                                     transfer_alias, card_surcharge_pct,
+                                     pay_methods_pickup, pay_methods_delivery';
 
     private const PRODUCT_FIELDS = 'id, category_id, sort_order, name, description, price, image_url,
                                     has_variants, is_combo, is_open_price, is_vegan_opt, badge_text,
@@ -106,8 +107,11 @@ class PublicController
                     'url'      => $l['url'],
                 ], $this->businesses->socialLinks($bid)),
                 'is_open_for_orders' => $this->businesses->isOpenForOrders($business, $now),
+                'hours'              => $this->businesses->hours($bid),
                 'transfer_alias'     => $business['transfer_alias'],
                 'card_surcharge_pct' => (float) $business['card_surcharge_pct'],
+                'pay_methods_pickup'   => $this->decodeMethods($business['pay_methods_pickup']),
+                'pay_methods_delivery' => $this->decodeMethods($business['pay_methods_delivery']),
             ],
             'categories' => array_map(static fn (array $c): array => [
                 'id'         => (int) $c['id'],
@@ -174,11 +178,30 @@ class PublicController
             Response::error('Nombre y teléfono son obligatorios', 422);
         }
 
-        $paymentMethod = $req->input('payment_method');
-        if ($paymentMethod !== null && $paymentMethod !== '' && !in_array($paymentMethod, self::PAYMENT_METHODS, true)) {
-            Response::error('Medio de pago inválido', 422);
+        // La modalidad viene del checkout: 'pickup' (retiro) o 'delivery'.
+        // Con delivery la dirección es obligatoria. El método de pago tiene
+        // que estar entre los que el negocio acepta para esa modalidad — se
+        // valida en el servidor, no alcanza con esconderlo en la UI.
+        $mode = $req->input('fulfillment') === 'delivery' ? 'delivery' : 'pickup';
+        $address = trim((string) $req->input('address', ''));
+        if ($mode === 'delivery' && $address === '') {
+            Response::error('Para envío a domicilio necesitamos la dirección', 422);
         }
+
+        $allowed = $this->decodeMethods(
+            $business[$mode === 'delivery' ? 'pay_methods_delivery' : 'pay_methods_pickup']
+        );
+
+        $paymentMethod = $req->input('payment_method');
         $paymentMethod = ($paymentMethod === '' ? null : $paymentMethod);
+        if ($paymentMethod !== null) {
+            if (!in_array($paymentMethod, self::PAYMENT_METHODS, true)) {
+                Response::error('Medio de pago inválido', 422);
+            }
+            if (!in_array($paymentMethod, $allowed, true)) {
+                Response::error('Ese medio de pago no está disponible para la modalidad elegida', 422);
+            }
+        }
 
         $items = $req->input('items');
         if (!is_array($items) || $items === []) {
@@ -260,7 +283,7 @@ class PublicController
             // delivery_fee = 0: el envío lo define el local al confirmar.
             $orderId = $this->orders->create(
                 $bid, 'web', $lines, 0.0, $name, $phone,
-                trim((string) $req->input('address', '')) ?: null,
+                $address ?: null,
                 $paymentMethod,
                 trim((string) $req->input('notes', '')) ?: null,
                 null
@@ -282,6 +305,21 @@ class PublicController
     }
 
     // -----------------------------------------------------------------
+
+    private const PAY_METHODS_ALL = ['cash', 'card', 'transfer', 'mp'];
+
+    /** @return string[] métodos efectivos de una modalidad (todos si null). */
+    private function decodeMethods(mixed $raw): array
+    {
+        if ($raw === null || $raw === '') {
+            return self::PAY_METHODS_ALL;
+        }
+        $arr = is_array($raw) ? $raw : json_decode((string) $raw, true);
+        if (!is_array($arr) || $arr === []) {
+            return self::PAY_METHODS_ALL;
+        }
+        return array_values(array_intersect(self::PAY_METHODS_ALL, array_map('strval', $arr)));
+    }
 
     private function businessBySlug(string $slug): array
     {

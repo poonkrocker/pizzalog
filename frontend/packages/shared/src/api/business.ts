@@ -12,6 +12,8 @@ export interface BusinessUpdateInput {
   accepts_online_orders?: number;
   transfer_alias?: string | null;
   card_surcharge_pct?: number;
+  pay_methods_pickup?: string[];
+  pay_methods_delivery?: string[];
   theme?: BusinessTheme | null;
 }
 

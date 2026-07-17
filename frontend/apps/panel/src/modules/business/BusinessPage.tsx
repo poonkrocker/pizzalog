@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, type Business, type BusinessTheme } from '@pizzalog/shared';
@@ -8,6 +8,7 @@ import { PageHeader } from '@/ui';
 import { ErrorState, Loading } from '@/ui';
 import { HoursSection } from './HoursSection';
 import { SocialSection } from './SocialSection';
+import { ImageCropModal } from '../products/ImageCropModal';
 
 function useBusiness() {
   const api = useApi();
@@ -61,6 +62,23 @@ export function BusinessPage() {
   if (business.isLoading || !form) return <Loading />;
   if (business.isError) return <ErrorState message="No se pudo cargar el perfil" />;
 
+  const logoInput = useRef<HTMLInputElement>(null);
+  const [logoCrop, setLogoCrop] = useState<File | null>(null);
+  const [logoUploading, setLogoUploading] = useState(false);
+
+  async function uploadLogo(blob: Blob) {
+    setLogoCrop(null);
+    setLogoUploading(true);
+    try {
+      const { url } = await api.uploads.image(blob);
+      setForm((f) => (f ? { ...f, logo_url: url } : f));
+    } catch {
+      // el error de subida se muestra igual que el resto del form abajo
+    } finally {
+      setLogoUploading(false);
+    }
+  }
+
   const set = (k: keyof Business, v: string) =>
     setForm((f) => (f ? { ...f, [k]: v } : f));
 
@@ -81,6 +99,8 @@ export function BusinessPage() {
         accepts_online_orders: form.accepts_online_orders,
         transfer_alias: form.transfer_alias || null,
         card_surcharge_pct: form.card_surcharge_pct ?? 0,
+        pay_methods_pickup: form.pay_methods_pickup ?? ALL_METHODS,
+        pay_methods_delivery: form.pay_methods_delivery ?? ALL_METHODS,
         theme: custom ? theme : null,
       });
       setSaved(true);
@@ -122,13 +142,56 @@ export function BusinessPage() {
           />
         </Field>
 
-        <Field label="Foto de perfil (URL)" hint="El logo o una foto del local. Por ahora se carga como enlace a una imagen.">
-          <Input
-            value={form.logo_url ?? ''}
-            onChange={(e) => set('logo_url', e.target.value)}
-            placeholder="https://…/logo.jpg"
-          />
+        <Field label="Logo del local" hint="Se recorta cuadrado y se guarda chico y liviano: en la carta se ve en miniatura.">
+          <div className="photo-field">
+            <div className="photo-field__thumb photo-field__thumb--logo">
+              {form.logo_url ? <img src={form.logo_url} alt="" /> : <span aria-hidden="true">🍕</span>}
+            </div>
+            <div className="photo-field__actions">
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={logoUploading}
+                onClick={() => logoInput.current?.click()}
+              >
+                {logoUploading ? 'Subiendo…' : form.logo_url ? 'Cambiar logo' : 'Subir logo'}
+              </Button>
+              {form.logo_url && (
+                <button
+                  type="button"
+                  className="link link--danger"
+                  onClick={() => setForm((f) => (f ? { ...f, logo_url: null } : f))}
+                >
+                  Quitar
+                </button>
+              )}
+            </div>
+            <input
+              ref={logoInput}
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) setLogoCrop(file);
+                e.target.value = '';
+              }}
+            />
+          </div>
         </Field>
+
+        {logoCrop && (
+          <ImageCropModal
+            file={logoCrop}
+            outW={256}
+            outH={256}
+            quality={0.7}
+            aspectLabel="cuadrado"
+            title="Recortá tu logo"
+            onDone={(blob) => void uploadLogo(blob)}
+            onClose={() => setLogoCrop(null)}
+          />
+        )}
 
         <div className="form-row">
           <Field label="Teléfono / WhatsApp">
@@ -193,12 +256,23 @@ export function BusinessPage() {
               }
             />
           </Field>
+
+          <PayMethodsPicker
+            label="Formas de pago para retiro en local"
+            value={form.pay_methods_pickup ?? ALL_METHODS}
+            onChange={(v) => setForm((f) => (f ? { ...f, pay_methods_pickup: v } : f))}
+          />
+          <PayMethodsPicker
+            label="Formas de pago para envío a domicilio"
+            value={form.pay_methods_delivery ?? ALL_METHODS}
+            onChange={(v) => setForm((f) => (f ? { ...f, pay_methods_delivery: v } : f))}
+          />
         </div>
 
         <div className="theme-block">
           <h2 className="theme-block__title">Apariencia de tu carta</h2>
           <Checkbox
-            label="Personalizar los colores (como los temas de Fotolog)"
+            label="Personalizar los colores"
             checked={custom}
             onChange={(e) => setCustom(e.target.checked)}
           />
@@ -293,5 +367,52 @@ export function BusinessPage() {
       <SocialSection />
       <HoursSection />
     </section>
+  );
+}
+
+// Métodos de pago disponibles y sus etiquetas. Debe coincidir con el backend
+// (BusinessController::PAY_METHODS) y con la carta.
+const ALL_METHODS = ['cash', 'card', 'transfer', 'mp'];
+
+const METHOD_LABELS: Record<string, string> = {
+  cash: 'Efectivo',
+  card: 'Tarjeta',
+  transfer: 'Transferencia',
+  mp: 'Mercado Pago',
+};
+
+/**
+ * Multi-selección de formas de pago para una modalidad. Guarda el subconjunto
+ * elegido; si el negocio marca todas, el backend lo interpreta como "sin
+ * restricción". No deja dejar cero (al menos una tiene que quedar tildada).
+ */
+function PayMethodsPicker({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string[];
+  onChange: (v: string[]) => void;
+}) {
+  function toggle(method: string) {
+    const has = value.includes(method);
+    if (has && value.length === 1) return; // no dejar vacío
+    onChange(has ? value.filter((m) => m !== method) : [...value, method]);
+  }
+
+  return (
+    <Field label={label} hint="Lo que destildes no se le ofrece al cliente en esa modalidad.">
+      <div className="pay-methods">
+        {ALL_METHODS.map((m) => (
+          <Checkbox
+            key={m}
+            label={METHOD_LABELS[m] ?? m}
+            checked={value.includes(m)}
+            onChange={() => toggle(m)}
+          />
+        ))}
+      </div>
+    </Field>
   );
 }

@@ -598,3 +598,67 @@ body[data-pattern='lunares'] {
   color: var(--gris);
 }
 .cart__subtotal span { font-variant-numeric: tabular-nums; }
+
+/* --- Botón agregar rápido sobre la foto ------------------------------ */
+.post__add {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  min-height: 34px;
+  padding: 6px 11px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: bold;
+  color: #fff;
+  background: var(--c-accent);
+  border: 2px outset var(--borde);
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+}
+.post__add:active { border-style: inset; }
+.post--off .post__add { display: none; }
+
+/* --- Retiro / Envío --------------------------------------------------- */
+.ful-toggle { display: flex; gap: 8px; margin-bottom: 12px; }
+.ful-btn {
+  flex: 1;
+  min-height: 46px;
+  padding: 8px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: bold;
+  color: var(--c-text);
+  background: var(--papel);
+  border: 2px outset var(--borde);
+  cursor: pointer;
+  line-height: 1.2;
+}
+.ful-btn--on {
+  color: #fff;
+  background: var(--c-accent);
+  border-style: inset;
+}
+
+/* --- Horario en el perfil (cabecera) --------------------------------- */
+.masthead__hours {
+  margin-top: 10px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  background: rgba(0, 0, 0, 0.03);
+  border: 1px solid var(--borde);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.masthead__hours-label { font-weight: bold; margin-bottom: 2px; }
+.masthead__hours-line { color: var(--c-text); }
+
+/* --- Horario en el pie ----------------------------------------------- */
+.guest__hours {
+  margin: 6px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--gris);
+}
+.guest__hours p { margin: 0; }

@@ -64,6 +64,12 @@ export interface SocialLink {
   url: string;
 }
 
+export interface BusinessHour {
+  day_of_week: number; // 0=domingo … 6=sábado
+  opens_at: string;    // 'HH:MM'
+  closes_at: string;   // 'HH:MM'
+}
+
 export interface BusinessProfile {
   name: string;
   slug: string;
@@ -77,6 +83,9 @@ export interface BusinessProfile {
   is_open_for_orders: boolean;
   transfer_alias: string | null;
   card_surcharge_pct: number;
+  pay_methods_pickup: string[];
+  pay_methods_delivery: string[];
+  hours: BusinessHour[];
 }
 
 export interface Menu {
@@ -112,9 +121,12 @@ export interface OrderItemInput {
   combo_selections?: ComboSelection[];
 }
 
+export type Fulfillment = 'pickup' | 'delivery';
+
 export interface CreateOrderInput {
   customer_name: string;
   customer_phone: string;
+  fulfillment: Fulfillment;
   address?: string | null;
   payment_method?: PaymentMethod | null;
   notes?: string | null;
