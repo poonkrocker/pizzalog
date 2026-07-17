@@ -6,6 +6,8 @@ import { useApi } from '@/lib/auth';
 import { Button, Checkbox, Field, Input, Select, Textarea } from '@/ui';
 import { PageHeader } from '@/ui';
 import { ErrorState, Loading } from '@/ui';
+import { HoursSection } from './HoursSection';
+import { SocialSection } from './SocialSection';
 
 function useBusiness() {
   const api = useApi();
@@ -74,12 +76,9 @@ export function BusinessPage() {
         phone: form.phone || null,
         address: form.address || null,
         description: form.description || null,
+        google_maps_url: form.google_maps_url || null,
         logo_url: form.logo_url || null,
-        instagram: form.instagram || null,
-        facebook: form.facebook || null,
-        tiktok: form.tiktok || null,
-        latitude: form.latitude !== null && String(form.latitude) !== '' ? Number(form.latitude) : null,
-        longitude: form.longitude !== null && String(form.longitude) !== '' ? Number(form.longitude) : null,
+        accepts_online_orders: form.accepts_online_orders,
         theme: custom ? theme : null,
       });
       setSaved(true);
@@ -138,39 +137,28 @@ export function BusinessPage() {
           </Field>
         </div>
 
-        <div className="form-row">
-          <Field label="Instagram" hint="Solo el usuario, sin @">
-            <Input value={form.instagram ?? ''} onChange={(e) => set('instagram', e.target.value)} placeholder="arrabbiata.cba" />
-          </Field>
-          <Field label="Facebook" hint="Usuario o nombre de la página">
-            <Input value={form.facebook ?? ''} onChange={(e) => set('facebook', e.target.value)} />
-          </Field>
-        </div>
-
-        <Field label="TikTok" hint="Solo el usuario, sin @">
-          <Input value={form.tiktok ?? ''} onChange={(e) => set('tiktok', e.target.value)} />
+        <Field
+          label="Link de Google Maps"
+          hint="Pegá acá el link que te da el botón Compartir de tu ficha en Google Maps. En la carta se convierte en el botón «Cómo llegar»."
+        >
+          <Input
+            value={form.google_maps_url ?? ''}
+            onChange={(e) => set('google_maps_url', e.target.value)}
+            placeholder="https://maps.app.goo.gl/…"
+          />
         </Field>
 
-        <div className="form-row">
-          <Field label="Latitud" hint="Para el mapa. En Google Maps: clic derecho sobre el local → copiar coordenadas.">
-            <Input
-              type="number"
-              step="any"
-              value={form.latitude ?? ''}
-              onChange={(e) => set('latitude', e.target.value)}
-              placeholder="-31.4173"
-            />
-          </Field>
-          <Field label="Longitud">
-            <Input
-              type="number"
-              step="any"
-              value={form.longitude ?? ''}
-              onChange={(e) => set('longitude', e.target.value)}
-              placeholder="-64.1833"
-            />
-          </Field>
-        </div>
+        <Checkbox
+          label="Acepto pedidos online ahora"
+          checked={form.accepts_online_orders === 1}
+          onChange={(e) =>
+            setForm((f) => (f ? { ...f, accepts_online_orders: e.target.checked ? 1 : 0 } : f))
+          }
+        />
+        <p className="field__hint">
+          Interruptor general, aparte del horario: destildalo para cerrar los pedidos por hoy sin
+          tocar las franjas horarias.
+        </p>
 
         <div className="theme-block">
           <h2 className="theme-block__title">Apariencia de tu carta</h2>
@@ -266,6 +254,9 @@ export function BusinessPage() {
           </Button>
         </div>
       </form>
+
+      <SocialSection />
+      <HoursSection />
     </section>
   );
 }

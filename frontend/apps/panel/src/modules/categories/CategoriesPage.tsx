@@ -52,10 +52,10 @@ export function CategoriesPage() {
   const columns: Column<Category>[] = [
     { key: 'name', header: 'Categoría' },
     {
-      key: 'product_count',
+      key: 'products_count',
       header: 'Productos',
       align: 'right',
-      render: (c) => c.product_count ?? 0,
+      render: (c) => c.products_count ?? 0,
     },
     {
       key: 'actions',

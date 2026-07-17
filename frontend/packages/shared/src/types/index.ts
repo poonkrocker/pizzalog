@@ -19,20 +19,62 @@ export interface Category {
   products_count?: number;
 }
 
+/** Claves de visible_days (lunes a domingo, en inglés como las guarda el back). */
+export type WeekDay = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
+
 export interface Product {
   id: number;
   category_id: number | null;
+  sort_order: number;
   name: string;
   description: string | null;
   price: number;
   cost: number | null;
+  image_url: string | null;
   track_stock: number;
   stock?: number;
   is_active: number;
   has_variants: number;
+  is_combo: number;
   is_open_price: number;
+  // Visibilidad (migración 011)
+  show_online: number;
+  is_secret: number;
+  is_vegan_opt: number;
+  badge_text: string | null;
+  visible_days: WeekDay[] | null;   // null = todos los días
+  visible_from: string | null;      // 'HH:MM' — null = sin restricción
+  visible_until: string | null;     // 'HH:MM' — si es < visible_from, cruza medianoche
   options?: ProductOption[];
   variants?: ProductVariant[];
+  combo?: Combo;
+}
+
+// --- Combos ---------------------------------------------------------------
+
+export interface ComboItem {
+  product_id: number;
+  name: string;
+  price: number;
+  image_url: string | null;
+}
+
+export interface ComboGroup {
+  id: number;
+  name: string;
+  select_count: number;
+  sort_order: number;
+  items: ComboItem[];
+}
+
+export interface Combo {
+  groups: ComboGroup[];
+}
+
+/** Lo que el cliente eligió en cada grupo, al agregar el combo al carrito. */
+export interface ComboSelection {
+  group_id: number;
+  product_ids: number[];
 }
 
 export interface ProductOptionValue {
@@ -139,14 +181,32 @@ export interface Business {
   slug: string;
   phone: string | null;
   address: string | null;
+  /** Link "Compartir" del perfil de Google Maps. Reemplaza a latitude/longitude. */
+  google_maps_url: string | null;
   description: string | null;
   logo_url: string | null;
-  instagram: string | null;
-  facebook: string | null;
-  tiktok: string | null;
-  latitude: number | null;
-  longitude: number | null;
+  accepts_online_orders: number;
   theme: BusinessTheme | null;
+}
+
+// --- Horarios de atención (gatean el pedido online, no la carta) -----------
+
+/** day_of_week: 0 = domingo … 6 = sábado. */
+export interface BusinessHour {
+  id?: number;
+  day_of_week: number;
+  opens_at: string;   // 'HH:MM'
+  closes_at: string;  // 'HH:MM' — si es <= opens_at, cruza medianoche
+}
+
+// --- Redes sociales --------------------------------------------------------
+
+/** platform es texto libre: el ícono se resuelve en el front, con fallback. */
+export interface SocialLink {
+  id?: number;
+  platform: string;
+  url: string;
+  sort_order?: number;
 }
 
 export type TableShape = 'round' | 'square' | 'rect';

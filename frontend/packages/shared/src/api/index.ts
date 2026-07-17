@@ -8,6 +8,7 @@ import { suppliersApi } from './suppliers';
 import { suppliesApi } from './supplies';
 import { variantsApi } from './variants';
 import { businessApi } from './business';
+import { combosApi } from './combos';
 import { uploadsApi } from './uploads';
 import { tablesApi } from './tables';
 import { kitchenApi } from './kitchen';
@@ -23,6 +24,7 @@ export function createApi(config: ApiClientConfig) {
     categories: categoriesApi(client),
     products: productsApi(client),
     variants: variantsApi(client),
+    combos: combosApi(client),
     business: businessApi(client),
     uploads: uploadsApi(client),
     sales: salesApi(client),
@@ -42,4 +44,5 @@ export type { RoundItemInput, CloseSplit } from './tables';
 export type { SalesQuery } from './sales';
 export type { MovementInput } from './supplies';
 export type { OptionInput, VariantUpdateInput } from './variants';
-export type { BusinessUpdateInput } from './business';
+export type { BusinessUpdateInput, BusinessHoursResponse } from './business';
+export type { ComboGroupInput } from './combos';

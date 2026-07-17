@@ -339,3 +339,234 @@ body[data-pattern='lunares'] {
 /* ---------- mapa ---------- */
 .map-frame { width: 100%; height: 300px; border: 0; display: block; border-bottom: 1px solid #ddd; }
 .map-link { color: var(--c-link); font-size: 13px; text-decoration: underline; }
+
+/* =====================================================================
+   Pedidos: carrito, checkout, combos, badges y estados de disponibilidad.
+   Mismo lenguaje visual (bordes outset, sombra dura), tap ≥ 44px.
+   ===================================================================== */
+
+/* ---------- badges sobre la foto ---------- */
+.post__photo { position: relative; }
+.post__badge {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  max-width: calc(100% - 8px);
+  padding: 3px 6px;
+  font-size: 10px;
+  font-weight: bold;
+  color: #fff;
+  background: var(--c-accent);
+  border: 1px solid rgba(0, 0, 0, 0.3);
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.post__vegan {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  font-size: 14px;
+  background: #fff;
+  border: 1px solid #bbb;
+  padding: 1px 4px;
+}
+.post__off {
+  position: absolute;
+  inset: auto 0 0 0;
+  padding: 4px;
+  font-size: 10px;
+  text-align: center;
+  color: #fff;
+  background: rgba(30, 30, 30, 0.78);
+}
+.post--off .post__photo img { filter: grayscale(1) opacity(0.75); }
+.post--off .post__price { color: var(--gris); }
+.post__combo {
+  font-style: normal;
+  font-size: 10px;
+  color: #5a3c00;
+  background: var(--ocre);
+  padding: 1px 4px;
+  margin-left: 3px;
+}
+
+/* ---------- avisos ---------- */
+.secret-note {
+  margin-top: 10px;
+  padding: 7px 9px;
+  font-size: 12px;
+  background: #fdf7e7;
+  border: 1px dashed var(--borde);
+  color: #6a5b32;
+}
+.entry__unavailable {
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: #7a1010;
+  background: #ffecec;
+  border: 1px solid #e0a0a0;
+}
+.offline-dot { color: #b33; }
+.tag {
+  display: inline-block;
+  margin-top: 6px;
+  padding: 3px 7px;
+  font-size: 11px;
+  border: 1px solid #bbb;
+  background: #f2f2f2;
+}
+.tag--vegan { background: #eaf7ea; border-color: #a9d0a9; color: #2c5c2c; }
+
+/* ---------- elegir variante / ítems del combo ---------- */
+.pick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 9px 8px;
+  border-bottom: 1px dotted #ccc;
+  font-size: 13px;
+  cursor: pointer;
+}
+.pick--on { background: #fdf7e7; }
+.pick__label { flex: 1; color: var(--c-link); }
+.pick__price { font-weight: bold; color: var(--c-accent); white-space: nowrap; font-size: 15px; }
+.counter {
+  font-weight: bold;
+  color: var(--c-accent);
+  background: #f2f2f2;
+  border: 1px solid #bbb;
+  padding: 1px 5px;
+}
+.counter--done { color: #2c5c2c; background: #eaf7ea; border-color: #a9d0a9; }
+
+/* ---------- agregar al carrito ---------- */
+.addbar { display: flex; gap: 8px; align-items: stretch; margin-top: 14px; }
+.stepper {
+  display: flex;
+  align-items: center;
+  border: 2px outset var(--borde);
+  background: var(--papel);
+}
+.stepper button {
+  width: 40px;
+  min-height: 44px;
+  font-size: 18px;
+  font-family: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  color: var(--c-text);
+}
+.stepper button:active { background: #eee; }
+.stepper__n { min-width: 28px; text-align: center; font-weight: bold; font-size: 14px; }
+.addbar__btn {
+  flex: 1;
+  min-height: 44px;
+  padding: 11px 12px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: bold;
+  color: #fff;
+  background: var(--c-accent);
+  border: 3px outset var(--borde);
+  box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.2);
+  cursor: pointer;
+  text-align: center;
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.addbar__btn:active { border-style: inset; }
+.addbar__btn:disabled { background: #bbb; cursor: not-allowed; box-shadow: none; }
+.addbar__btn--wa { background: #25874a; margin-top: 12px; }
+
+/* ---------- barra fija del carrito ---------- */
+.page--with-bar { padding-bottom: 76px; }
+.cartbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 56px;
+  padding: 10px 14px;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: bold;
+  color: #fff;
+  background: var(--c-accent);
+  border: 0;
+  border-top: 3px solid rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+}
+.cartbar__n {
+  min-width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  background: #fff;
+  color: var(--c-accent);
+  border-radius: 50%;
+  font-size: 13px;
+}
+.cartbar__txt { flex: 1; text-align: left; text-decoration: underline; }
+
+/* ---------- líneas del carrito ---------- */
+.cart__line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px dotted #ccc;
+}
+.cart__info { flex: 1; min-width: 0; }
+.cart__name { display: block; font-size: 13px; }
+.cart__combo { display: block; font-size: 11px; color: var(--gris); margin-top: 2px; }
+.cart__unit { display: block; font-size: 11px; color: var(--gris); margin-top: 2px; }
+.cart__sum { font-weight: bold; color: var(--c-accent); white-space: nowrap; font-size: 14px; }
+.cart__total { margin-top: 12px; text-align: right; font-size: 16px; }
+.cart__total b { font-size: 22px; color: var(--c-accent); }
+.cart__hint { margin-top: 4px; text-align: right; font-size: 11px; color: var(--gris); }
+.cart__clear {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+  min-height: 44px;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--c-link);
+  background: transparent;
+  border: 0;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* ---------- formulario del checkout ---------- */
+.fld { display: block; margin-bottom: 12px; }
+.fld > span { display: block; font-size: 12px; color: #555; margin-bottom: 4px; }
+.fld input,
+.fld select,
+.fld textarea {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px;
+  font-family: inherit;
+  font-size: 14px;
+  color: var(--c-text);
+  background: var(--papel);
+  border: 2px inset var(--borde);
+}
+.fld textarea { min-height: 70px; resize: vertical; }
+
+/* ---------- íconos de redes ---------- */
+.plink--icon { display: inline-flex; align-items: center; gap: 5px; }
+.plink--icon svg { display: block; }

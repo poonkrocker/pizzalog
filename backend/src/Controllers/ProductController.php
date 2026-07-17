@@ -2,21 +2,31 @@
 namespace Pizzalog\Controllers;
 
 use Pizzalog\Core\Database;
+use Pizzalog\Core\ProductVisibility;
 use Pizzalog\Core\Request;
 use Pizzalog\Core\Response;
 use Pizzalog\Ingredients\ExtractorFactory;
+use Pizzalog\Repositories\ComboRepository;
 use Pizzalog\Repositories\IngredientRepository;
 use Pizzalog\Repositories\VariantRepository;
 
 class ProductController
 {
+    /** Columnas del producto para el panel (gestión interna: se ve todo siempre). */
+    private const FIELDS = 'id, category_id, sort_order, name, description, price, cost, image_url,
+                            track_stock, stock_quantity, stock_min, is_active, has_variants, is_combo,
+                            is_open_price, show_online, is_secret, is_vegan_opt, badge_text,
+                            visible_days, visible_from, visible_until';
+
     private IngredientRepository $ingredients;
     private VariantRepository $variants;
+    private ComboRepository $combos;
 
     public function __construct()
     {
         $this->ingredients = new IngredientRepository();
         $this->variants    = new VariantRepository();
+        $this->combos      = new ComboRepository();
     }
 
     /**
@@ -38,25 +48,19 @@ class ProductController
     /** GET /products */
     public function index(Request $req): void
     {
+        $bid  = (int) $req->auth['business_id'];
         $stmt = Database::pdo()->prepare(
-            'SELECT id, category_id, name, description, price, cost, image_url,
-                    track_stock, stock_quantity, stock_min, is_active, has_variants, is_open_price
+            'SELECT ' . self::FIELDS . '
                FROM products
               WHERE business_id = ?
-              ORDER BY name'
+              ORDER BY sort_order ASC, id ASC'
         );
-        $stmt->execute([(int) $req->auth['business_id']]);
-        $products = $stmt->fetchAll();
+        $stmt->execute([$bid]);
 
-        foreach ($products as &$p) {
-            $p['ingredients'] = $this->ingredients->forProduct((int) $p['id']);
-            if ((int) $p['has_variants'] === 1) {
-                $data = $this->variants->forProduct((int) $req->auth['business_id'], (int) $p['id']);
-                $p['options']  = $data['options'];
-                $p['variants'] = $data['variants'];
-            }
+        $products = [];
+        foreach ($stmt->fetchAll() as $row) {
+            $products[] = $this->hydrate($bid, $row);
         }
-        unset($p);
 
         Response::ok(['products' => $products]);
     }
@@ -64,21 +68,18 @@ class ProductController
     /** GET /products/{id} */
     public function show(Request $req): void
     {
-        $product = $this->findOwned($req, (int) $req->param('id'));
-        $product['ingredients'] = $this->ingredients->forProduct((int) $product['id']);
-        if ((int) $product['has_variants'] === 1) {
-            $data = $this->variants->forProduct((int) $req->auth['business_id'], (int) $product['id']);
-            $product['options']  = $data['options'];
-            $product['variants'] = $data['variants'];
-        }
-        Response::ok(['product' => $product]);
+        $bid = (int) $req->auth['business_id'];
+        Response::ok([
+            'product' => $this->hydrate($bid, $this->findOwned($req, (int) $req->param('id'))),
+        ]);
     }
 
     /**
      * POST /products
      * Body: { name, description?, price, cost?, category_id?, track_stock?,
-     *         stock_quantity?, stock_min?, ingredients?: string[] }
-     * Los ingredientes llegan YA confirmados por el usuario (desde el preview).
+     *         stock_quantity?, stock_min?, ingredients?: string[],
+     *         show_online?, is_secret?, is_vegan_opt?, badge_text?,
+     *         visible_days?: string[], visible_from?, visible_until? }
      */
     public function store(Request $req): void
     {
@@ -88,16 +89,28 @@ class ProductController
 
         $pdo->beginTransaction();
         try {
+            // Entra al final de su categoría, no al principio con el default 0.
+            $next = $pdo->prepare(
+                'SELECT COALESCE(MAX(sort_order), -1) + 1 FROM products
+                  WHERE business_id = ? AND category_id <=> ?'
+            );
+            $next->execute([$bid, $d['category_id']]);
+            $sortOrder = (int) $next->fetchColumn();
+
             $stmt = $pdo->prepare(
                 'INSERT INTO products
-                    (business_id, category_id, name, description, price, cost,
-                     track_stock, stock_quantity, stock_min, is_open_price, image_url)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                    (business_id, category_id, sort_order, name, description, price, cost,
+                     track_stock, stock_quantity, stock_min, is_open_price, image_url,
+                     show_online, is_secret, is_vegan_opt, badge_text,
+                     visible_days, visible_from, visible_until)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $stmt->execute([
-                $bid, $d['category_id'], $d['name'], $d['description'], $d['price'],
+                $bid, $d['category_id'], $sortOrder, $d['name'], $d['description'], $d['price'],
                 $d['cost'], $d['track_stock'], $d['stock_quantity'], $d['stock_min'],
                 $d['is_open_price'], $d['image_url'],
+                $d['show_online'], $d['is_secret'], $d['is_vegan_opt'], $d['badge_text'],
+                $d['visible_days'], $d['visible_from'], $d['visible_until'],
             ]);
             $productId = (int) $pdo->lastInsertId();
 
@@ -110,9 +123,7 @@ class ProductController
             throw $e;
         }
 
-        $product = $this->findOwned($req, $productId);
-        $product['ingredients'] = $this->ingredients->forProduct($productId);
-        Response::ok(['product' => $product], 201);
+        Response::ok(['product' => $this->hydrate($bid, $this->findOwned($req, $productId))], 201);
     }
 
     /** PUT /products/{id} */
@@ -130,13 +141,16 @@ class ProductController
                 'UPDATE products
                     SET category_id = ?, name = ?, description = ?, price = ?, cost = ?,
                         track_stock = ?, stock_quantity = ?, stock_min = ?, is_open_price = ?,
-                        image_url = ?
+                        image_url = ?, show_online = ?, is_secret = ?, is_vegan_opt = ?,
+                        badge_text = ?, visible_days = ?, visible_from = ?, visible_until = ?
                   WHERE id = ? AND business_id = ?'
             );
             $stmt->execute([
                 $d['category_id'], $d['name'], $d['description'], $d['price'], $d['cost'],
                 $d['track_stock'], $d['stock_quantity'], $d['stock_min'], $d['is_open_price'],
-                $d['image_url'], $id, $bid,
+                $d['image_url'], $d['show_online'], $d['is_secret'], $d['is_vegan_opt'],
+                $d['badge_text'], $d['visible_days'], $d['visible_from'], $d['visible_until'],
+                $id, $bid,
             ]);
 
             $ids = $this->ingredients->resolveNames($bid, $d['ingredients']);
@@ -148,9 +162,61 @@ class ProductController
             throw $e;
         }
 
-        $product = $this->findOwned($req, $id);
-        $product['ingredients'] = $this->ingredients->forProduct($id);
-        Response::ok(['product' => $product]);
+        Response::ok(['product' => $this->hydrate($bid, $this->findOwned($req, $id))]);
+    }
+
+    /**
+     * PUT /products/reorder
+     * Body: { category_id: number|null, product_ids: number[] }
+     * El array completo de esa categoría, en el orden final. Todo o nada:
+     * si falta o sobra alguno, o hay uno de otra categoría, 422 sin guardar.
+     */
+    public function reorder(Request $req): void
+    {
+        $bid = (int) $req->auth['business_id'];
+
+        $categoryId = $req->input('category_id');
+        $categoryId = ($categoryId === null || $categoryId === '') ? null : (int) $categoryId;
+
+        $ids = $req->input('product_ids');
+        if (!is_array($ids) || $ids === []) {
+            Response::error('Mandá el listado completo de productos de la categoría', 422);
+        }
+        $ids = array_map('intval', $ids);
+        if (count($ids) !== count(array_unique($ids))) {
+            Response::error('Hay productos repetidos en el orden enviado', 422);
+        }
+
+        $pdo  = Database::pdo();
+        $stmt = $pdo->prepare(
+            'SELECT id FROM products WHERE business_id = ? AND category_id <=> ? AND is_active = 1'
+        );
+        $stmt->execute([$bid, $categoryId]);
+        $actual = array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
+
+        $sent = $ids;
+        sort($actual);
+        sort($sent);
+        if ($actual !== $sent) {
+            Response::error(
+                'El orden enviado no coincide con los productos de esa categoría. Recargá y probá de nuevo.',
+                422
+            );
+        }
+
+        $pdo->beginTransaction();
+        try {
+            $upd = $pdo->prepare('UPDATE products SET sort_order = ? WHERE id = ? AND business_id = ?');
+            foreach ($ids as $pos => $pid) {
+                $upd->execute([$pos, $pid, $bid]);
+            }
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+
+        Response::ok(['reordered' => count($ids)]);
     }
 
     /** DELETE /products/{id}  (baja lógica: preserva históricos de venta) */
@@ -168,6 +234,27 @@ class ProductController
     }
 
     // ----------------------------------------------------------------
+
+    /** Suma ingredientes, variantes y combo, y normaliza los campos nuevos. */
+    private function hydrate(int $bid, array $p): array
+    {
+        $p['ingredients'] = $this->ingredients->forProduct((int) $p['id']);
+
+        if ((int) $p['has_variants'] === 1) {
+            $data = $this->variants->forProduct($bid, (int) $p['id']);
+            $p['options']  = $data['options'];
+            $p['variants'] = $data['variants'];
+        }
+        if ((int) $p['is_combo'] === 1) {
+            $p['combo'] = $this->combos->forProduct($bid, (int) $p['id']);
+        }
+
+        $p['visible_days']  = ProductVisibility::decodeDays($p['visible_days'] ?? null);
+        $p['visible_from']  = $p['visible_from'] !== null ? substr((string) $p['visible_from'], 0, 5) : null;
+        $p['visible_until'] = $p['visible_until'] !== null ? substr((string) $p['visible_until'], 0, 5) : null;
+
+        return $p;
+    }
 
     private function validate(Request $req, int $bid): array
     {
@@ -187,8 +274,15 @@ class ProductController
             Response::error('La categoría indicada no existe', 422);
         }
 
-        $cost = $req->input('cost');
+        $cost        = $req->input('cost');
         $ingredients = $req->input('ingredients');
+
+        $badge = trim((string) $req->input('badge_text', ''));
+        if (mb_strlen($badge) > 40) {
+            Response::error('El badge no puede superar los 40 caracteres', 422);
+        }
+
+        $days = ProductVisibility::decodeDays($req->input('visible_days'));
 
         return [
             'name'           => $name,
@@ -202,14 +296,32 @@ class ProductController
             'is_open_price'  => (int) (bool) $req->input('is_open_price', false),
             'image_url'      => substr(trim((string) $req->input('image_url', '')), 0, 300) ?: null,
             'ingredients'    => is_array($ingredients) ? $ingredients : [],
+            'show_online'    => (int) (bool) $req->input('show_online', true),
+            'is_secret'      => (int) (bool) $req->input('is_secret', false),
+            'is_vegan_opt'   => (int) (bool) $req->input('is_vegan_opt', false),
+            'badge_text'     => $badge !== '' ? $badge : null,
+            'visible_days'   => $days !== null ? json_encode($days) : null,
+            'visible_from'   => $this->time($req->input('visible_from')),
+            'visible_until'  => $this->time($req->input('visible_until')),
         ];
+    }
+
+    private function time(mixed $v): ?string
+    {
+        $v = trim((string) ($v ?? ''));
+        if ($v === '') {
+            return null;
+        }
+        if (!preg_match('/^([01]\d|2[0-3]):([0-5]\d)(:[0-5]\d)?$/', $v)) {
+            Response::error('Horario inválido (usá el formato HH:MM)', 422);
+        }
+        return strlen($v) === 5 ? $v . ':00' : $v;
     }
 
     private function findOwned(Request $req, int $id): array
     {
         $stmt = Database::pdo()->prepare(
-            'SELECT id, category_id, name, description, price, cost, image_url,
-                    track_stock, stock_quantity, stock_min, is_active, has_variants, is_open_price
+            'SELECT ' . self::FIELDS . '
                FROM products
               WHERE id = ? AND business_id = ?
               LIMIT 1'

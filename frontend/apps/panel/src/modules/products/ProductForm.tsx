@@ -1,11 +1,21 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
-import { ApiError, type Category, type Product } from '@pizzalog/shared';
+import { ApiError, type Category, type Product, type WeekDay } from '@pizzalog/shared';
 import { useRef } from 'react';
 import { Button, Checkbox, Field, Input, Select, Textarea } from '@/ui';
 import { useApi } from '@/lib/auth';
 import { useSaveProduct } from './hooks';
 import { ImageCropModal } from './ImageCropModal';
+
+const DAYS: Array<{ value: WeekDay; label: string }> = [
+  { value: 'mon', label: 'Lun' },
+  { value: 'tue', label: 'Mar' },
+  { value: 'wed', label: 'Mié' },
+  { value: 'thu', label: 'Jue' },
+  { value: 'fri', label: 'Vie' },
+  { value: 'sat', label: 'Sáb' },
+  { value: 'sun', label: 'Dom' },
+];
 
 interface Props {
   product: Product | null; // null = alta
@@ -25,6 +35,18 @@ export function ProductForm({ product, categories, onDone }: Props) {
   const [trackStock, setTrackStock] = useState(Boolean(product?.track_stock));
   const [isOpenPrice, setIsOpenPrice] = useState(Boolean(product?.is_open_price));
   const [error, setError] = useState<string | null>(null);
+
+  // Visibilidad en la carta online (migración 011).
+  const [showOnline, setShowOnline] = useState(product ? Boolean(product.show_online) : true);
+  const [isSecret, setIsSecret] = useState(Boolean(product?.is_secret));
+  const [isVeganOpt, setIsVeganOpt] = useState(Boolean(product?.is_vegan_opt));
+  const [badge, setBadge] = useState(product?.badge_text ?? '');
+  const [days, setDays] = useState<WeekDay[]>(product?.visible_days ?? []);
+  const [visibleFrom, setVisibleFrom] = useState(product?.visible_from ?? '');
+  const [visibleUntil, setVisibleUntil] = useState(product?.visible_until ?? '');
+
+  const toggleDay = (d: WeekDay) =>
+    setDays((prev) => (prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d]));
 
   // Foto del producto: recorte 4:3 y subida al backend.
   const api = useApi();
@@ -62,6 +84,14 @@ export function ProductForm({ product, categories, onDone }: Props) {
           track_stock: trackStock ? 1 : 0,
           is_open_price: isOpenPrice ? 1 : 0,
           image_url: imageUrl,
+          show_online: showOnline ? 1 : 0,
+          is_secret: isSecret ? 1 : 0,
+          is_vegan_opt: isVeganOpt ? 1 : 0,
+          badge_text: badge.trim() || null,
+          // [] = sin restricción de días (el back lo guarda como NULL).
+          visible_days: days.length > 0 ? days : null,
+          visible_from: visibleFrom || null,
+          visible_until: visibleUntil || null,
         },
       });
       onDone();
@@ -165,6 +195,80 @@ export function ProductForm({ product, categories, onDone }: Props) {
         checked={isOpenPrice}
         onChange={(e) => setIsOpenPrice(e.target.checked)}
       />
+      <fieldset className="visibility-block">
+        <legend className="visibility-block__title">Carta online</legend>
+
+        <Checkbox
+          label="Mostrar en la carta online"
+          checked={showOnline}
+          onChange={(e) => setShowOnline(e.target.checked)}
+        />
+        <p className="field__hint">
+          Destildado: se sigue vendiendo en el TPV y en el salón, pero no aparece en
+          pizzalog.net ni se puede pedir por web (ej. «2x1 vermouth mediodía»).
+        </p>
+
+        <Checkbox
+          label="Carta secreta"
+          checked={isSecret}
+          onChange={(e) => setIsSecret(e.target.checked)}
+        />
+        <p className="field__hint">
+          No aparece en el listado normal: solo entrando por el link
+          /{'{'}tu-local{'}'}/secreta.
+        </p>
+
+        <Checkbox
+          label="Tiene opción vegana"
+          checked={isVeganOpt}
+          onChange={(e) => setIsVeganOpt(e.target.checked)}
+        />
+
+        <Field
+          label="Badge"
+          hint={`Texto libre sobre la foto: «¡Nuevo!», «Pizza de la semana»… ${badge.length}/40`}
+        >
+          <Input
+            value={badge}
+            maxLength={40}
+            onChange={(e) => setBadge(e.target.value)}
+            placeholder="¡Nuevo!"
+          />
+        </Field>
+
+        <Field label="Días que se muestra" hint="Ninguno tildado = todos los días.">
+          <div className="days-row">
+            {DAYS.map((d) => (
+              <label key={d.value} className="day-chip">
+                <input
+                  type="checkbox"
+                  checked={days.includes(d.value)}
+                  onChange={() => toggleDay(d.value)}
+                />
+                <span>{d.label}</span>
+              </label>
+            ))}
+          </div>
+        </Field>
+
+        <div className="form-row">
+          <Field label="Desde" hint="Vacío = sin restricción horaria.">
+            <Input
+              type="time"
+              value={visibleFrom}
+              onChange={(e) => setVisibleFrom(e.target.value)}
+            />
+          </Field>
+          <Field label="Hasta" hint="Si es menor que «desde», cruza medianoche (20:00 → 02:00).">
+            <Input
+              type="time"
+              value={visibleUntil}
+              onChange={(e) => setVisibleUntil(e.target.value)}
+            />
+          </Field>
+        </div>
+      </fieldset>
+
       {error && (
         <p className="login__error" role="alert">
           {error}
