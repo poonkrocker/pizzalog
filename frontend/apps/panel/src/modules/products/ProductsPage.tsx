@@ -18,12 +18,39 @@ export function ProductsPage() {
   const [variantsFor, setVariantsFor] = useState<Product | null>(null);
   const [comboFor, setComboFor] = useState<Product | null>(null);
   const [reordering, setReordering] = useState(false);
+  // Filtro por categoría del listado (arriba de todo). 'all' = todas.
+  const [filterCat, setFilterCat] = useState<number | 'all' | 'none'>('all');
 
   const categoryName = useMemo(() => {
     const map = new Map<number, string>();
     for (const c of categories.data ?? []) map.set(c.id, c.name);
     return map;
   }, [categories.data]);
+
+  // Los borrados son baja lógica (is_active = 0): el backend los devuelve
+  // igual para poder reactivarlos, pero en el listado no van — por eso
+  // "no se borraban": seguían apareciendo. Acá se ocultan.
+  const activeProducts = useMemo(
+    () => (products.data ?? []).filter((p) => p.is_active === 1),
+    [products.data],
+  );
+
+  // Categorías que realmente tienen productos, para no mostrar filtros vacíos.
+  const usedCategories = useMemo(() => {
+    const ids = new Set(activeProducts.map((p) => p.category_id));
+    return (categories.data ?? []).filter((c) => ids.has(c.id));
+  }, [categories.data, activeProducts]);
+
+  const hasUncategorized = useMemo(
+    () => activeProducts.some((p) => p.category_id == null),
+    [activeProducts],
+  );
+
+  const visibleProducts = useMemo(() => {
+    if (filterCat === 'all') return activeProducts;
+    if (filterCat === 'none') return activeProducts.filter((p) => p.category_id == null);
+    return activeProducts.filter((p) => p.category_id === filterCat);
+  }, [activeProducts, filterCat]);
 
   const columns: Column<Product>[] = [
     {
@@ -106,34 +133,65 @@ export function ProductsPage() {
         <Loading />
       ) : products.isError ? (
         <ErrorState message="No se pudieron cargar los productos." />
-      ) : (products.data ?? []).length === 0 ? (
+      ) : activeProducts.length === 0 ? (
         <EmptyState title="Todavía no hay productos">
           <Button onClick={() => setCreating(true)}>Crear el primero</Button>
         </EmptyState>
       ) : (
-        <DataTable
-          columns={columns}
-          rows={products.data ?? []}
-          renderExpand={(p) =>
-            p.has_variants === 1 ? (
-              <div className="variant-peek">
-                {(p.variants ?? []).length === 0 ? (
-                  <p className="variant-peek__empty">Sin variantes cargadas todavía.</p>
-                ) : (
-                  (p.variants ?? []).map((v) => (
-                    <div key={v.id} className="variant-peek__row">
-                      <span>{v.label}</span>
-                      <span className="variant-peek__price">
-                        {formatARS(v.price)}
-                        {v.is_active !== 1 && <em> · inactiva</em>}
-                      </span>
-                    </div>
-                  ))
-                )}
-              </div>
-            ) : null
-          }
-        />
+        <>
+          <div className="cat-filter" role="tablist" aria-label="Filtrar por categoría">
+            <button
+              className={`cat-filter__chip${filterCat === 'all' ? ' cat-filter__chip--on' : ''}`}
+              onClick={() => setFilterCat('all')}
+            >
+              Todas ({activeProducts.length})
+            </button>
+            {usedCategories.map((c) => {
+              const n = activeProducts.filter((p) => p.category_id === c.id).length;
+              return (
+                <button
+                  key={c.id}
+                  className={`cat-filter__chip${filterCat === c.id ? ' cat-filter__chip--on' : ''}`}
+                  onClick={() => setFilterCat(c.id)}
+                >
+                  {c.name} ({n})
+                </button>
+              );
+            })}
+            {hasUncategorized && (
+              <button
+                className={`cat-filter__chip${filterCat === 'none' ? ' cat-filter__chip--on' : ''}`}
+                onClick={() => setFilterCat('none')}
+              >
+                Sin categoría
+              </button>
+            )}
+          </div>
+
+          <DataTable
+            columns={columns}
+            rows={visibleProducts}
+            renderExpand={(p) =>
+              p.has_variants === 1 ? (
+                <div className="variant-peek">
+                  {(p.variants ?? []).length === 0 ? (
+                    <p className="variant-peek__empty">Sin variantes cargadas todavía.</p>
+                  ) : (
+                    (p.variants ?? []).map((v) => (
+                      <div key={v.id} className="variant-peek__row">
+                        <span>{v.label}</span>
+                        <span className="variant-peek__price">
+                          {formatARS(v.price)}
+                          {v.is_active !== 1 && <em> · inactiva</em>}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                </div>
+              ) : null
+            }
+          />
+        </>
       )}
 
       <Modal

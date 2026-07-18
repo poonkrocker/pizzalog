@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { BusinessTheme, Menu, Product } from './types';
 import { fetchMenu, money, routeFromPath } from './lib/api';
+import { formatHours } from './lib/hours';
 import { useCart } from './lib/cart';
 import { SocialIcon, socialLabel } from './components/Icons';
 import { ProductModal } from './components/ProductModal';
@@ -29,7 +30,7 @@ function Placeholder({ name }: { name: string }) {
   );
 }
 
-/** El tema del local pinta la carta vía variables CSS, como los temas de Fotolog. */
+/** El tema del local pinta la carta vía variables CSS. */
 function applyTheme(theme: BusinessTheme | null) {
   const root = document.documentElement;
   const map: Array<[keyof BusinessTheme, string]> = [
@@ -122,6 +123,7 @@ export function App() {
   }
 
   const b = menu.business;
+  const hoursText = formatHours(b.hours ?? []);
 
   return (
     <div className={`page${canOrder && cart.count > 0 ? ' page--with-bar' : ''}`}>
@@ -188,6 +190,17 @@ export function App() {
           <span className="widget">tu visita nº {visits}</span>
         </div>
 
+        {hoursText.length > 0 && (
+          <div className="masthead__hours">
+            <span className="masthead__hours-label">🕒 Horarios</span>
+            {hoursText.map((line) => (
+              <span key={line} className="masthead__hours-line">
+                {line}
+              </span>
+            ))}
+          </div>
+        )}
+
         {mode === 'secreta' && <p className="secret-note">🤫 carta secreta</p>}
         {mode === 'salon' && (
           <p className="secret-note">Mirá la carta y pedile al mozo. Acá no se toman pedidos.</p>
@@ -218,11 +231,36 @@ export function App() {
         {shown.map((p) => {
           const variants = (p.variants ?? []).filter((v) => v.is_active === 1);
           const from = variants.length ? Math.min(...variants.map((v) => v.price)) : p.price;
+          // Necesita abrir la ficha si hay que elegir algo (variante o combo).
+          const needsChoice = variants.length > 0 || p.is_combo === 1;
+
+          function quickAdd(e: React.MouseEvent) {
+            e.stopPropagation(); // no abrir la foto
+            if (!canOrder || !p.is_available_now) return;
+            if (needsChoice) {
+              setOpen(p); // hay que elegir: abrimos la ficha
+              return;
+            }
+            cart.add(
+              {
+                key: `${p.id}/0/`,
+                product_id: p.id,
+                name: p.name,
+                unit_price: p.price,
+                image_url: p.image_url,
+              },
+              1,
+            );
+          }
+
           return (
-            <button
+            <div
               key={p.id}
               className={`post${p.is_available_now ? '' : ' post--off'}`}
+              role="button"
+              tabIndex={0}
               onClick={() => setOpen(p)}
+              onKeyDown={(e) => e.key === 'Enter' && setOpen(p)}
             >
               <div className="post__photo">
                 {p.image_url ? (
@@ -237,6 +275,19 @@ export function App() {
                   </span>
                 )}
                 {!p.is_available_now && <span className="post__off">en otro horario</span>}
+
+                {/* Agregar rápido, sin entrar a la foto. Con variantes/combo,
+                    abre la ficha para elegir. */}
+                {canOrder && p.is_available_now && (
+                  <button
+                    className="post__add"
+                    onClick={quickAdd}
+                    aria-label={needsChoice ? `Elegir opciones de ${p.name}` : `Agregar ${p.name}`}
+                    title={needsChoice ? 'Elegí las opciones' : 'Agregar al carrito'}
+                  >
+                    {needsChoice ? '＋ elegir' : '＋'}
+                  </button>
+                )}
               </div>
               <div className="post__strip">
                 <span className="post__name">
@@ -248,7 +299,7 @@ export function App() {
                   {money(from)}
                 </span>
               </div>
-            </button>
+            </div>
           );
         })}
         {shown.length === 0 && <p className="wall__empty">no hay nada por acá…</p>}
@@ -266,7 +317,14 @@ export function App() {
           </a>
         )}
         {b.address && <p className="guest__addr">{b.address}</p>}
-        <p className="guest__tag">hecho con Pizzalog © {new Date().getFullYear()}</p>
+        {hoursText.length > 0 && (
+          <div className="guest__hours">
+            {hoursText.map((line) => (
+              <p key={line}>{line}</p>
+            ))}
+          </div>
+        )}
+        <p className="guest__tag">Hecho con Pizzalog.net © {new Date().getFullYear()}</p>
       </footer>
 
       {/* Barra fija del carrito: solo si hay algo y se puede pedir. */}
@@ -290,6 +348,7 @@ export function App() {
       {cartOpen && (
         <CartPanel
           slug={slug}
+          business={b}
           lines={cart.lines}
           total={cart.total}
           isOpen={b.is_open_for_orders}

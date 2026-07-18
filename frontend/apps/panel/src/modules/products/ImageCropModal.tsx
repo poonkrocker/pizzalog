@@ -2,22 +2,33 @@ import { useEffect, useRef, useState } from 'react';
 import { Button, Modal } from '@/ui';
 
 /**
- * Recorte de imagen con encuadre fijo 4:3 (el formato de las fotos de la
- * carta). El usuario arrastra para encuadrar y acerca con el control de zoom;
- * al confirmar se exporta un JPEG liviano de 1200×900 listo para subir.
+ * Recorte de imagen con encuadre configurable. Por defecto 4:3 a 1200×900
+ * (las fotos de la carta); pasando outW/outH/quality/aspect se reutiliza para
+ * otros formatos — ej. el logo, que va cuadrado, chico y muy comprimido.
+ * El usuario arrastra para encuadrar y acerca con el zoom; al confirmar se
+ * exporta un JPEG liviano listo para subir.
  */
-const OUT_W = 1200;
-const OUT_H = 900;
-
 export function ImageCropModal({
   file,
   onDone,
   onClose,
+  outW = 1200,
+  outH = 900,
+  quality = 0.85,
+  aspectLabel = '4:3',
+  title = 'Encuadrar la foto',
 }: {
   file: File;
   onDone: (blob: Blob) => void;
   onClose: () => void;
+  outW?: number;
+  outH?: number;
+  quality?: number;
+  aspectLabel?: string;
+  title?: string;
 }) {
+  const OUT_W = outW;
+  const OUT_H = outH;
   const viewportRef = useRef<HTMLDivElement>(null);
   const [img, setImg] = useState<HTMLImageElement | null>(null);
   const [zoom, setZoom] = useState(1);
@@ -99,7 +110,7 @@ export function ImageCropModal({
       ctx.drawImage(img, dx, dy, drawW, drawH);
 
       const blob = await new Promise<Blob | null>((res) =>
-        canvas.toBlob(res, 'image/jpeg', 0.85),
+        canvas.toBlob(res, 'image/jpeg', quality),
       );
       if (!blob) throw new Error('export');
       onDone(blob);
@@ -110,14 +121,15 @@ export function ImageCropModal({
   }
 
   return (
-    <Modal open onClose={onClose} title="Encuadrar la foto">
+    <Modal open onClose={onClose} title={title}>
       <p className="muted-text" style={{ marginTop: 0 }}>
-        Arrastrá para encuadrar y acercá con el control. Se guarda en 4:3.
+        Arrastrá para encuadrar y acercá con el control. Se guarda en {aspectLabel}.
       </p>
 
       <div
         ref={viewportRef}
         className="crop-viewport"
+        style={{ aspectRatio: `${OUT_W} / ${OUT_H}` }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}

@@ -1,33 +1,42 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { CartaError, createOrder, money } from '../lib/api';
 import type { CartLine } from '../lib/cart';
 import {
   PAYMENT_LABELS,
-  PAYMENT_METHODS,
+  type BusinessProfile,
   type CreateOrderResponse,
+  type Fulfillment,
   type PaymentMethod,
 } from '../types';
 
 interface Props {
   slug: string;
+  business: BusinessProfile;
   lines: CartLine[];
   total: number;
-  /** false = el local está cerrado o dejó de aceptar pedidos online. */
   isOpen: boolean;
   onSetQty: (key: string, qty: number) => void;
   onClear: () => void;
   onClose: () => void;
 }
 
+const ORDER: PaymentMethod[] = ['cash', 'card', 'transfer', 'mp'];
+
 /**
- * Carrito + checkout en un solo panel, en dos pasos.
+ * Carrito + checkout en UNA vista, al estilo de la web de Arrabbiata:
+ *   - botones Retiro en local / Envío a domicilio (la dirección aparece
+ *     solo con envío)
+ *   - las formas de pago se filtran por lo que el negocio acepta en esa
+ *     modalidad (pay_methods_pickup / pay_methods_delivery, del panel)
+ *   - Transferencia muestra el alias/instrucciones del negocio
+ *   - Tarjeta suma el recargo % y lo avisa (informativo por ahora)
  *
- * El WhatsApp se manda DESPUÉS de que el pedido quedó guardado: el link viene
- * del servidor (whatsapp_url), así que si el mensaje nunca se envía el local
- * igual ve el pedido en el panel. Al revés se perdían pedidos.
+ * El WhatsApp se abre DESPUÉS de guardar: el link lo arma el servidor, así
+ * que aunque el cliente no mande el mensaje el pedido ya quedó registrado.
  */
 export function CartPanel({
   slug,
+  business,
   lines,
   total,
   isOpen,
@@ -35,7 +44,7 @@ export function CartPanel({
   onClear,
   onClose,
 }: Props) {
-  const [step, setStep] = useState<'cart' | 'form'>('cart');
+  const [fulfillment, setFulfillment] = useState<Fulfillment>('pickup');
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
@@ -45,10 +54,39 @@ export function CartPanel({
   const [sending, setSending] = useState(false);
   const [done, setDone] = useState<CreateOrderResponse | null>(null);
 
+  // Métodos válidos para la modalidad activa. Si el elegido deja de valer al
+  // cambiar de modalidad, se limpia para forzar reelección.
+  const methods = useMemo(() => {
+    const allowed =
+      fulfillment === 'delivery' ? business.pay_methods_delivery : business.pay_methods_pickup;
+    const set = new Set(allowed);
+    return ORDER.filter((m) => set.has(m));
+  }, [fulfillment, business]);
+
+  const paymentValid = payment !== '' && methods.includes(payment);
+  const effectivePayment = paymentValid ? payment : '';
+
+  const surchargePct = business.card_surcharge_pct ?? 0;
+  const surcharge =
+    effectivePayment === 'card' ? Math.round((total * surchargePct) / 100) : 0;
+  const finalTotal = total + surcharge;
+
+  function switchFulfillment(f: Fulfillment) {
+    setFulfillment(f);
+    setError(null);
+    // Si el pago actual no existe en la nueva modalidad, lo reseteamos.
+    const allowed = f === 'delivery' ? business.pay_methods_delivery : business.pay_methods_pickup;
+    if (payment && !allowed.includes(payment)) setPayment('');
+  }
+
   async function submit() {
     setError(null);
     if (!name.trim() || !phone.trim()) {
       setError('Necesitamos tu nombre y un teléfono para confirmarte el pedido.');
+      return;
+    }
+    if (fulfillment === 'delivery' && !address.trim()) {
+      setError('Para envío a domicilio, cargá la dirección.');
       return;
     }
 
@@ -57,8 +95,9 @@ export function CartPanel({
       const res = await createOrder(slug, {
         customer_name: name.trim(),
         customer_phone: phone.trim(),
-        address: address.trim() || null,
-        payment_method: payment || null,
+        fulfillment,
+        address: fulfillment === 'delivery' ? address.trim() : null,
+        payment_method: effectivePayment || null,
         notes: notes.trim() || null,
         items: lines.map((l) => ({
           product_id: l.product_id,
@@ -68,7 +107,7 @@ export function CartPanel({
         })),
       });
       setDone(res);
-      onClear(); // el pedido ya está guardado en el local
+      onClear();
     } catch (err) {
       setError(
         err instanceof CartaError ? err.message : 'No pudimos enviar el pedido. Probá de nuevo.',
@@ -78,7 +117,6 @@ export function CartPanel({
     }
   }
 
-  // --- Pedido confirmado ---
   if (done) {
     return (
       <div className="veil" onClick={onClose} role="dialog" aria-modal="true">
@@ -92,8 +130,8 @@ export function CartPanel({
           <div className="entry__body">
             <p className="entry__price">pedido #{done.order.order_number}</p>
             <p className="entry__desc">
-              Ya le llegó al local. Total: <b>{money(done.order.total)}</b> (sin el envío, que te
-              confirman ellos).
+              Ya le llegó al local. Total: <b>{money(done.order.total)}</b>
+              {fulfillment === 'delivery' && ' (sin el envío, que te confirman ellos)'}.
             </p>
             {done.whatsapp_url && (
               <a
@@ -114,23 +152,23 @@ export function CartPanel({
     );
   }
 
+  const empty = lines.length === 0;
+
   return (
     <div className="veil" onClick={onClose} role="dialog" aria-modal="true">
       <article className="entry" onClick={(e) => e.stopPropagation()}>
         <header className="entry__bar">
-          <span className="entry__bar-title">
-            {step === 'cart' ? 'tu pedido' : 'tus datos'}
-          </span>
+          <span className="entry__bar-title">tu pedido</span>
           <button className="entry__close" onClick={onClose} aria-label="Cerrar">
             ✕
           </button>
         </header>
 
         <div className="entry__body">
-          {step === 'cart' && (
-            <>
-              {lines.length === 0 && <p className="entry__desc">Todavía no agregaste nada.</p>}
+          {empty && <p className="entry__desc">Todavía no agregaste nada.</p>}
 
+          {!empty && (
+            <>
               {lines.map((l) => (
                 <div key={l.key} className="cart__line">
                   <div className="cart__info">
@@ -140,7 +178,6 @@ export function CartPanel({
                     )}
                     <span className="cart__unit">{money(l.unit_price)} c/u</span>
                   </div>
-
                   <div className="stepper" role="group" aria-label={`Cantidad de ${l.name}`}>
                     <button onClick={() => onSetQty(l.key, l.quantity - 1)} aria-label="Menos">
                       −
@@ -150,85 +187,110 @@ export function CartPanel({
                       +
                     </button>
                   </div>
-
                   <span className="cart__sum">{money(l.unit_price * l.quantity)}</span>
                 </div>
               ))}
 
-              {lines.length > 0 && (
-                <>
-                  <p className="cart__total">
-                    total <b>{money(total)}</b>
-                  </p>
-                  <p className="cart__hint">El envío lo confirma el local al aceptar el pedido.</p>
+              <div className="checkout">
+                <label className="fld">
+                  <span>Nombre para el pedido</span>
+                  <input value={name} onChange={(e) => setName(e.target.value)} />
+                </label>
 
-                  {!isOpen && (
-                    <p className="entry__unavailable">
-                      Ahora está cerrado: no se puede pedir online. Mirá la carta tranquilo, tu
-                      pedido queda guardado.
-                    </p>
-                  )}
+                <label className="fld">
+                  <span>Teléfono</span>
+                  <input
+                    type="tel"
+                    inputMode="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                  />
+                </label>
 
+                {/* Retiro / Envío */}
+                <div className="ful-toggle" role="group" aria-label="Modalidad de entrega">
                   <button
-                    className="addbar__btn"
-                    disabled={!isOpen}
-                    onClick={() => setStep('form')}
+                    type="button"
+                    className={`ful-btn${fulfillment === 'pickup' ? ' ful-btn--on' : ''}`}
+                    onClick={() => switchFulfillment('pickup')}
                   >
-                    continuar
+                    🏪 Retiro en local
                   </button>
-                  <button className="cart__clear" onClick={onClear}>
-                    vaciar carrito
+                  <button
+                    type="button"
+                    className={`ful-btn${fulfillment === 'delivery' ? ' ful-btn--on' : ''}`}
+                    onClick={() => switchFulfillment('delivery')}
+                  >
+                    🛵 Envío a domicilio
                   </button>
+                </div>
+
+                {fulfillment === 'delivery' && (
+                  <label className="fld">
+                    <span>Dirección de entrega</span>
+                    <input value={address} onChange={(e) => setAddress(e.target.value)} />
+                  </label>
+                )}
+
+                <label className="fld">
+                  <span>Forma de pago</span>
+                  <select
+                    value={effectivePayment}
+                    onChange={(e) => setPayment(e.target.value as PaymentMethod | '')}
+                  >
+                    <option value="">Elegí una opción</option>
+                    {methods.map((m) => (
+                      <option key={m} value={m}>
+                        {PAYMENT_LABELS[m]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                {effectivePayment === 'transfer' && business.transfer_alias && (
+                  <p className="pay-note pay-note--transfer">{business.transfer_alias}</p>
+                )}
+
+                {effectivePayment === 'card' && surchargePct > 0 && (
+                  <p className="pay-note pay-note--card">
+                    El pago con tarjeta tiene un recargo del {surchargePct}% ({money(surcharge)}), ya
+                    sumado al total.
+                  </p>
+                )}
+
+                <label className="fld">
+                  <span>Aclaraciones</span>
+                  <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+                </label>
+              </div>
+
+              {surcharge > 0 ? (
+                <>
+                  <p className="cart__subtotal">
+                    subtotal <span>{money(total)}</span>
+                  </p>
+                  <p className="cart__subtotal">
+                    recargo tarjeta ({surchargePct}%) <span>{money(surcharge)}</span>
+                  </p>
+                  <p className="cart__total">
+                    total <b>{money(finalTotal)}</b>
+                  </p>
                 </>
+              ) : (
+                <p className="cart__total">
+                  total <b>{money(total)}</b>
+                </p>
               )}
-            </>
-          )}
+              {fulfillment === 'delivery' && (
+                <p className="cart__hint">El envío lo confirma el local al aceptar el pedido.</p>
+              )}
 
-          {step === 'form' && (
-            <>
-              <label className="fld">
-                <span>Nombre</span>
-                <input value={name} onChange={(e) => setName(e.target.value)} />
-              </label>
-
-              <label className="fld">
-                <span>Teléfono</span>
-                <input
-                  type="tel"
-                  inputMode="tel"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                />
-              </label>
-
-              <label className="fld">
-                <span>Dirección (dejala vacía si retirás)</span>
-                <input value={address} onChange={(e) => setAddress(e.target.value)} />
-              </label>
-
-              <label className="fld">
-                <span>¿Cómo pagás?</span>
-                <select
-                  value={payment}
-                  onChange={(e) => setPayment(e.target.value as PaymentMethod | '')}
-                >
-                  <option value="">Lo defino después</option>
-                  {PAYMENT_METHODS.map((m) => (
-                    <option key={m} value={m}>
-                      {PAYMENT_LABELS[m]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="fld">
-                <span>Aclaraciones</span>
-                <textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
-              </label>
-
-              <p className="cart__total">
-                total <b>{money(total)}</b>
-              </p>
+              {!isOpen && (
+                <p className="entry__unavailable">
+                  Ahora está cerrado: no se puede pedir online. Mirá la carta tranquilo, tu pedido
+                  queda guardado.
+                </p>
+              )}
 
               {error && (
                 <p className="entry__unavailable" role="alert">
@@ -236,11 +298,15 @@ export function CartPanel({
                 </p>
               )}
 
-              <button className="addbar__btn" onClick={() => void submit()} disabled={sending}>
+              <button
+                className="addbar__btn"
+                disabled={!isOpen || sending}
+                onClick={() => void submit()}
+              >
                 {sending ? 'enviando…' : 'confirmar pedido'}
               </button>
-              <button className="cart__clear" onClick={() => setStep('cart')}>
-                volver
+              <button className="cart__clear" onClick={onClear}>
+                vaciar carrito
               </button>
             </>
           )}

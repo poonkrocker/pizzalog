@@ -20,10 +20,12 @@ use Pizzalog\Repositories\BusinessRepository;
 final class BusinessController
 {
     private const FIELDS = 'id, name, slug, phone, address, google_maps_url, description,
-                            logo_url, theme, accepts_online_orders';
+                            logo_url, theme, accepts_online_orders, transfer_alias, card_surcharge_pct,
+                            pay_methods_pickup, pay_methods_delivery';
 
     private const THEME_COLORS   = ['bg', 'accent', 'link', 'text'];
     private const THEME_PATTERNS = ['mosaico', 'liso', 'rayas', 'lunares'];
+    private const PAY_METHODS     = ['cash', 'card', 'transfer', 'mp'];
 
     private BusinessRepository $repo;
 
@@ -111,6 +113,30 @@ final class BusinessController
             }
         }
 
+        // Datos de pago del checkout (migración 017).
+        $transferAlias = trim((string) ($req->input('transfer_alias', '') ?? ''));
+        if (mb_strlen($transferAlias) > 255) {
+            Response::error('El texto de transferencia es demasiado largo (máx. 255)', 422);
+        }
+
+        $surcharge = $req->input('card_surcharge_pct');
+        $surcharge = ($surcharge === null || $surcharge === '') ? 0.0 : (float) $surcharge;
+        if ($surcharge < 0 || $surcharge > 100) {
+            Response::error('El recargo por tarjeta debe estar entre 0 y 100', 422);
+        }
+
+        // Métodos aceptados por modalidad. Se guarda solo el subconjunto válido;
+        // null (o lista vacía / lista completa) = "todos", que en la carta no
+        // restringe nada. Al menos uno tiene que quedar por modalidad.
+        $pickup   = $this->cleanMethods($req->input('pay_methods_pickup'));
+        $delivery = $this->cleanMethods($req->input('pay_methods_delivery'));
+        if ($pickup === []) {
+            Response::error('Elegí al menos una forma de pago para retiro en local', 422);
+        }
+        if ($delivery === []) {
+            Response::error('Elegí al menos una forma de pago para envío a domicilio', 422);
+        }
+
         $opt = static fn (string $k) => (static function ($v) {
             $v = trim((string) $v);
             return $v === '' ? null : $v;
@@ -119,12 +145,14 @@ final class BusinessController
         Database::pdo()->prepare(
             'UPDATE businesses
                 SET name = ?, slug = ?, phone = ?, address = ?, google_maps_url = ?,
-                    description = ?, logo_url = ?, theme = ?, accepts_online_orders = ?
+                    description = ?, logo_url = ?, theme = ?, accepts_online_orders = ?,
+                    transfer_alias = ?, card_surcharge_pct = ?
               WHERE id = ?'
         )->execute([
             $name, $slug, $opt('phone'), $opt('address'), $maps !== '' ? $maps : null,
             $opt('description'), $opt('logo_url'), $theme,
             (int) (bool) $req->input('accepts_online_orders', true),
+            $transferAlias !== '' ? $transferAlias : null, $surcharge,
             $bid,
         ]);
 
@@ -251,6 +279,48 @@ final class BusinessController
         return substr($v, 0, 5);
     }
 
+    /**
+     * Sanitiza una lista de métodos de pago que llega del panel: deja solo los
+     * válidos, sin repetir y en el orden canónico. Devuelve [] si viene algo
+     * pero todo inválido (para que el caller lo rechace), o la lista completa
+     * tal cual si no se mandó nada (= sin restricción).
+     *
+     * @return string[]
+     */
+    private function cleanMethods(mixed $raw): array
+    {
+        if (!is_array($raw)) {
+            return self::PAY_METHODS; // no se tocó: todos
+        }
+        $clean = array_values(array_intersect(self::PAY_METHODS, array_map('strval', $raw)));
+        return $clean;
+    }
+
+    /** null si están todos (no hace falta guardar restricción); si no, el JSON. */
+    private function encodeMethods(array $methods): ?string
+    {
+        sort($methods);
+        $all = self::PAY_METHODS;
+        sort($all);
+        if ($methods === $all) {
+            return null;
+        }
+        return json_encode(array_values(array_intersect(self::PAY_METHODS, $methods)));
+    }
+
+    /** @return string[] lista efectiva (todos si viene null/ vacío). */
+    private function decodeMethods(mixed $raw): array
+    {
+        if ($raw === null || $raw === '') {
+            return self::PAY_METHODS;
+        }
+        $arr = is_array($raw) ? $raw : json_decode((string) $raw, true);
+        if (!is_array($arr) || $arr === []) {
+            return self::PAY_METHODS;
+        }
+        return array_values(array_intersect(self::PAY_METHODS, array_map('strval', $arr)));
+    }
+
     private function cast(array $b): array
     {
         return [
@@ -263,6 +333,10 @@ final class BusinessController
             'description'           => $b['description'],
             'logo_url'              => $b['logo_url'],
             'accepts_online_orders' => (int) $b['accepts_online_orders'],
+            'transfer_alias'        => $b['transfer_alias'],
+            'card_surcharge_pct'    => (float) $b['card_surcharge_pct'],
+            'pay_methods_pickup'    => $this->decodeMethods($b['pay_methods_pickup']),
+            'pay_methods_delivery'  => $this->decodeMethods($b['pay_methods_delivery']),
             'theme'                 => $b['theme'] !== null ? json_decode((string) $b['theme'], true) : null,
         ];
     }

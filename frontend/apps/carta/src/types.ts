@@ -64,6 +64,12 @@ export interface SocialLink {
   url: string;
 }
 
+export interface BusinessHour {
+  day_of_week: number; // 0=domingo … 6=sábado
+  opens_at: string;    // 'HH:MM'
+  closes_at: string;   // 'HH:MM'
+}
+
 export interface BusinessProfile {
   name: string;
   slug: string;
@@ -75,6 +81,11 @@ export interface BusinessProfile {
   theme: BusinessTheme | null;
   social_links: SocialLink[];
   is_open_for_orders: boolean;
+  transfer_alias: string | null;
+  card_surcharge_pct: number;
+  pay_methods_pickup: string[];
+  pay_methods_delivery: string[];
+  hours: BusinessHour[];
 }
 
 export interface Menu {
@@ -83,7 +94,7 @@ export interface Menu {
   products: Product[];
 }
 
-export const PAYMENT_METHODS = ['cash', 'card', 'transfer', 'mp', 'other'] as const;
+export const PAYMENT_METHODS = ['cash', 'card', 'transfer', 'mp'] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
 export const PAYMENT_LABELS: Record<PaymentMethod, string> = {
@@ -91,7 +102,6 @@ export const PAYMENT_LABELS: Record<PaymentMethod, string> = {
   card: 'Tarjeta',
   transfer: 'Transferencia',
   mp: 'Mercado Pago',
-  other: 'Otro',
 };
 
 // --- Selecciones de combo en el carrito ------------------------------------
@@ -111,9 +121,12 @@ export interface OrderItemInput {
   combo_selections?: ComboSelection[];
 }
 
+export type Fulfillment = 'pickup' | 'delivery';
+
 export interface CreateOrderInput {
   customer_name: string;
   customer_phone: string;
+  fulfillment: Fulfillment;
   address?: string | null;
   payment_method?: PaymentMethod | null;
   notes?: string | null;
