@@ -49,6 +49,12 @@ export function BusinessPage() {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
+  // Los hooks del logo van ACÁ, antes de cualquier return condicional: React
+  // exige que se ejecuten siempre y en el mismo orden en cada render.
+  const logoInput = useRef<HTMLInputElement>(null);
+  const [logoCrop, setLogoCrop] = useState<File | null>(null);
+  const [logoUploading, setLogoUploading] = useState(false);
+
   useEffect(() => {
     if (business.data && !form) {
       setForm(business.data);
@@ -61,10 +67,6 @@ export function BusinessPage() {
 
   if (business.isLoading || !form) return <Loading />;
   if (business.isError) return <ErrorState message="No se pudo cargar el perfil" />;
-
-  const logoInput = useRef<HTMLInputElement>(null);
-  const [logoCrop, setLogoCrop] = useState<File | null>(null);
-  const [logoUploading, setLogoUploading] = useState(false);
 
   async function uploadLogo(blob: Blob) {
     setLogoCrop(null);
