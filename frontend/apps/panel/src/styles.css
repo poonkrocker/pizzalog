@@ -937,16 +937,17 @@ button { font-family: inherit; }
   padding: 6px 12px;
   font-family: inherit;
   font-size: 13px;
-  color: var(--fg, #222);
-  background: var(--surface, #fff);
-  border: 1px solid var(--line, #ddd);
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
   border-radius: 999px;
   cursor: pointer;
 }
+.cat-filter__chip:hover { border-color: var(--muted); }
 .cat-filter__chip--on {
   color: #fff;
-  background: var(--accent, #c0392b);
-  border-color: var(--accent, #c0392b);
+  background: var(--accent);
+  border-color: var(--accent);
   font-weight: 600;
 }
 
