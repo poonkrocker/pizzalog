@@ -85,7 +85,7 @@ class PublicController
         $prods = $pdo->prepare(
             'SELECT ' . self::PRODUCT_FIELDS . '
                FROM products
-              WHERE business_id = ? AND is_active = 1 AND show_online = 1 AND is_secret = ?
+              WHERE business_id = ? AND is_active = 1 AND show_online = 1 AND is_available = 1 AND is_secret = ?
               ORDER BY sort_order ASC, id ASC'
         );
         $prods->execute([$bid, $secret ? 1 : 0]);
@@ -352,7 +352,7 @@ class PublicController
         $stmt = Database::pdo()->prepare(
             "SELECT id, name, price, is_combo, visible_days, visible_from, visible_until
                FROM products
-              WHERE business_id = ? AND is_active = 1 AND show_online = 1
+              WHERE business_id = ? AND is_active = 1 AND show_online = 1 AND is_available = 1
                 AND id IN ($placeholders)"
         );
         $stmt->execute(array_merge([$bid], $ids));

@@ -28,3 +28,13 @@ export function useDeleteProduct() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['products'] }),
   });
 }
+
+export function useToggleAvailability() {
+  const api = useApi();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: number; isAvailable: boolean }) =>
+      api.products.setAvailability(input.id, input.isAvailable),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['products'] }),
+  });
+}

@@ -38,6 +38,7 @@ export function ProductForm({ product, categories, onDone }: Props) {
 
   // Visibilidad en la carta online (migración 011).
   const [showOnline, setShowOnline] = useState(product ? Boolean(product.show_online) : true);
+  const [isAvailable, setIsAvailable] = useState(product ? Boolean(product.is_available) : true);
   const [isSecret, setIsSecret] = useState(Boolean(product?.is_secret));
   const [isVeganOpt, setIsVeganOpt] = useState(Boolean(product?.is_vegan_opt));
   const [badge, setBadge] = useState(product?.badge_text ?? '');
@@ -85,6 +86,7 @@ export function ProductForm({ product, categories, onDone }: Props) {
           is_open_price: isOpenPrice ? 1 : 0,
           image_url: imageUrl,
           show_online: showOnline ? 1 : 0,
+          is_available: isAvailable ? 1 : 0,
           is_secret: isSecret ? 1 : 0,
           is_vegan_opt: isVeganOpt ? 1 : 0,
           badge_text: badge.trim() || null,
@@ -199,14 +201,29 @@ export function ProductForm({ product, categories, onDone }: Props) {
         <legend className="visibility-block__title">Carta online</legend>
 
         <Checkbox
-          label="Mostrar en la carta online"
+          label="Este producto es parte de la carta online"
           checked={showOnline}
           onChange={(e) => setShowOnline(e.target.checked)}
         />
         <p className="field__hint">
-          Destildado: se sigue vendiendo en el TPV y en el salón, pero no aparece en
-          pizzalog.net ni se puede pedir por web (ej. «2x1 vermouth mediodía»).
+          Nivel general: destildado, el producto <b>nunca</b> aparece en la carta web. Se sigue
+          vendiendo en el TPV y en el salón (ej. «2x1 vermouth mediodía», cargos internos).
         </p>
+
+        {showOnline && (
+          <>
+            <Checkbox
+              label="Disponible ahora"
+              checked={isAvailable}
+              onChange={(e) => setIsAvailable(e.target.checked)}
+            />
+            <p className="field__hint">
+              Interruptor rápido del día a día: destildalo cuando se agota (ej. no hay más
+              burrata). Mientras esté agotado <b>desaparece</b> de la carta, pero sigue siendo
+              parte de ella. También lo prendés y apagás desde el listado de productos.
+            </p>
+          </>
+        )}
 
         <Checkbox
           label="Carta secreta"

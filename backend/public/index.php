@@ -72,6 +72,7 @@ $router->put('/products/reorder', [ProductController::class, 'reorder'], [$auth,
 $router->get('/products/{id}', [ProductController::class, 'show'], [$auth]);
 $router->post('/products', [ProductController::class, 'store'], [$auth, $manage]);
 $router->put('/products/{id}', [ProductController::class, 'update'], [$auth, $manage]);
+$router->put('/products/{id}/availability', [ProductController::class, 'setAvailability'], [$auth, $manage]);
 $router->delete('/products/{id}', [ProductController::class, 'destroy'], [$auth, $manage]);
 $router->get('/products/{id}/variants', [VariantController::class, 'show'], [$auth]);
 $router->put('/products/{id}/options', [VariantController::class, 'setOptions'], [$auth, $manage]);

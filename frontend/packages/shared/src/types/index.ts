@@ -39,6 +39,7 @@ export interface Product {
   is_open_price: number;
   // Visibilidad (migración 011)
   show_online: number;
+  is_available: number;
   is_secret: number;
   is_vegan_opt: number;
   badge_text: string | null;
