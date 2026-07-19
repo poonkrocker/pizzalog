@@ -63,7 +63,7 @@ class TableSessionController
         $note      = trim((string) $req->input('note', '')) ?: null;
         $label     = trim((string) $req->input('label', '')) ?: null;
 
-        $id = $this->repo->openSession($bid, (int) $req->auth['sub'], $tableIds, $partySize, $note, $label);
+        $id = $this->repo->openSession($bid, (int) $req->auth['user_id'], $tableIds, $partySize, $note, $label);
         Response::ok(['session' => $this->repo->getSessionDetail($bid, $id)], 201);
     }
 
@@ -97,7 +97,7 @@ class TableSessionController
         $note = trim((string) $req->input('note', '')) ?: null;
 
         try {
-            $roundId = $this->repo->addRound($bid, $id, (int) $req->auth['sub'], $items, $note);
+            $roundId = $this->repo->addRound($bid, $id, (int) $req->auth['user_id'], $items, $note);
         } catch (\RuntimeException $e) {
             Response::error($e->getMessage(), 422);
         }
@@ -227,7 +227,7 @@ class TableSessionController
 
         try {
             $saleIds = (new TableCheckoutService())
-                ->close($bid, (int) $req->auth['sub'], $id, $paymentMethod, $splits, $cashSessionId, $note);
+                ->close($bid, (int) $req->auth['user_id'], $id, $paymentMethod, $splits, $cashSessionId, $note);
         } catch (\RuntimeException $e) {
             Response::error($e->getMessage(), 422);
         }

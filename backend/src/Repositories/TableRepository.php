@@ -105,9 +105,51 @@ class TableRepository
         return $t ? $this->castTable($t) : null;
     }
 
+    /**
+     * Crea una mesa. El borrado de mesas es baja lógica y la tabla tiene
+     * UNIQUE (business_id, area_id, label) que NO distingue activas de
+     * borradas: sin este cuidado, un nombre usado y borrado quedaba
+     * «quemado» para siempre y el alta explotaba con un 500.
+     *
+     *  - Si existe una mesa BORRADA con ese nombre en esa área → se recicla:
+     *    se reactiva esa misma fila con los datos nuevos (conserva el id, y
+     *    con él el historial de sesiones viejas de esa mesa).
+     *  - Si existe una mesa ACTIVA con ese nombre → DomainException con
+     *    mensaje claro (422), no un error interno.
+     *
+     * @throws \DomainException si el nombre ya está en uso por una mesa activa
+     */
     public function createTable(int $bid, array $d): int
     {
         $pdo = Database::pdo();
+
+        $stmt = $pdo->prepare(
+            'SELECT id, is_active FROM tables
+              WHERE business_id = ? AND area_id = ? AND label = ? LIMIT 1'
+        );
+        $stmt->execute([$bid, $d['area_id'], $d['label']]);
+        $existing = $stmt->fetch();
+
+        if ($existing) {
+            if ((int) $existing['is_active'] === 1) {
+                throw new \DomainException(
+                    sprintf('Ya hay una mesa llamada «%s» en esta área. Usá otro nombre.', $d['label'])
+                );
+            }
+            // Reciclar la fila borrada: mismos id y label, datos nuevos.
+            $pdo->prepare(
+                'UPDATE tables
+                    SET kind = ?, capacity = ?, shape = ?, pos_x = ?, pos_y = ?,
+                        width = ?, height = ?, rotation = ?, is_active = 1
+                  WHERE id = ? AND business_id = ?'
+            )->execute([
+                $d['kind'], $d['capacity'], $d['shape'], $d['pos_x'], $d['pos_y'],
+                $d['width'], $d['height'], $d['rotation'],
+                (int) $existing['id'], $bid,
+            ]);
+            return (int) $existing['id'];
+        }
+
         $pdo->prepare(
             'INSERT INTO tables
                 (business_id, area_id, label, kind, capacity, shape, pos_x, pos_y, width, height, rotation)
@@ -119,9 +161,36 @@ class TableRepository
         return (int) $pdo->lastInsertId();
     }
 
+    /**
+     * Edita una mesa. Mismo cuidado que en createTable con el UNIQUE de
+     * (business_id, area_id, label): si el nombre nuevo pertenece a una mesa
+     * ACTIVA distinta → error legible; si pertenece a una BORRADA → se libera
+     * el nombre renombrando la fila fantasma (conserva su historial).
+     *
+     * @throws \DomainException si el nombre ya está en uso por otra mesa activa
+     */
     public function updateTable(int $bid, int $id, array $d): void
     {
-        Database::pdo()->prepare(
+        $pdo  = Database::pdo();
+        $stmt = $pdo->prepare(
+            'SELECT id, is_active FROM tables
+              WHERE business_id = ? AND area_id = ? AND label = ? AND id != ? LIMIT 1'
+        );
+        $stmt->execute([$bid, $d['area_id'], $d['label'], $id]);
+        $clash = $stmt->fetch();
+
+        if ($clash) {
+            if ((int) $clash['is_active'] === 1) {
+                throw new \DomainException(
+                    sprintf('Ya hay una mesa llamada «%s» en esta área. Usá otro nombre.', $d['label'])
+                );
+            }
+            // Fantasma borrada con ese nombre: se lo liberamos renombrándola.
+            $pdo->prepare('UPDATE tables SET label = CONCAT(label, " (borrada #", id, ")") WHERE id = ?')
+                ->execute([(int) $clash['id']]);
+        }
+
+        $pdo->prepare(
             'UPDATE tables
                 SET area_id = ?, label = ?, kind = ?, capacity = ?, shape = ?, pos_x = ?, pos_y = ?,
                     width = ?, height = ?, rotation = ?, is_active = ?

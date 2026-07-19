@@ -53,7 +53,7 @@ class SupplyController
 
         $initial = (float) $req->input('initial_stock', 0);
         if ($initial > 0) {
-            $this->repo->applyMovement($bid, $id, 'restock', $initial, 'Carga inicial', (int) $req->auth['sub']);
+            $this->repo->applyMovement($bid, $id, 'restock', $initial, 'Carga inicial', (int) $req->auth['user_id']);
         }
         Response::ok(['supply' => $this->repo->get($bid, $id)], 201);
     }
@@ -115,7 +115,7 @@ class SupplyController
         $type     = (string) $req->input('type', '');
         $quantity = (float) $req->input('quantity', 0);
         $reason   = trim((string) $req->input('reason', '')) ?: null;
-        $userId   = (int) $req->auth['sub'];
+        $userId   = (int) $req->auth['user_id'];
 
         if (!in_array($type, ['restock', 'consumption', 'adjustment', 'count'], true)) {
             Response::error('Tipo de movimiento inválido', 422);
