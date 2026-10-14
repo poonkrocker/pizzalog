@@ -10,11 +10,12 @@ import type { ComboSelection, Product } from '../types';
 export interface CartLine {
   key: string;
   product_id: number;
-  name: string;          // ya incluye la variante: "Napolitana · Grande"
-  unit_price: number;    // precio de la variante si hay; si no, del producto
+  name: string;          // ya incluye la variante o mitad: "Pizza 1/2 Napolitana + 1/2 Fugazzeta"
+  unit_price: number;    // precio de la variante si hay; si no, del producto o mitad más cara
   quantity: number;
   image_url: string | null;
   variant_id?: number;
+  half_product_id?: number;
   combo_selections?: ComboSelection[];
   combo_labels?: string[]; // "Muzzarella", "Fugazzeta"… solo para mostrar
   notes?: string;
@@ -37,12 +38,13 @@ export function lineKey(
   product: Product,
   variantId: number | undefined,
   selections: ComboSelection[] | undefined,
+  halfProductId?: number,
 ): string {
   const combo = (selections ?? [])
     .map((s) => `${s.group_id}:${[...s.product_ids].sort((a, b) => a - b).join('-')}`)
     .sort()
     .join('|');
-  return `${product.id}/${variantId ?? 0}/${combo}`;
+  return `${product.id}/${variantId ?? 0}/${halfProductId ?? 0}/${combo}`;
 }
 
 /**

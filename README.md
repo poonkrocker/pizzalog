@@ -13,7 +13,7 @@ acción de actualizar (pull) desde el panel de Ferozo. Sin FTP.
 ├── backend/       API PHP             → api.pizzalog.net      (subdominio → /public_html/backend/public)
 │   ├── public/       único punto accesible por web
 │   ├── config/       config.php local (gitignoreado, NO se pisa con los pulls)
-│   ├── migrations/   correr en orden 000 → 010 (protegida por .htaccess)
+│   ├── migrations/   correr en orden 000 → 020 (protegida por .htaccess)
 │   └── tools/        reimportación de catálogo Loyverse (protegida)
 └── frontend/      Código fuente React (protegido por .htaccess; se compila
                    en desarrollo y sus builds se comitean en / y /app)
@@ -44,7 +44,7 @@ acción de actualizar (pull) desde el panel de Ferozo. Sin FTP.
 
 ## Base de datos
 
-Migraciones en `backend/migrations/`, correr **en orden (000 → 010)** en la
+Migraciones en `backend/migrations/`, correr **en orden (000 → 020)** en la
 base del negocio. `backend/tools/reimport_loyverse_variantes.sql` recarga el
 catálogo desde Loyverse con el modelo de variantes (una sola vez).
 

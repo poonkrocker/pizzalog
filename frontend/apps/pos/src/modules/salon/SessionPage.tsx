@@ -5,10 +5,10 @@ import { AddRoundSheet } from './AddRoundSheet';
 import { useCancelSession, useCloseSession, useRequestBill, useSession } from './hooks';
 
 const METHODS: { value: string; label: string }[] = [
-  { value: 'efectivo', label: 'Efectivo' },
-  { value: 'tarjeta', label: 'Tarjeta' },
-  { value: 'transferencia', label: 'Transferencia' },
-  { value: 'otro', label: 'Otro' },
+  { value: 'cash', label: 'Efectivo' },
+  { value: 'card', label: 'Tarjeta' },
+  { value: 'transfer', label: 'Transferencia' },
+  { value: 'other', label: 'Otro' },
 ];
 
 export function SessionPage() {

@@ -6,6 +6,7 @@ import { ProductGrid } from './ProductGrid';
 import { VariantPicker } from './VariantPicker';
 import { PriceKeypad } from './PriceKeypad';
 import { SendToAccountSheet } from './SendToAccountSheet';
+import { HalfHalfModal } from './HalfHalfModal';
 import { config } from '@/lib/config';
 import { saleTicket, comandaTicket } from '@/print/tickets';
 import { getPrinterSettings, isNative, tryPrint } from '@/print/printer';
@@ -20,10 +21,10 @@ const CHANNELS: { value: OrderChannel; icon: string; label: string }[] = [
 ];
 
 const METHODS: { value: string; label: string }[] = [
-  { value: 'efectivo', label: 'Efectivo' },
-  { value: 'tarjeta', label: 'Tarjeta' },
-  { value: 'transferencia', label: 'Transferencia' },
-  { value: 'otro', label: 'Otro' },
+  { value: 'cash', label: 'Efectivo' },
+  { value: 'card', label: 'Tarjeta' },
+  { value: 'transfer', label: 'Transferencia' },
+  { value: 'other', label: 'Otro' },
 ];
 
 export function SalePage() {
@@ -41,6 +42,7 @@ export function SalePage() {
   const [cart, setCart] = useState<CartLine[]>([]);
   const [variantFor, setVariantFor] = useState<Product | null>(null);
   const [keypadFor, setKeypadFor] = useState<Product | null>(null);
+  const [showHalfHalf, setShowHalfHalf] = useState(false);
   const [paying, setPaying] = useState(false);
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<{ kind: 'online' | 'queued' | 'round'; detail?: string } | null>(null);
@@ -200,6 +202,14 @@ export function SalePage() {
 
       <div className="sale__main">
         <div className="cat-tabs">
+          <button
+            type="button"
+            className="cat-tab"
+            style={{ background: 'var(--c-accent, #e63946)', color: '#fff', fontWeight: 700 }}
+            onClick={() => setShowHalfHalf(true)}
+          >
+            🍕 Mitad y Mitad
+          </button>
           {categories.map((c) => (
             <button
               key={c.id}
@@ -269,6 +279,22 @@ export function SalePage() {
           product={keypadFor}
           onConfirm={(amount) => confirmOpenPrice(keypadFor, amount)}
           onClose={() => setKeypadFor(null)}
+        />
+      )}
+
+      {showHalfHalf && (
+        <HalfHalfModal
+          products={products}
+          onAdd={({ product, secondProduct, unitPrice, label }) => {
+            addLine({
+              key: `half-${product.id}-${secondProduct.id}-${uuid()}`,
+              product,
+              quantity: 1,
+              unitPrice,
+              label,
+            });
+          }}
+          onClose={() => setShowHalfHalf(false)}
         />
       )}
 

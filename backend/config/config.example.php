@@ -43,7 +43,10 @@ return [
         // Orígenes autorizados a consumir la API.
         'allowed_origins' => [
             'https://app.pizzalog.net',    // panel de administración / TPV web
-            'http://localhost:5173',       // desarrollo local (Vite)
+            'https://pizzalog.net',        // La Carta pública (pizzalog.net/{slug})
+            'http://localhost:5173',       // desarrollo local panel (Vite)
+            'http://localhost:5174',       // desarrollo local TPV (Vite)
+            'http://localhost:5175',       // desarrollo local carta (Vite)
             'http://localhost',            // app Android (Capacitor)
             'https://localhost',           // app Android (Capacitor, scheme https)
             'capacitor://localhost',       // app Android (Capacitor, scheme nativo)

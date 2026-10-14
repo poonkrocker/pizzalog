@@ -83,7 +83,7 @@ class SaleController
             Response::error('La venta debe tener al menos un ítem', 422);
         }
 
-        $paymentMethod = (string) $req->input('payment_method', 'cash');
+        $paymentMethod = self::normalizePaymentMethod((string) $req->input('payment_method', 'cash'));
         if (!in_array($paymentMethod, self::PAYMENT_METHODS, true)) {
             Response::error('Medio de pago inválido', 422);
         }
@@ -109,6 +109,9 @@ class SaleController
         $cashSessionId = ($cashSessionId === null || $cashSessionId === '') ? null : (int) $cashSessionId;
         if ($cashSessionId !== null && !$this->openSessionBelongs($bid, $cashSessionId)) {
             Response::error('La sesión de caja no existe o está cerrada', 422);
+        }
+        if ($cashSessionId === null) {
+            $cashSessionId = $this->findCurrentOpenCashSessionId($bid);
         }
 
         // Canal de la venta (mostrador, para llevar, delivery propio…).
@@ -180,13 +183,16 @@ class SaleController
             $lineTotal = round($unitPrice * $qty, 2);
             $subtotal += $lineTotal;
             $lines[]   = [
-                'product_id'   => $pid,
-                'variant_id'   => $variantId,
-                'product_name' => $productName,
-                'unit_price'   => $unitPrice,
-                'quantity'     => $qty,
-                'line_total'   => $lineTotal,
-                'track_stock'  => (int) $product['track_stock'] === 1,
+                'product_id'       => $pid,
+                'variant_id'       => $variantId,
+                'product_name'     => $productName,
+                'unit_price'       => $unitPrice,
+                'quantity'         => $qty,
+                'line_total'       => $lineTotal,
+                'track_stock'      => (int) $product['track_stock'] === 1,
+                'combo_selections' => !empty($it['combo_selections']) && is_array($it['combo_selections'])
+                    ? $it['combo_selections']
+                    : null,
             ];
         }
         if ($discount > round($subtotal, 2)) {
@@ -370,6 +376,28 @@ class SaleController
             $map[(int) $row['id']] = $row;
         }
         return $map;
+    }
+
+    public static function normalizePaymentMethod(?string $method): string
+    {
+        return match (strtolower(trim((string) $method))) {
+            'efectivo', 'cash'                  => 'cash',
+            'tarjeta', 'card'                   => 'card',
+            'transferencia', 'transfer'         => 'transfer',
+            'mp', 'mercadopago', 'mercado_pago' => 'mp',
+            'otro', 'other'                     => 'other',
+            default                             => 'other',
+        };
+    }
+
+    private function findCurrentOpenCashSessionId(int $bid): ?int
+    {
+        $stmt = Database::pdo()->prepare(
+            'SELECT id FROM cash_sessions WHERE business_id = ? AND status = "open" ORDER BY opened_at DESC LIMIT 1'
+        );
+        $stmt->execute([$bid]);
+        $id = $stmt->fetchColumn();
+        return $id !== false ? (int) $id : null;
     }
 
     private function openSessionBelongs(int $bid, int $sessionId): bool

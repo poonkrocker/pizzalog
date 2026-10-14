@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { BusinessTheme, Menu, Product } from './types';
-import { fetchMenu, money, routeFromPath } from './lib/api';
+import { fetchMenu, formatWhatsAppNumber, money, routeFromPath } from './lib/api';
 import { formatHours } from './lib/hours';
 import { useCart } from './lib/cart';
 import { SocialIcon, socialLabel } from './components/Icons';
@@ -309,7 +309,7 @@ export function App() {
         {b.phone && (
           <a
             className="guest__book"
-            href={`https://wa.me/${b.phone.replace(/\D/g, '')}`}
+            href={`https://wa.me/${formatWhatsAppNumber(b.phone)}`}
             target="_blank"
             rel="noreferrer"
           >
@@ -339,6 +339,9 @@ export function App() {
       {open && (
         <ProductModal
           product={open}
+          combinableProducts={(menu?.products ?? []).filter(
+            (p) => p.is_combinable === 1 || (open.category_id !== null && p.category_id === open.category_id),
+          )}
           canOrder={canOrder}
           onAdd={(line, qty) => cart.add(line, qty)}
           onClose={() => setOpen(null)}

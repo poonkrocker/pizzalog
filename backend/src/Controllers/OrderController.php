@@ -100,11 +100,10 @@ class OrderController
             Response::error('Canal inválido', 422);
         }
 
-        $paymentMethod = $req->input('payment_method');
-        if ($paymentMethod !== null && $paymentMethod !== '' && !in_array($paymentMethod, self::PAYMENT_METHODS, true)) {
-            Response::error('Medio de pago inválido', 422);
-        }
-        $paymentMethod = ($paymentMethod === '' ? null : $paymentMethod);
+        $rawMethod = $req->input('payment_method');
+        $paymentMethod = ($rawMethod !== null && $rawMethod !== '')
+            ? SaleController::normalizePaymentMethod((string) $rawMethod)
+            : null;
 
         $deliveryFee = $req->input('delivery_fee', 0);
         if (!is_numeric($deliveryFee) || (float) $deliveryFee < 0) {
@@ -230,10 +229,8 @@ class OrderController
             Response::error('El pedido ya fue concretado', 422);
         }
 
-        $paymentMethod = (string) ($req->input('payment_method') ?: $order['payment_method'] ?: 'cash');
-        if (!in_array($paymentMethod, self::PAYMENT_METHODS, true)) {
-            Response::error('Medio de pago inválido', 422);
-        }
+        $rawMethod     = $req->input('payment_method') ?: $order['payment_method'] ?: 'cash';
+        $paymentMethod = SaleController::normalizePaymentMethod((string) $rawMethod);
 
         // Cargar ítems del pedido + el track_stock actual de cada producto.
         $stmt = Database::pdo()->prepare(
@@ -270,11 +267,21 @@ class OrderController
         }
 
         $pdo = Database::pdo();
+        $cashSessionId = null;
+        if ($paymentMethod === 'cash') {
+            $csStmt = $pdo->prepare(
+                'SELECT id FROM cash_sessions WHERE business_id = ? AND status = "open" ORDER BY opened_at DESC LIMIT 1'
+            );
+            $csStmt->execute([$bid]);
+            $csId = $csStmt->fetchColumn();
+            $cashSessionId = $csId !== false ? (int) $csId : null;
+        }
+
         $pdo->beginTransaction();
         try {
             $saleId = $this->sales->create(
                 $bid, $userId, $lines, $paymentMethod, 0.0,
-                $order['channel'], null, null,
+                $order['channel'], $cashSessionId, null,
                 'Pedido #' . $order['order_number']
             );
 

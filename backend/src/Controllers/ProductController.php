@@ -15,7 +15,7 @@ class ProductController
     /** Columnas del producto para el panel (gestión interna: se ve todo siempre). */
     private const FIELDS = 'id, category_id, sort_order, name, description, price, cost, image_url,
                             track_stock, stock_quantity, stock_min, is_active, has_variants, is_combo,
-                            is_open_price, show_online, is_available, is_secret, is_vegan_opt, badge_text,
+                            is_open_price, is_combinable, show_online, is_available, is_secret, is_vegan_opt, badge_text,
                             visible_days, visible_from, visible_until';
 
     private IngredientRepository $ingredients;
@@ -100,15 +100,15 @@ class ProductController
             $stmt = $pdo->prepare(
                 'INSERT INTO products
                     (business_id, category_id, sort_order, name, description, price, cost,
-                     track_stock, stock_quantity, stock_min, is_open_price, image_url,
+                     track_stock, stock_quantity, stock_min, is_open_price, is_combinable, image_url,
                      show_online, is_available, is_secret, is_vegan_opt, badge_text,
                      visible_days, visible_from, visible_until)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $stmt->execute([
                 $bid, $d['category_id'], $sortOrder, $d['name'], $d['description'], $d['price'],
                 $d['cost'], $d['track_stock'], $d['stock_quantity'], $d['stock_min'],
-                $d['is_open_price'], $d['image_url'],
+                $d['is_open_price'], $d['is_combinable'], $d['image_url'],
                 $d['show_online'], $d['is_available'], $d['is_secret'], $d['is_vegan_opt'], $d['badge_text'],
                 $d['visible_days'], $d['visible_from'], $d['visible_until'],
             ]);
@@ -140,14 +140,14 @@ class ProductController
             $stmt = $pdo->prepare(
                 'UPDATE products
                     SET category_id = ?, name = ?, description = ?, price = ?, cost = ?,
-                        track_stock = ?, stock_quantity = ?, stock_min = ?, is_open_price = ?,
+                        track_stock = ?, stock_quantity = ?, stock_min = ?, is_open_price = ?, is_combinable = ?,
                         image_url = ?, show_online = ?, is_available = ?, is_secret = ?, is_vegan_opt = ?,
                         badge_text = ?, visible_days = ?, visible_from = ?, visible_until = ?
                   WHERE id = ? AND business_id = ?'
             );
             $stmt->execute([
                 $d['category_id'], $d['name'], $d['description'], $d['price'], $d['cost'],
-                $d['track_stock'], $d['stock_quantity'], $d['stock_min'], $d['is_open_price'],
+                $d['track_stock'], $d['stock_quantity'], $d['stock_min'], $d['is_open_price'], $d['is_combinable'],
                 $d['image_url'], $d['show_online'], $d['is_available'], $d['is_secret'], $d['is_vegan_opt'],
                 $d['badge_text'], $d['visible_days'], $d['visible_from'], $d['visible_until'],
                 $id, $bid,
@@ -275,7 +275,7 @@ class ProductController
         $p['visible_until'] = $p['visible_until'] !== null ? substr((string) $p['visible_until'], 0, 5) : null;
 
         // Flags como int para que el front pueda comparar con === 1 sin dudas.
-        foreach (['is_active', 'has_variants', 'is_combo', 'is_open_price',
+        foreach (['is_active', 'has_variants', 'is_combo', 'is_open_price', 'is_combinable',
                   'show_online', 'is_available', 'is_secret', 'is_vegan_opt'] as $flag) {
             if (isset($p[$flag])) {
                 $p[$flag] = (int) $p[$flag];
@@ -323,6 +323,7 @@ class ProductController
             'stock_quantity' => (int) $req->input('stock_quantity', 0),
             'stock_min'      => (int) $req->input('stock_min', 0),
             'is_open_price'  => (int) (bool) $req->input('is_open_price', false),
+            'is_combinable'  => (int) (bool) $req->input('is_combinable', false),
             'image_url'      => substr(trim((string) $req->input('image_url', '')), 0, 300) ?: null,
             'ingredients'    => is_array($ingredients) ? $ingredients : [],
             'show_online'    => (int) (bool) $req->input('show_online', true),

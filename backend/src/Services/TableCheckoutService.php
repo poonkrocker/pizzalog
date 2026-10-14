@@ -1,6 +1,7 @@
 <?php
 namespace Pizzalog\Services;
 
+use Pizzalog\Controllers\SaleController;
 use Pizzalog\Core\Database;
 use Pizzalog\Repositories\TableSessionRepository;
 
@@ -46,6 +47,16 @@ class TableCheckoutService
             : $this->buildSplitGroups($items, $splits);
 
         $pdo = Database::pdo();
+
+        if ($cashSessionId === null) {
+            $csStmt = $pdo->prepare(
+                'SELECT id FROM cash_sessions WHERE business_id = ? AND status = "open" ORDER BY opened_at DESC LIMIT 1'
+            );
+            $csStmt->execute([$bid]);
+            $csId = $csStmt->fetchColumn();
+            $cashSessionId = $csId !== false ? (int) $csId : null;
+        }
+
         $pdo->beginTransaction();
         try {
             $saleIds = [];
@@ -62,8 +73,10 @@ class TableCheckoutService
                     ];
                 }, $g['items']);
 
+                $normalizedMethod = SaleController::normalizePaymentMethod($g['payment_method']);
+
                 $saleIds[] = $this->sales->create(
-                    $bid, $userId, $lines, $g['payment_method'],
+                    $bid, $userId, $lines, $normalizedMethod,
                     0.0, 'dine_in', $cashSessionId, null, $note, $sessionId
                 );
             }

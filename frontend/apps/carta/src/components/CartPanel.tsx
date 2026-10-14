@@ -103,7 +103,9 @@ export function CartPanel({
           product_id: l.product_id,
           quantity: l.quantity,
           ...(l.variant_id !== undefined ? { variant_id: l.variant_id } : {}),
+          ...(l.half_product_id !== undefined ? { half_product_id: l.half_product_id } : {}),
           ...(l.combo_selections ? { combo_selections: l.combo_selections } : {}),
+          ...(l.notes ? { notes: l.notes } : {}),
         })),
       });
       setDone(res);

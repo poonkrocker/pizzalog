@@ -10,7 +10,10 @@ class Cors
     {
         $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
 
-        if ($origin !== '' && in_array($origin, $allowed, true)) {
+        $isPizzalogDomain = $origin !== '' && (bool) preg_match('/^https?:\/\/(?:[a-z0-9-]+\.)*pizzalog\.net(?::\d+)?$/i', $origin);
+        $isPublicEndpoint = str_contains($_SERVER['REQUEST_URI'] ?? '', '/public/');
+
+        if ($origin !== '' && (in_array($origin, $allowed, true) || $isPizzalogDomain || $isPublicEndpoint)) {
             header("Access-Control-Allow-Origin: $origin");
             header('Vary: Origin');
         }

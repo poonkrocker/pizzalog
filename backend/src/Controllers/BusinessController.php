@@ -146,13 +146,15 @@ final class BusinessController
             'UPDATE businesses
                 SET name = ?, slug = ?, phone = ?, address = ?, google_maps_url = ?,
                     description = ?, logo_url = ?, theme = ?, accepts_online_orders = ?,
-                    transfer_alias = ?, card_surcharge_pct = ?
+                    transfer_alias = ?, card_surcharge_pct = ?,
+                    pay_methods_pickup = ?, pay_methods_delivery = ?
               WHERE id = ?'
         )->execute([
             $name, $slug, $opt('phone'), $opt('address'), $maps !== '' ? $maps : null,
             $opt('description'), $opt('logo_url'), $theme,
             (int) (bool) $req->input('accepts_online_orders', true),
             $transferAlias !== '' ? $transferAlias : null, $surcharge,
+            $this->encodeMethods($pickup), $this->encodeMethods($delivery),
             $bid,
         ]);
 

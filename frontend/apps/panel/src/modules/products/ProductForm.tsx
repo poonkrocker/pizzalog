@@ -34,6 +34,7 @@ export function ProductForm({ product, categories, onDone }: Props) {
   );
   const [trackStock, setTrackStock] = useState(Boolean(product?.track_stock));
   const [isOpenPrice, setIsOpenPrice] = useState(Boolean(product?.is_open_price));
+  const [isCombinable, setIsCombinable] = useState(Boolean(product?.is_combinable));
   const [error, setError] = useState<string | null>(null);
 
   // Visibilidad en la carta online (migración 011).
@@ -84,6 +85,7 @@ export function ProductForm({ product, categories, onDone }: Props) {
           category_id: categoryId === '' ? null : Number(categoryId),
           track_stock: trackStock ? 1 : 0,
           is_open_price: isOpenPrice ? 1 : 0,
+          is_combinable: isCombinable ? 1 : 0,
           image_url: imageUrl,
           show_online: showOnline ? 1 : 0,
           is_available: isAvailable ? 1 : 0,
@@ -240,6 +242,15 @@ export function ProductForm({ product, categories, onDone }: Props) {
           checked={isVeganOpt}
           onChange={(e) => setIsVeganOpt(e.target.checked)}
         />
+
+        <Checkbox
+          label="Pizza combinable (Mitad y Mitad)"
+          checked={isCombinable}
+          onChange={(e) => setIsCombinable(e.target.checked)}
+        />
+        <p className="field__hint">
+          Permite combinar este producto con otro sabor en la Carta Online y en el TPV, cobrando la mitad más cara.
+        </p>
 
         <Field
           label="Badge"

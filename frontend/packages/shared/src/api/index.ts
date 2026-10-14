@@ -12,6 +12,9 @@ import { combosApi } from './combos';
 import { uploadsApi } from './uploads';
 import { tablesApi } from './tables';
 import { kitchenApi } from './kitchen';
+import { ordersApi } from './orders';
+import { cashApi } from './cash';
+import { analyticsApi } from './analytics';
 
 // Crea la fachada de la API. Cada dominio es un módulo independiente: sumar
 // uno nuevo (cash, inventory, fiscal...) es agregar su archivo y una línea
@@ -33,6 +36,9 @@ export function createApi(config: ApiClientConfig) {
     customers: customersApi(client),
     tables: tablesApi(client),
     kitchen: kitchenApi(client),
+    orders: ordersApi(client),
+    cash: cashApi(client),
+    analytics: analyticsApi(client),
   };
 }
 
@@ -42,6 +48,8 @@ export { ApiClient, ApiError } from './client';
 export type { ApiClientConfig } from './client';
 export type { RoundItemInput, CloseSplit } from './tables';
 export type { SalesQuery } from './sales';
+export type { OrdersQuery } from './orders';
+export type { AnalyticsQuery } from './analytics';
 export type { MovementInput } from './supplies';
 export type { OptionInput, VariantUpdateInput } from './variants';
 export type { BusinessUpdateInput, BusinessHoursResponse } from './business';

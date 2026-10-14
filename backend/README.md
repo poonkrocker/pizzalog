@@ -95,10 +95,20 @@ migration_007_barras.sql           <- barras (varias cuentas por lugar) y nombre
 migration_008_canales_tpv.sql      <- canales de venta del TPV: para llevar y delivery
 migration_009_perfil_negocio.sql   <- perfil público: foto, bio, redes, ubicación
 migration_010_tema_carta.sql       <- tema de la carta: colores y patrón por negocio
+migration_011_visibilidad_productos.sql <- visibilidad en carta general / menú secreto
+migration_012_horario_atencion.sql     <- horarios de apertura y turnos semanales
+migration_013_combos.sql               <- combos y promociones con grupos y selección
+migration_014_orden_productos.sql      <- ordenamiento personalizado (sort_order)
+migration_015_redes_sociales.sql       <- enlaces a Instagram, TikTok, Facebook y web
+migration_016_ubicacion_google_maps.sql <- coordenadas y link de Google Maps
+migration_017_datos_pago_carta.sql     <- alias, CBU y métodos de pago aceptados
+migration_018_tables_kind.sql          <- tipo de mesa (table / bar) para salón
+migration_019_disponibilidad_manual.sql <- switch de disponibilidad manual (abierto/cerrado)
+migration_020_pizzas_mitad.sql         <- pizzas combinables / Mitad y Mitad
 ```
 
-> El orden importa: las migraciones 001–004 hacen `ALTER`/`CREATE` que dependen
-> de las tablas base. No saltees la 002.
+> El orden importa: correr **000 → 020 en estricto orden correlativo**. Todas son
+> acumulativas e indispensables para que el backend y frontend funcionen sin errores de columnas faltantes.
 
 ### 3. Configuración
 Copiá `config/config.example.php` a `config/config.php` y completá:

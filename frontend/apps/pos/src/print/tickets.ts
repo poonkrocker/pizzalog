@@ -84,7 +84,9 @@ function paymentName(m: string): string {
     cash: 'Efectivo',
     card: 'Tarjeta',
     transfer: 'Transferencia',
+    mp: 'Mercado Pago',
     mercadopago: 'Mercado Pago',
+    other: 'Otro',
     otro: 'Otro',
   };
   return names[m] ?? m;

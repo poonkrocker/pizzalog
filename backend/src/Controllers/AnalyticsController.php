@@ -64,7 +64,7 @@ class AnalyticsController
             $count = (int) $r['c'];
             $rev   = (float) $r['r'];
             $byChannel[] = ['channel' => $r['channel'], 'sales_count' => $count, 'revenue' => $rev];
-            $bucket = $r['channel'] === 'counter' ? 'local' : 'delivery';
+            $bucket = in_array($r['channel'], ['counter', 'takeaway', 'dine_in'], true) ? 'local' : 'delivery';
             ${$bucket}['sales_count'] += $count;
             ${$bucket}['revenue']     += $rev;
         }

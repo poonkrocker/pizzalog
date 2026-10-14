@@ -38,6 +38,7 @@ export interface Product {
   has_variants: number;
   is_combo: number;
   is_open_price: number;
+  is_combinable?: number;
   is_vegan_opt: number;
   badge_text: string | null;
   is_available_now: boolean;
@@ -117,6 +118,7 @@ export interface OrderItemInput {
   product_id: number;
   quantity: number;
   variant_id?: number;
+  half_product_id?: number;
   notes?: string;
   combo_selections?: ComboSelection[];
 }

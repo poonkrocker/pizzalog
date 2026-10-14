@@ -37,6 +37,7 @@ export interface Product {
   has_variants: number;
   is_combo: number;
   is_open_price: number;
+  is_combinable?: number;
   // Visibilidad (migración 011)
   show_online: number;
   is_available: number;
@@ -372,3 +373,105 @@ export interface Customer {
   notes: string | null;
   created_at: string;
 }
+
+// --- Pedidos (Delivery / Takeaway) ----------------------------------------
+
+export type OrderStatus =
+  | 'received'
+  | 'confirmed'
+  | 'preparing'
+  | 'on_the_way'
+  | 'delivered'
+  | 'cancelled';
+
+export interface OrderItem {
+  id: number;
+  order_id: number;
+  product_id: number | null;
+  product_name: string;
+  unit_price: number;
+  quantity: number;
+  line_total: number;
+  notes: string | null;
+}
+
+export interface Order {
+  id: number;
+  order_number: number;
+  channel: SaleChannel;
+  status: OrderStatus;
+  customer_name: string | null;
+  customer_phone: string | null;
+  address: string | null;
+  delivery_fee: number;
+  items_total: number;
+  total: number;
+  payment_method: string | null;
+  notes: string | null;
+  sale_id: number | null;
+  created_at: string;
+  items?: OrderItem[];
+}
+
+// --- Caja y Arqueo --------------------------------------------------------
+
+export type CashSessionStatus = 'open' | 'closed';
+export type CashMovementType = 'in' | 'out';
+
+export interface CashMovement {
+  id: number;
+  cash_session_id: number;
+  type: CashMovementType;
+  amount: number;
+  reason: string | null;
+  created_by?: number;
+  created_at: string;
+}
+
+export interface CashSession {
+  id: number;
+  opened_by: number;
+  opened_by_name?: string | null;
+  opened_at: string;
+  closed_at: string | null;
+  opening_amount: number;
+  closing_amount: number | null;
+  expected_amount: number | null;
+  difference: number | null;
+  status: CashSessionStatus;
+  note: string | null;
+  cash_sales?: number;
+  movements_in?: number;
+  movements_out?: number;
+  sales_by_method?: Record<string, number>;
+  movements?: CashMovement[];
+}
+
+// --- Analytics ------------------------------------------------------------
+
+export interface AnalyticsSummary {
+  from: string;
+  to: string;
+  sales_count: number;
+  revenue: number;
+  discounts: number;
+  avg_ticket: number;
+  units_sold: number;
+  by_channel: Array<{ channel: string; sales_count: number; revenue: number }>;
+  delivery: { sales_count: number; revenue: number };
+  local: { sales_count: number; revenue: number };
+}
+
+export interface AnalyticsTopProduct {
+  product_id: number | null;
+  name: string;
+  units: number;
+  revenue: number;
+}
+
+export interface AnalyticsSalesPoint {
+  day: string;
+  sales_count: number;
+  revenue: number;
+}
+

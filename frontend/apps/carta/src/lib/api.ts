@@ -74,3 +74,16 @@ export function createOrder(slug: string, input: CreateOrderInput): Promise<Crea
 
 export const money = (n: number) =>
   '$' + n.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+
+export function formatWhatsAppNumber(phone: string): string {
+  let num = phone.replace(/\D/g, '');
+  if (!num) return '';
+  if (num.startsWith('549') && num.length >= 12) return num;
+  if (num.startsWith('54') && num.length >= 12) return '549' + num.slice(2);
+  if (num.startsWith('0')) num = num.slice(1);
+  if (num.length === 12 && /^(\d{2,4})15(\d{6,8})$/.test(num)) {
+    num = num.replace(/^(\d{2,4})15(\d{6,8})$/, '$1$2');
+  }
+  if (num.length === 10) return '549' + num;
+  return num;
+}

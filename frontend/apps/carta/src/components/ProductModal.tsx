@@ -5,6 +5,7 @@ import { lineKey, type CartLine } from '../lib/cart';
 
 interface Props {
   product: Product;
+  combinableProducts?: Product[];
   /** En modo salón no se pide: el modal es solo de lectura. */
   canOrder: boolean;
   onAdd: (line: Omit<CartLine, 'quantity'>, qty: number) => void;
@@ -21,15 +22,16 @@ function Placeholder({ name }: { name: string }) {
 }
 
 /**
- * Ficha del producto. Tres formas según qué sea:
+ * Ficha del producto. Cuatro formas según qué sea:
  *  - simple  → precio y listo
  *  - variantes → elegís una (obligatorio; el back rechaza si no mandás variant_id)
+ *  - mitad y mitad → elegís 2° sabor entre pizzas combinables (cobra la más cara)
  *  - combo   → stepper: un paso por grupo, "elegí 3 pizzas" con contador
  *
  * El precio del combo es el del combo, no la suma de lo elegido: por eso los
  * ítems del combo se muestran sin precio, para que nadie sume de más.
  */
-export function ProductModal({ product, canOrder, onAdd, onClose }: Props) {
+export function ProductModal({ product, combinableProducts, canOrder, onAdd, onClose }: Props) {
   const variants = useMemo(
     () => (product.variants ?? []).filter((v) => v.is_active === 1),
     [product],
@@ -41,13 +43,27 @@ export function ProductModal({ product, canOrder, onAdd, onClose }: Props) {
   );
   const [picks, setPicks] = useState<Record<number, number[]>>({});
   const [qty, setQty] = useState(1);
+  const [isHalfHalf, setIsHalfHalf] = useState(false);
+  const [secondHalfId, setSecondHalfId] = useState<number | undefined>(undefined);
+
+  const availableHalves = useMemo(() => {
+    return (combinableProducts ?? []).filter((p) => p.id !== product.id && p.is_available_now);
+  }, [combinableProducts, product.id]);
+
+  const secondHalf = useMemo(() => {
+    return availableHalves.find((p) => p.id === secondHalfId);
+  }, [availableHalves, secondHalfId]);
 
   const unitPrice = useMemo(() => {
+    let base = product.price;
     if (variantId !== undefined) {
-      return variants.find((v) => v.id === variantId)?.price ?? product.price;
+      base = variants.find((v) => v.id === variantId)?.price ?? product.price;
     }
-    return product.price;
-  }, [variantId, variants, product.price]);
+    if (isHalfHalf && secondHalf) {
+      return Math.max(base, secondHalf.price);
+    }
+    return base;
+  }, [variantId, variants, product.price, isHalfHalf, secondHalf]);
 
   function togglePick(group: { id: number; select_count: number }, productId: number) {
     setPicks((prev) => {
@@ -67,7 +83,8 @@ export function ProductModal({ product, canOrder, onAdd, onClose }: Props) {
 
   const missing = groups.filter((g) => (picks[g.id] ?? []).length !== g.select_count);
   const needsVariant = variants.length > 0 && variantId === undefined;
-  const blocked = !product.is_available_now || needsVariant || missing.length > 0;
+  const needsSecondHalf = isHalfHalf && !secondHalfId;
+  const blocked = !product.is_available_now || needsVariant || missing.length > 0 || needsSecondHalf;
 
   function add() {
     if (blocked) return;
@@ -87,12 +104,19 @@ export function ProductModal({ product, canOrder, onAdd, onClose }: Props) {
         : undefined;
 
     const variantLabel = variants.find((v) => v.id === variantId)?.label;
+    const effectiveName =
+      isHalfHalf && secondHalf
+        ? `Pizza 1/2 ${product.name} + 1/2 ${secondHalf.name}`
+        : variantLabel
+        ? `${product.name} · ${variantLabel}`
+        : product.name;
 
     onAdd(
       {
-        key: lineKey(product, variantId, selections),
+        key: lineKey(product, variantId, selections, isHalfHalf ? secondHalf?.id : undefined),
         product_id: product.id,
-        name: variantLabel ? `${product.name} · ${variantLabel}` : product.name,
+        half_product_id: isHalfHalf ? secondHalf?.id : undefined,
+        name: effectiveName,
         unit_price: unitPrice,
         image_url: product.image_url,
         ...(variantId !== undefined ? { variant_id: variantId } : {}),
@@ -181,9 +205,42 @@ export function ProductModal({ product, canOrder, onAdd, onClose }: Props) {
                     <span className="pick__label">{i.name}</span>
                   </label>
                 ))}
-              </section>
-            );
-          })}
+          {/* --- Mitad y Mitad: si hay sabores combinables disponibles --- */}
+          {availableHalves.length > 0 && groups.length === 0 && (
+            <section className="comments" style={{ marginTop: '1rem', borderTop: '1px dashed var(--c-border, #ddd)', paddingTop: '0.75rem' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', cursor: 'pointer', fontWeight: 600 }}>
+                <input
+                  type="checkbox"
+                  checked={isHalfHalf}
+                  onChange={(e) => {
+                    setIsHalfHalf(e.target.checked);
+                    if (!e.target.checked) setSecondHalfId(undefined);
+                  }}
+                />
+                <span>🍕 ¿Hacerla Mitad y Mitad?</span>
+              </label>
+
+              {isHalfHalf && (
+                <div style={{ marginTop: '0.75rem', padding: '0.6rem 0.8rem', background: 'var(--c-surface, #f9f9f9)', borderRadius: '6px' }}>
+                  <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.8rem', color: '#666' }}>
+                    Elegí el 2° sabor (se cobra el precio de la mitad más cara):
+                  </p>
+                  <select
+                    value={secondHalfId ?? ''}
+                    onChange={(e) => setSecondHalfId(e.target.value ? Number(e.target.value) : undefined)}
+                    style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #ccc', fontSize: '0.85rem' }}
+                  >
+                    <option value="">-- Seleccioná el segundo sabor --</option>
+                    {availableHalves.map((h) => (
+                      <option key={h.id} value={h.id}>
+                        1/2 {h.name} ({money(h.price)})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </section>
+          )}
 
           {canOrder && product.is_available_now && (
             <div className="addbar">

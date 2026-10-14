@@ -36,7 +36,7 @@ class PublicController
                                      pay_methods_pickup, pay_methods_delivery';
 
     private const PRODUCT_FIELDS = 'id, category_id, sort_order, name, description, price, image_url,
-                                    has_variants, is_combo, is_open_price, is_vegan_opt, badge_text,
+                                    has_variants, is_combo, is_open_price, is_combinable, is_vegan_opt, badge_text,
                                     visible_days, visible_from, visible_until';
 
     private OrderService $orders;
@@ -193,7 +193,9 @@ class PublicController
         );
 
         $paymentMethod = $req->input('payment_method');
-        $paymentMethod = ($paymentMethod === '' ? null : $paymentMethod);
+        $paymentMethod = ($paymentMethod === '' || $paymentMethod === null)
+            ? null
+            : SaleController::normalizePaymentMethod((string) $paymentMethod);
         if ($paymentMethod !== null) {
             if (!in_array($paymentMethod, self::PAYMENT_METHODS, true)) {
                 Response::error('Medio de pago inválido', 422);
@@ -216,6 +218,9 @@ class PublicController
                 Response::error('Cada ítem necesita product_id y quantity mayor a 0', 422);
             }
             $productIds[] = $pid;
+            if (!empty($it['half_product_id'])) {
+                $productIds[] = (int) $it['half_product_id'];
+            }
         }
 
         $products = $this->loadOrderableProducts($bid, array_values(array_unique($productIds)));
@@ -257,6 +262,14 @@ class PublicController
                 $unitPrice = $variant['price'];
             } elseif ((int) $product['has_variants'] === 1) {
                 Response::error(sprintf('Elegí una opción de "%s"', $name), 422);
+            }
+
+            // Mitad y Mitad (Half & Half)
+            $halfId = !empty($it['half_product_id']) ? (int) $it['half_product_id'] : null;
+            if ($halfId !== null && isset($products[$halfId])) {
+                $halfProd  = $products[$halfId];
+                $name      = 'Pizza 1/2 ' . $product['name'] . ' + 1/2 ' . $halfProd['name'];
+                $unitPrice = max($unitPrice, (float) $halfProd['price']);
             }
 
             $lineTotal = round($unitPrice * $qty, 2);
@@ -413,7 +426,7 @@ class PublicController
     /** Arma el link wa.me con el pedido pre-cargado. Usa el teléfono del local. */
     private function whatsappUrl(array $business, array $order): ?string
     {
-        $number = preg_replace('/\D+/', '', (string) $business['phone']);
+        $number = self::formatWhatsAppNumber((string) ($business['phone'] ?? ''));
         if ($number === null || $number === '') {
             return null;
         }
@@ -436,5 +449,30 @@ class PublicController
         $lines[] = 'Pedido #' . $order['order_number'];
 
         return 'https://wa.me/' . $number . '?text=' . rawurlencode(implode("\n", $lines));
+    }
+
+    public static function formatWhatsAppNumber(?string $raw): ?string
+    {
+        if ($raw === null) return null;
+        $num = preg_replace('/\D+/', '', $raw);
+        if ($num === '') return null;
+
+        if (str_starts_with($num, '549') && strlen($num) >= 12) {
+            return $num;
+        }
+        if (str_starts_with($num, '54') && strlen($num) >= 12) {
+            return '549' . substr($num, 2);
+        }
+        if (str_starts_with($num, '0')) {
+            $num = substr($num, 1);
+        }
+        if (strlen($num) === 12 && preg_match('/^(\d{2,4})15(\d{6,8})$/', $num, $m)) {
+            $num = $m[1] . $m[2];
+        }
+        if (strlen($num) === 10) {
+            return '549' . $num;
+        }
+
+        return $num;
     }
 }

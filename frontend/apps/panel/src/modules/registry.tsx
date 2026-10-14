@@ -1,9 +1,11 @@
 import type { Role } from '@pizzalog/shared';
 import type { ModuleDef } from './types';
 import { DashboardPage } from './dashboard/DashboardPage';
+import { OrdersPage } from './orders/OrdersPage';
 import { ProductsPage } from './products/ProductsPage';
 import { CategoriesPage } from './categories/CategoriesPage';
 import { SalesPage } from './sales/SalesPage';
+import { CashPage } from './cash/CashPage';
 import { SalonPage } from './salon/SalonPage';
 import { SuppliesPage } from './supplies/SuppliesPage';
 import { SuppliersPage } from './suppliers/SuppliersPage';
@@ -23,6 +25,14 @@ export const modules: ModuleDef[] = [
     icon: '\u25E7',
   },
   {
+    id: 'orders',
+    title: 'Pedidos',
+    path: 'pedidos',
+    roles: ['admin', 'manager'],
+    element: <OrdersPage />,
+    icon: '\u25C8',
+  },
+  {
     id: 'products',
     title: 'Productos',
     path: 'productos',
@@ -37,6 +47,14 @@ export const modules: ModuleDef[] = [
     roles: ['admin', 'manager'],
     element: <SalesPage />,
     icon: '\u25B0',
+  },
+  {
+    id: 'cash',
+    title: 'Caja',
+    path: 'caja',
+    roles: ['admin', 'manager'],
+    element: <CashPage />,
+    icon: '\u25A5',
   },
   {
     id: 'salon',
