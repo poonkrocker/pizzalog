@@ -28,6 +28,8 @@ export function ordersApi(client: ApiClient) {
       client.post<{ order: Order }>('/orders', data),
     updateStatus: (id: number, status: OrderStatus) =>
       client.put<{ order: Order }>(`/orders/${id}/status`, { status }),
+    assignDriver: (id: number, delivery_driver_id: number | null) =>
+      client.put<{ order: Order }>(`/orders/${id}/assign-driver`, { delivery_driver_id }),
     complete: (id: number, payment_method?: string) =>
       client.post<{ order: Order; sale?: Sale }>(`/orders/${id}/complete`, { payment_method }),
     cancel: (id: number) =>

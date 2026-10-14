@@ -156,3 +156,31 @@ export interface CreateOrderResponse {
   order: OrderResult;
   whatsapp_url: string | null;
 }
+
+// --- Auto-pedido en Mesa con QR -------------------------------------------
+
+export interface TableInfo {
+  id: number;
+  label: string;
+  area_name: string | null;
+  kind: string;
+  capacity: number;
+}
+
+export interface CreateTableOrderInput {
+  table_id: number;
+  customer_name?: string | null;
+  notes?: string | null;
+  items: OrderItemInput[];
+}
+
+export interface CreateTableOrderResponse {
+  ok: boolean;
+  table: { id: number; label: string };
+  session_id: number;
+  round_id: number;
+  round_number: number;
+  items_count: number;
+  total: number;
+  message: string;
+}

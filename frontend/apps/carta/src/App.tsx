@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { BusinessTheme, Menu, Product } from './types';
-import { fetchMenu, formatWhatsAppNumber, money, routeFromPath } from './lib/api';
+import type { BusinessTheme, Menu, Product, TableInfo } from './types';
+import { fetchMenu, fetchTableInfo, formatWhatsAppNumber, money, routeFromPath } from './lib/api';
 import { formatHours } from './lib/hours';
 import { useCart } from './lib/cart';
 import { SocialIcon, socialLabel } from './components/Icons';
@@ -54,12 +54,14 @@ export function App() {
 
   const [menu, setMenu] = useState<Menu | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [tableInfo, setTableInfo] = useState<TableInfo | null>(null);
   const [cat, setCat] = useState<number | 'all'>('all');
   const [open, setOpen] = useState<Product | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
   const visits = useVisitCount();
 
   // En modo salón se mira, no se pide (el mozo toma la comanda).
+  // En modo mesa (auto-pedido QR) sí se puede pedir.
   const canOrder = mode !== 'salon';
   const cart = useCart(slug ?? '_');
 
@@ -71,7 +73,13 @@ export function App() {
         setMenu(data);
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : 'error'));
-  }, [slug, mode]);
+
+    if (mode === 'mesa' && route.tableId) {
+      fetchTableInfo(slug, route.tableId)
+        .then((res) => setTableInfo(res.table))
+        .catch(() => {});
+    }
+  }, [slug, mode, route.tableId]);
 
   // Los de precio abierto son cargos internos (envío, propina): no van al público.
   const products = useMemo(
@@ -205,7 +213,27 @@ export function App() {
         {mode === 'salon' && (
           <p className="secret-note">Mirá la carta y pedile al mozo. Acá no se toman pedidos.</p>
         )}
-        {canOrder && !b.is_open_for_orders && (
+        {mode === 'mesa' && (
+          <div
+            style={{
+              background: 'var(--c-accent, #e63946)',
+              color: '#fff',
+              padding: '0.75rem 1rem',
+              borderRadius: '8px',
+              margin: '0.75rem 0',
+              textAlign: 'center',
+              boxShadow: '0 2px 6px rgba(0,0,0,0.1)',
+            }}
+          >
+            <div style={{ fontSize: '1.05rem', fontWeight: 700 }}>
+              🍽️ Estás en la {tableInfo ? `Mesa ${tableInfo.label}` : `Mesa ${route.tableId ?? ''}`}
+            </div>
+            <div style={{ fontSize: '0.825rem', marginTop: '0.2rem', opacity: 0.95 }}>
+              Pedí directamente desde tu celu y tu comanda marcha directo a la cocina
+            </div>
+          </div>
+        )}
+        {canOrder && mode !== 'mesa' && !b.is_open_for_orders && (
           <p className="secret-note">
             Ahora está cerrado: podés mirar la carta, pero no pedir online.
           </p>
@@ -355,6 +383,8 @@ export function App() {
           lines={cart.lines}
           total={cart.total}
           isOpen={b.is_open_for_orders}
+          mode={mode}
+          tableInfo={tableInfo}
           onSetQty={cart.setQty}
           onClear={cart.clear}
           onClose={() => setCartOpen(false)}

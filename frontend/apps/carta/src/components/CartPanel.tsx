@@ -1,12 +1,15 @@
 import { useMemo, useState } from 'react';
-import { CartaError, createOrder, money } from '../lib/api';
+import { CartaError, createOrder, createTableOrder, money } from '../lib/api';
 import type { CartLine } from '../lib/cart';
 import {
   PAYMENT_LABELS,
   type BusinessProfile,
   type CreateOrderResponse,
+  type CreateTableOrderResponse,
   type Fulfillment,
+  type Mode,
   type PaymentMethod,
+  type TableInfo,
 } from '../types';
 
 interface Props {
@@ -15,6 +18,8 @@ interface Props {
   lines: CartLine[];
   total: number;
   isOpen: boolean;
+  mode?: Mode;
+  tableInfo?: TableInfo | null;
   onSetQty: (key: string, qty: number) => void;
   onClear: () => void;
   onClose: () => void;
@@ -40,10 +45,13 @@ export function CartPanel({
   lines,
   total,
   isOpen,
+  mode,
+  tableInfo,
   onSetQty,
   onClear,
   onClose,
 }: Props) {
+  const isMesa = mode === 'mesa';
   const [fulfillment, setFulfillment] = useState<Fulfillment>('pickup');
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -53,6 +61,7 @@ export function CartPanel({
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [done, setDone] = useState<CreateOrderResponse | null>(null);
+  const [tableDone, setTableDone] = useState<CreateTableOrderResponse | null>(null);
 
   // Métodos válidos para la modalidad activa. Si el elegido deja de valer al
   // cambiar de modalidad, se limpia para forzar reelección.
@@ -81,6 +90,39 @@ export function CartPanel({
 
   async function submit() {
     setError(null);
+
+    if (isMesa) {
+      if (!tableInfo?.id) {
+        setError('No pudimos identificar la mesa. Por favor escaneá el QR nuevamente.');
+        return;
+      }
+      setSending(true);
+      try {
+        const res = await createTableOrder(slug, {
+          table_id: tableInfo.id,
+          customer_name: name.trim() || null,
+          notes: notes.trim() || null,
+          items: lines.map((l) => ({
+            product_id: l.product_id,
+            quantity: l.quantity,
+            ...(l.variant_id !== undefined ? { variant_id: l.variant_id } : {}),
+            ...(l.half_product_id !== undefined ? { half_product_id: l.half_product_id } : {}),
+            ...(l.combo_selections ? { combo_selections: l.combo_selections } : {}),
+            ...(l.notes ? { notes: l.notes } : {}),
+          })),
+        });
+        setTableDone(res);
+        onClear();
+      } catch (err) {
+        setError(
+          err instanceof CartaError ? err.message : 'No pudimos enviar la comanda a la cocina. Probá de nuevo.',
+        );
+      } finally {
+        setSending(false);
+      }
+      return;
+    }
+
     if (!name.trim() || !phone.trim()) {
       setError('Necesitamos tu nombre y un teléfono para confirmarte el pedido.');
       return;
@@ -117,6 +159,36 @@ export function CartPanel({
     } finally {
       setSending(false);
     }
+  }
+
+  if (tableDone) {
+    return (
+      <div className="veil" onClick={onClose} role="dialog" aria-modal="true">
+        <article className="entry" onClick={(e) => e.stopPropagation()}>
+          <header className="entry__bar">
+            <span className="entry__bar-title">¡marchando a cocina!</span>
+            <button className="entry__close" onClick={onClose} aria-label="Cerrar">
+              ✕
+            </button>
+          </header>
+          <div className="entry__body" style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: '3rem', margin: '0.5rem 0' }}>👨‍🍳🍕</div>
+            <p className="entry__price">Mesa {tableDone.table.label} · Ronda #{tableDone.round_number}</p>
+            <p className="entry__desc" style={{ fontSize: '1rem', lineHeight: 1.4 }}>
+              Tu comanda ya está en la cocina y empezaron a prepararla.
+              <br />
+              Total de esta tanda: <b>{money(tableDone.total)}</b>
+            </p>
+            <div style={{ background: '#eef6ff', border: '1px solid #b6d4fe', padding: '0.6rem 0.8rem', borderRadius: '6px', margin: '1rem 0', fontSize: '0.85rem', color: '#084298' }}>
+              💡 Podés seguir pidiendo más rondas en cualquier momento. Se abona todo junto al pedir la cuenta.
+            </div>
+            <button className="addbar__btn" onClick={onClose} style={{ marginTop: '0.5rem' }}>
+              volver a la carta
+            </button>
+          </div>
+        </article>
+      </div>
+    );
   }
 
   if (done) {
@@ -193,80 +265,120 @@ export function CartPanel({
                 </div>
               ))}
 
-              <div className="checkout">
-                <label className="fld">
-                  <span>Nombre para el pedido</span>
-                  <input value={name} onChange={(e) => setName(e.target.value)} />
-                </label>
-
-                <label className="fld">
-                  <span>Teléfono</span>
-                  <input
-                    type="tel"
-                    inputMode="tel"
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                  />
-                </label>
-
-                {/* Retiro / Envío */}
-                <div className="ful-toggle" role="group" aria-label="Modalidad de entrega">
-                  <button
-                    type="button"
-                    className={`ful-btn${fulfillment === 'pickup' ? ' ful-btn--on' : ''}`}
-                    onClick={() => switchFulfillment('pickup')}
+              {isMesa ? (
+                <div className="checkout">
+                  <div
+                    style={{
+                      background: '#eef6ff',
+                      border: '1px solid #b6d4fe',
+                      borderRadius: '6px',
+                      padding: '0.6rem 0.8rem',
+                      marginBottom: '0.5rem',
+                      fontSize: '0.875rem',
+                      color: '#084298',
+                    }}
                   >
-                    🏪 Retiro en local
-                  </button>
-                  <button
-                    type="button"
-                    className={`ful-btn${fulfillment === 'delivery' ? ' ful-btn--on' : ''}`}
-                    onClick={() => switchFulfillment('delivery')}
-                  >
-                    🛵 Envío a domicilio
-                  </button>
-                </div>
+                    🍽️ Comanda para la <strong>Mesa {tableInfo?.label ?? ''}</strong>
+                    <div style={{ fontSize: '0.775rem', color: '#555', marginTop: '0.1rem' }}>
+                      Va directo a la cocina. Se suma a la cuenta de tu mesa.
+                    </div>
+                  </div>
 
-                {fulfillment === 'delivery' && (
                   <label className="fld">
-                    <span>Dirección de entrega</span>
-                    <input value={address} onChange={(e) => setAddress(e.target.value)} />
+                    <span>Tu nombre (opcional)</span>
+                    <input
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="Ej. Sofía"
+                    />
                   </label>
-                )}
 
-                <label className="fld">
-                  <span>Forma de pago</span>
-                  <select
-                    value={effectivePayment}
-                    onChange={(e) => setPayment(e.target.value as PaymentMethod | '')}
-                  >
-                    <option value="">Elegí una opción</option>
-                    {methods.map((m) => (
-                      <option key={m} value={m}>
-                        {PAYMENT_LABELS[m]}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                  <label className="fld">
+                    <span>Aclaraciones para la cocina</span>
+                    <textarea
+                      rows={2}
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                      placeholder="Ej. Muzza bien dorada, hielo para la bebida..."
+                    />
+                  </label>
+                </div>
+              ) : (
+                <div className="checkout">
+                  <label className="fld">
+                    <span>Nombre para el pedido</span>
+                    <input value={name} onChange={(e) => setName(e.target.value)} />
+                  </label>
 
-                {effectivePayment === 'transfer' && business.transfer_alias && (
-                  <p className="pay-note pay-note--transfer">{business.transfer_alias}</p>
-                )}
+                  <label className="fld">
+                    <span>Teléfono</span>
+                    <input
+                      type="tel"
+                      inputMode="tel"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                    />
+                  </label>
 
-                {effectivePayment === 'card' && surchargePct > 0 && (
-                  <p className="pay-note pay-note--card">
-                    El pago con tarjeta tiene un recargo del {surchargePct}% ({money(surcharge)}), ya
-                    sumado al total.
-                  </p>
-                )}
+                  {/* Retiro / Envío */}
+                  <div className="ful-toggle" role="group" aria-label="Modalidad de entrega">
+                    <button
+                      type="button"
+                      className={`ful-btn${fulfillment === 'pickup' ? ' ful-btn--on' : ''}`}
+                      onClick={() => switchFulfillment('pickup')}
+                    >
+                      🏪 Retiro en local
+                    </button>
+                    <button
+                      type="button"
+                      className={`ful-btn${fulfillment === 'delivery' ? ' ful-btn--on' : ''}`}
+                      onClick={() => switchFulfillment('delivery')}
+                    >
+                      🛵 Envío a domicilio
+                    </button>
+                  </div>
 
-                <label className="fld">
-                  <span>Aclaraciones</span>
-                  <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
-                </label>
-              </div>
+                  {fulfillment === 'delivery' && (
+                    <label className="fld">
+                      <span>Dirección de entrega</span>
+                      <input value={address} onChange={(e) => setAddress(e.target.value)} />
+                    </label>
+                  )}
 
-              {surcharge > 0 ? (
+                  <label className="fld">
+                    <span>Forma de pago</span>
+                    <select
+                      value={effectivePayment}
+                      onChange={(e) => setPayment(e.target.value as PaymentMethod | '')}
+                    >
+                      <option value="">Elegí una opción</option>
+                      {methods.map((m) => (
+                        <option key={m} value={m}>
+                          {PAYMENT_LABELS[m]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  {effectivePayment === 'transfer' && business.transfer_alias && (
+                    <p className="pay-note pay-note--transfer">{business.transfer_alias}</p>
+                  )}
+
+                  {effectivePayment === 'card' && surchargePct > 0 && (
+                    <p className="pay-note pay-note--card">
+                      El pago con tarjeta tiene un recargo del {surchargePct}% ({money(surcharge)}), ya
+                      sumado al total.
+                    </p>
+                  )}
+
+                  <label className="fld">
+                    <span>Aclaraciones</span>
+                    <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+                  </label>
+                </div>
+              )}
+
+              {!isMesa && surcharge > 0 ? (
                 <>
                   <p className="cart__subtotal">
                     subtotal <span>{money(total)}</span>
@@ -283,11 +395,11 @@ export function CartPanel({
                   total <b>{money(total)}</b>
                 </p>
               )}
-              {fulfillment === 'delivery' && (
+              {!isMesa && fulfillment === 'delivery' && (
                 <p className="cart__hint">El envío lo confirma el local al aceptar el pedido.</p>
               )}
 
-              {!isOpen && (
+              {!isMesa && !isOpen && (
                 <p className="entry__unavailable">
                   Ahora está cerrado: no se puede pedir online. Mirá la carta tranquilo, tu pedido
                   queda guardado.
@@ -302,10 +414,14 @@ export function CartPanel({
 
               <button
                 className="addbar__btn"
-                disabled={!isOpen || sending}
+                disabled={(!isMesa && !isOpen) || sending}
                 onClick={() => void submit()}
               >
-                {sending ? 'enviando…' : 'confirmar pedido'}
+                {sending
+                  ? 'enviando a cocina…'
+                  : isMesa
+                  ? `🚀 mandar comanda a cocina (${money(total)})`
+                  : 'confirmar pedido'}
               </button>
               <button className="cart__clear" onClick={onClear}>
                 vaciar carrito

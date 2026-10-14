@@ -35,7 +35,10 @@ acción de actualizar (pull) desde el panel de Ferozo. Sin FTP.
 - **Ventas (TPV)** táctil con cola offline idempotente, selector de canal
   (Acá / Llevar / Delivery) e impresión Bluetooth ESC/POS (ticket y comanda).
 - **Salón** con mesas y **barras multi-cuenta** (cada cuenta con nombre), 
-  comandas por ronda y vista de cocina.
+  comandas por ronda, vista de cocina y **auto-pedido en mesa con QR**
+  (`pizzalog.net/{slug}/mesa/{id}`) con envío directo a cocina.
+- **Cadetes y Repartos** — gestión de repartidores, asignación de pedidos delivery,
+  hoja de ruta enviada por WhatsApp en 1-click y liquidación de turno con balance de caja.
 - **La Carta** — perfil público estilo internet 2008 en `pizzalog.net/{slug}`:
   foto, bio, redes, teléfono, dirección con mapa, muro de productos y
   **temas de colores** personalizables desde el panel («Mi local»).
@@ -44,7 +47,7 @@ acción de actualizar (pull) desde el panel de Ferozo. Sin FTP.
 
 ## Base de datos
 
-Migraciones en `backend/migrations/`, correr **en orden (000 → 020)** en la
+Migraciones en `backend/migrations/`, correr **en orden (000 → 021)** en la
 base del negocio. `backend/tools/reimport_loyverse_variantes.sql` recarga el
 catálogo desde Loyverse con el modelo de variantes (una sola vez).
 

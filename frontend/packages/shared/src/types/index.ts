@@ -409,8 +409,54 @@ export interface Order {
   payment_method: string | null;
   notes: string | null;
   sale_id: number | null;
+  delivery_driver_id?: number | null;
+  delivery_driver_name?: string | null;
+  delivery_driver_phone?: string | null;
   created_at: string;
   items?: OrderItem[];
+}
+
+// --- Cadetes / Repartidores & Liquidación ----------------------------------
+
+export type VehicleType = 'moto' | 'bici' | 'auto' | 'otro';
+
+export interface DeliveryDriver {
+  id: number;
+  name: string;
+  phone: string | null;
+  vehicle_type: VehicleType;
+  vehicle_plate: string | null;
+  fee_per_trip: number;
+  is_active: number;
+  created_at?: string;
+}
+
+export interface DriverSettlementOrder {
+  id: number;
+  order_number: number;
+  customer_name: string | null;
+  customer_phone: string | null;
+  address: string | null;
+  total: number;
+  delivery_fee: number;
+  payment_method: string | null;
+  status: OrderStatus;
+  created_at: string;
+}
+
+export interface DriverSettlement {
+  driver_id: number;
+  driver_name: string;
+  driver_phone: string | null;
+  fee_per_trip: number;
+  total_orders: number;
+  cash_orders_count: number;
+  cash_collected: number;
+  other_payments_count: number;
+  other_payments_total: number;
+  total_earned_fees: number;
+  net_cash_balance: number;
+  orders: DriverSettlementOrder[];
 }
 
 // --- Caja y Arqueo --------------------------------------------------------

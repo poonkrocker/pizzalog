@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { formatARS, formatDateTime, type OrderStatus } from '@pizzalog/shared';
 import { Badge, Button, Modal, Select } from '@/ui';
-import { useCancelOrder, useCompleteOrder, useOrder, useUpdateOrderStatus } from './hooks';
+import { useCancelOrder, useCompleteOrder, useOrder, useUpdateOrderStatus, useAssignDriver } from './hooks';
+import { useDrivers } from '../drivers/hooks';
 
 const STATUS_LABELS: Record<OrderStatus, { label: string; tone?: 'neutral' | 'accent' | 'success' | 'warning' | 'danger' }> = {
   received: { label: 'Recibido', tone: 'warning' },
@@ -31,6 +32,8 @@ export function OrderDetailModal({
   const updateStatus = useUpdateOrderStatus();
   const completeOrder = useCompleteOrder();
   const cancelOrder = useCancelOrder();
+  const assignDriver = useAssignDriver();
+  const driversQuery = useDrivers();
 
   const [paymentMethod, setPaymentMethod] = useState<string>('cash');
   const [isCompleting, setIsCompleting] = useState(false);
@@ -194,6 +197,43 @@ export function OrderDetailModal({
               <strong>Nota del cliente:</strong> {order.notes}
             </p>
           )}
+        </div>
+
+        {/* Repartidor / Cadete */}
+        <div style={{ background: 'var(--c-surface, #f9f9f9)', padding: '0.75rem 1rem', borderRadius: '6px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+            <h4 style={{ margin: 0, fontSize: '0.9rem', color: '#444' }}>Repartidor / Cadete</h4>
+            {order.delivery_driver_id && <Badge tone="accent">Asignado</Badge>}
+          </div>
+          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: '200px' }}>
+              <Select
+                value={order.delivery_driver_id ? String(order.delivery_driver_id) : ''}
+                onChange={(e) => {
+                  const val = e.target.value ? parseInt(e.target.value, 10) : null;
+                  assignDriver.mutate({ id: order.id, driverId: val });
+                }}
+                disabled={assignDriver.isPending || order.status === 'delivered' || order.status === 'cancelled'}
+              >
+                <option value="">-- Sin cadete asignado --</option>
+                {(driversQuery.data ?? []).map((d) => (
+                  <option key={d.id} value={d.id}>
+                    🛵 {d.name} {d.phone ? `(${d.phone})` : ''}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            {order.delivery_driver_phone && (
+              <a
+                href={`https://wa.me/${order.delivery_driver_phone.replace(/\D/g, '')}`}
+                target="_blank"
+                rel="noreferrer"
+                style={{ fontSize: '0.85rem', color: '#25D366', fontWeight: 600, textDecoration: 'none', whiteSpace: 'nowrap' }}
+              >
+                💬 WhatsApp Cadete
+              </a>
+            )}
+          </div>
         </div>
 
         {/* Detalle de ítems */}

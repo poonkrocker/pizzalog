@@ -105,9 +105,10 @@ migration_017_datos_pago_carta.sql     <- alias, CBU y métodos de pago aceptado
 migration_018_tables_kind.sql          <- tipo de mesa (table / bar) para salón
 migration_019_disponibilidad_manual.sql <- switch de disponibilidad manual (abierto/cerrado)
 migration_020_pizzas_mitad.sql         <- pizzas combinables / Mitad y Mitad
+migration_021_cadetes_reparto.sql      <- repartidores/cadetes, comisión por viaje y asignación a pedidos
 ```
 
-> El orden importa: correr **000 → 020 en estricto orden correlativo**. Todas son
+> El orden importa: correr **000 → 021 en estricto orden correlativo**. Todas son
 > acumulativas e indispensables para que el backend y frontend funcionen sin errores de columnas faltantes.
 
 ### 3. Configuración
@@ -170,8 +171,9 @@ Todos bajo `https://api.pizzalog.net`. Salvo los públicos, requieren
 | Inventario   | `GET /inventory/stock`, `GET /inventory/low-stock`, `GET /inventory/movements`, `POST /inventory/restock`, `POST /inventory/adjustment`, `POST /inventory/count` |
 | Empleados    | `GET/POST /users`, `GET/PUT/DELETE /users/{id}` (admin) |
 | Asistencia   | `POST /attendance/punch`, `GET /attendance`, `GET /attendance/open`, `GET /attendance/summary` |
-| Delivery     | `GET/POST /orders`, `GET /orders/{id}`, `PUT /orders/{id}/status`, `POST /orders/{id}/complete`, `POST /orders/{id}/cancel` |
-| Menú público | `GET /public/{slug}/menu`, `POST /public/{slug}/orders` (sin auth) |
+| Delivery     | `GET/POST /orders`, `GET /orders/{id}`, `PUT /orders/{id}/status`, `POST /orders/{id}/complete`, `POST /orders/{id}/cancel`, `PUT /orders/{id}/assign-driver` |
+| Cadetes      | `GET/POST /delivery-drivers`, `GET/PUT/DELETE /delivery-drivers/{id}`, `GET /delivery-drivers/{id}/settlement` |
+| Menú público | `GET /public/{slug}/menu`, `POST /public/{slug}/orders`, `GET /public/{slug}/table/{id}`, `POST /public/{slug}/table-order` (sin auth) |
 | Salón · config | `GET/POST /table-areas`, `PUT/DELETE /table-areas/{id}`, `GET /floor`, `GET/POST /tables`, `PUT /tables/layout`, `GET/PUT/DELETE /tables/{id}` |
 | Salón · cuentas | `GET/POST /table-sessions`, `GET /table-sessions/{id}`, `POST /table-sessions/{id}/rounds`, `POST /table-sessions/{id}/request-bill`, `PUT /table-sessions/{id}/tables`, `POST /table-sessions/{id}/merge`, `POST /table-sessions/{id}/close`, `POST /table-sessions/{id}/cancel`, `DELETE /table-sessions/{id}/items/{itemId}` |
 | Cocina (KDS) | `GET /kitchen/rounds`, `PUT /kitchen/rounds/{id}/status`, `POST /kitchen/rounds/{id}/print` |

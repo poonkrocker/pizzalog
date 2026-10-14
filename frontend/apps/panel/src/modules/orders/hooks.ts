@@ -59,3 +59,16 @@ export function useCancelOrder() {
     },
   });
 }
+
+export function useAssignDriver() {
+  const api = useApi();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, driverId }: { id: number; driverId: number | null }) =>
+      api.orders.assignDriver(id, driverId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.invalidateQueries({ queryKey: ['order'] });
+    },
+  });
+}

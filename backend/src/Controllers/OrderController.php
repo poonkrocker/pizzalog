@@ -61,14 +61,20 @@ class OrderController
             $where[]  = 'o.created_at <= ?';
             $params[] = $req->query['to'] . ' 23:59:59';
         }
+        if (!empty($req->query['driver_id'])) {
+            $where[]  = 'o.delivery_driver_id = ?';
+            $params[] = (int) $req->query['driver_id'];
+        }
 
         $limit  = min(max((int) ($req->query['limit'] ?? 100), 1), 300);
         $offset = max((int) ($req->query['offset'] ?? 0), 0);
 
         $sql = 'SELECT o.id, o.order_number, o.channel, o.status, o.customer_name,
                        o.customer_phone, o.address, o.delivery_fee, o.items_total,
-                       o.total, o.payment_method, o.notes, o.sale_id, o.created_at
+                       o.total, o.payment_method, o.notes, o.sale_id, o.delivery_driver_id,
+                       dd.name AS delivery_driver_name, o.created_at
                   FROM orders o
+             LEFT JOIN delivery_drivers dd ON dd.id = o.delivery_driver_id
                  WHERE ' . implode(' AND ', $where) . '
                  ORDER BY o.created_at DESC
                  LIMIT ' . $limit . ' OFFSET ' . $offset;
@@ -83,6 +89,33 @@ class OrderController
     {
         $order = $this->findOwned((int) $req->auth['business_id'], (int) $req->param('id'));
         Response::ok(['order' => $this->withItems($order)]);
+    }
+
+    /** PUT /orders/{id}/assign-driver   Body: { delivery_driver_id: int|null } */
+    public function assignDriver(Request $req): void
+    {
+        $bid   = (int) $req->auth['business_id'];
+        $id    = (int) $req->param('id');
+        $this->findOwned($bid, $id);
+
+        $driverId = $req->input('delivery_driver_id');
+        $driverId = ($driverId !== null && $driverId !== '' && (int) $driverId > 0) ? (int) $driverId : null;
+
+        if ($driverId !== null) {
+            $check = Database::pdo()->prepare(
+                'SELECT id FROM delivery_drivers WHERE id = ? AND business_id = ? LIMIT 1'
+            );
+            $check->execute([$driverId, $bid]);
+            if (!$check->fetch()) {
+                Response::error('Cadete no encontrado en este negocio', 422);
+            }
+        }
+
+        Database::pdo()
+            ->prepare('UPDATE orders SET delivery_driver_id = ? WHERE id = ? AND business_id = ?')
+            ->execute([$driverId, $id, $bid]);
+
+        Response::ok(['order' => $this->withItems($this->findOwned($bid, $id))]);
     }
 
     /**
@@ -331,9 +364,13 @@ class OrderController
     private function findOwned(int $bid, int $id): array
     {
         $stmt = Database::pdo()->prepare(
-            'SELECT id, order_number, channel, status, customer_name, customer_phone, address,
-                    delivery_fee, items_total, total, payment_method, notes, sale_id, created_at
-               FROM orders WHERE id = ? AND business_id = ? LIMIT 1'
+            'SELECT o.id, o.order_number, o.channel, o.status, o.customer_name, o.customer_phone, o.address,
+                    o.delivery_fee, o.items_total, o.total, o.payment_method, o.notes, o.sale_id,
+                    o.delivery_driver_id, dd.name AS delivery_driver_name, dd.phone AS delivery_driver_phone,
+                    o.created_at
+               FROM orders o
+          LEFT JOIN delivery_drivers dd ON dd.id = o.delivery_driver_id
+              WHERE o.id = ? AND o.business_id = ? LIMIT 1'
         );
         $stmt->execute([$id, $bid]);
         $order = $stmt->fetch();
@@ -367,9 +404,14 @@ class OrderController
 
     private function castOrder(array $o): array
     {
-        $o['id']           = (int) $o['id'];
-        $o['order_number'] = $o['order_number'] !== null ? (int) $o['order_number'] : null;
-        $o['sale_id']      = $o['sale_id'] !== null ? (int) $o['sale_id'] : null;
+        $o['id']                    = (int) $o['id'];
+        $o['order_number']          = $o['order_number'] !== null ? (int) $o['order_number'] : null;
+        $o['sale_id']               = $o['sale_id'] !== null ? (int) $o['sale_id'] : null;
+        $o['delivery_driver_id']    = isset($o['delivery_driver_id']) && $o['delivery_driver_id'] !== null
+            ? (int) $o['delivery_driver_id']
+            : null;
+        $o['delivery_driver_name']  = $o['delivery_driver_name'] ?? null;
+        $o['delivery_driver_phone'] = $o['delivery_driver_phone'] ?? null;
         foreach (['delivery_fee', 'items_total', 'total'] as $k) {
             $o[$k] = (float) $o[$k];
         }

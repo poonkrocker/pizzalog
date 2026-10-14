@@ -317,6 +317,228 @@ class PublicController
         ], 201);
     }
 
+    /** GET /public/{slug}/table/{id} */
+    public function tableInfo(Request $req): void
+    {
+        $business   = $this->businessBySlug((string) $req->param('slug'));
+        $bid        = (int) $business['id'];
+        $tableParam = trim((string) $req->param('id'));
+
+        $stmt = Database::pdo()->prepare(
+            'SELECT t.id, t.label, t.kind, t.capacity, a.name AS area_name
+               FROM tables t
+          LEFT JOIN table_areas a ON a.id = t.area_id
+              WHERE t.business_id = ? AND (t.id = ? OR t.label = ?) AND t.is_active = 1
+              LIMIT 1'
+        );
+        $stmt->execute([$bid, is_numeric($tableParam) ? (int) $tableParam : 0, $tableParam]);
+        $table = $stmt->fetch();
+
+        if (!$table) {
+            Response::error('Mesa no encontrada o inactiva', 404);
+        }
+
+        Response::ok([
+            'table' => [
+                'id'        => (int) $table['id'],
+                'label'     => $table['label'],
+                'area_name' => $table['area_name'] ?? null,
+                'kind'      => $table['kind'] ?? 'table',
+                'capacity'  => (int) $table['capacity'],
+            ],
+            'business' => [
+                'name' => $business['name'],
+                'slug' => $business['slug'],
+            ],
+        ]);
+    }
+
+    /**
+     * POST /public/{slug}/table-order
+     * Body: { table_id, customer_name?, notes?, items: [ { product_id, quantity, variant_id?, half_product_id?, notes? } ] }
+     */
+    public function createTableOrder(Request $req): void
+    {
+        $business = $this->businessBySlug((string) $req->param('slug'));
+        $bid      = (int) $business['id'];
+
+        $tableId = (int) $req->input('table_id', 0);
+        if ($tableId <= 0) {
+            Response::error('Identificador de mesa inválido', 422);
+        }
+
+        $stmt = Database::pdo()->prepare(
+            'SELECT id, label, is_active FROM tables WHERE id = ? AND business_id = ? AND is_active = 1 LIMIT 1'
+        );
+        $stmt->execute([$tableId, $bid]);
+        $table = $stmt->fetch();
+        if (!$table) {
+            Response::error('La mesa no existe o está inactiva', 422);
+        }
+
+        $items = $req->input('items');
+        if (!is_array($items) || $items === []) {
+            Response::error('El pedido debe tener al menos un ítem', 422);
+        }
+
+        $customerName = trim((string) $req->input('customer_name', '')) ?: null;
+        $orderNotes   = trim((string) $req->input('notes', '')) ?: null;
+
+        $productIds = [];
+        foreach ($items as $it) {
+            $pid = (int) ($it['product_id'] ?? 0);
+            $qty = $it['quantity'] ?? null;
+            if ($pid <= 0 || !is_numeric($qty) || (float) $qty <= 0) {
+                Response::error('Cada ítem necesita product_id y quantity mayor a 0', 422);
+            }
+            $productIds[] = $pid;
+            if (!empty($it['half_product_id'])) {
+                $productIds[] = (int) $it['half_product_id'];
+            }
+        }
+
+        $products = $this->loadOrderableProducts($bid, array_values(array_unique($productIds)));
+        foreach (array_unique($productIds) as $pid) {
+            if (!isset($products[$pid])) {
+                Response::error('Hay un producto que ya no está disponible', 422);
+            }
+        }
+
+        $lines           = [];
+        $totalRound      = 0.0;
+        $totalItemsCount = 0;
+
+        foreach ($items as $it) {
+            $pid       = (int) $it['product_id'];
+            $qty       = max(1, (int) $it['quantity']);
+            $product   = $products[$pid];
+            $name      = $product['name'];
+            $unitPrice = (float) $product['price'];
+            $variantId = null;
+
+            if (!empty($it['variant_id'])) {
+                $vid     = (int) $it['variant_id'];
+                $variant = $this->findActiveVariant($bid, $pid, $vid);
+                if ($variant === null) {
+                    Response::error(sprintf('La opción elegida de "%s" ya no está disponible', $name), 422);
+                }
+                $name      = $name . ' — ' . $variant['label'];
+                $unitPrice = $variant['price'];
+                $variantId = $vid;
+            }
+
+            // Mitad y Mitad
+            if (!empty($it['half_product_id'])) {
+                $halfId = (int) $it['half_product_id'];
+                if (isset($products[$halfId])) {
+                    $halfProd  = $products[$halfId];
+                    $name      = 'Pizza 1/2 ' . $product['name'] . ' + 1/2 ' . $halfProd['name'];
+                    $unitPrice = max($unitPrice, (float) $halfProd['price']);
+                }
+            }
+
+            $lineTotal       = round($unitPrice * $qty, 2);
+            $totalRound     += $lineTotal;
+            $totalItemsCount += $qty;
+
+            $lines[] = [
+                'product_id' => $pid,
+                'variant_id' => $variantId,
+                'name'       => $name,
+                'qty'        => $qty,
+                'unit_price' => $unitPrice,
+                'note'       => isset($it['notes']) ? (trim((string) $it['notes']) ?: null) : null,
+            ];
+        }
+
+        $pdo = Database::pdo();
+        $pdo->beginTransaction();
+        try {
+            // 1. Buscar si ya existe una sesión abierta para esta mesa
+            $sessStmt = $pdo->prepare(
+                'SELECT s.id
+                   FROM session_tables st
+                   JOIN table_sessions s ON s.id = st.session_id
+                  WHERE s.business_id = ? AND st.table_id = ?
+                    AND s.status IN ("open", "bill_requested")
+                  ORDER BY s.id DESC LIMIT 1'
+            );
+            $sessStmt->execute([$bid, $tableId]);
+            $existingSessionId = $sessStmt->fetchColumn();
+
+            if ($existingSessionId !== false) {
+                $sessionId = (int) $existingSessionId;
+            } else {
+                // Abrir nueva sesión de mesa
+                $label    = 'Mesa ' . $table['label'];
+                $sessNote = 'Auto-pedido QR' . ($customerName ? ' (' . $customerName . ')' : '');
+                $pdo->prepare(
+                    'INSERT INTO table_sessions (business_id, status, party_size, label, opened_by, note)
+                     VALUES (?, "open", NULL, ?, NULL, ?)'
+                )->execute([$bid, $label, $sessNote]);
+                $sessionId = (int) $pdo->lastInsertId();
+
+                $pdo->prepare(
+                    'INSERT INTO session_tables (session_id, table_id) VALUES (?, ?)'
+                )->execute([$sessionId, $tableId]);
+            }
+
+            // 2. Crear la ronda (comanda) que va a la cocina
+            $numStmt = $pdo->prepare(
+                'SELECT COALESCE(MAX(number), 0) + 1 FROM table_rounds WHERE session_id = ?'
+            );
+            $numStmt->execute([$sessionId]);
+            $roundNumber = (int) $numStmt->fetchColumn();
+
+            $roundNoteParts = [];
+            if ($customerName) {
+                $roundNoteParts[] = 'Comensal: ' . $customerName;
+            }
+            if ($orderNotes) {
+                $roundNoteParts[] = $orderNotes;
+            }
+            $roundNote = $roundNoteParts !== [] ? implode(' | ', $roundNoteParts) : 'Auto-pedido QR';
+
+            $pdo->prepare(
+                'INSERT INTO table_rounds (business_id, session_id, number, status, note, created_by)
+                 VALUES (?, ?, ?, "pending", ?, NULL)'
+            )->execute([$bid, $sessionId, $roundNumber, $roundNote]);
+            $roundId = (int) $pdo->lastInsertId();
+
+            // 3. Insertar los ítems de la ronda
+            $itemStmt = $pdo->prepare(
+                'INSERT INTO table_round_items
+                    (business_id, session_id, round_id, product_id, variant_id, name, qty, unit_price, note, status)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, "ordered")'
+            );
+            foreach ($lines as $l) {
+                $itemStmt->execute([
+                    $bid, $sessionId, $roundId, $l['product_id'], $l['variant_id'],
+                    $l['name'], $l['qty'], $l['unit_price'], $l['note'],
+                ]);
+            }
+
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+
+        Response::ok([
+            'ok'           => true,
+            'table'        => [
+                'id'    => (int) $table['id'],
+                'label' => $table['label'],
+            ],
+            'session_id'   => $sessionId,
+            'round_id'     => $roundId,
+            'round_number' => $roundNumber,
+            'items_count'  => $totalItemsCount,
+            'total'        => round($totalRound, 2),
+            'message'      => '¡Pedido enviado a la cocina con éxito!',
+        ], 201);
+    }
+
     // -----------------------------------------------------------------
 
     private const PAY_METHODS_ALL = ['cash', 'card', 'transfer', 'mp'];

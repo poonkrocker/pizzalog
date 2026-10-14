@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { formatARS, formatDateTime, type Order, type OrderStatus, type SaleChannel } from '@pizzalog/shared';
 import {
   Badge,
+  Button,
   DataTable,
   EmptyState,
   ErrorState,
@@ -13,6 +14,7 @@ import {
 } from '@/ui';
 import type { Column } from '@/ui';
 import { useOrders, useUpdateOrderStatus } from './hooks';
+import { useDrivers } from '../drivers/hooks';
 import { OrderDetailModal } from './OrderDetailModal';
 
 const STATUS_TABS: Array<{ id: OrderStatus | 'all'; label: string }> = [
@@ -51,9 +53,13 @@ function today(): string {
 export function OrdersPage() {
   const [selectedTab, setSelectedTab] = useState<OrderStatus | 'all'>('all');
   const [channel, setChannel] = useState<SaleChannel | ''>('');
+  const [driverId, setDriverId] = useState<string>('');
   const [from, setFrom] = useState(today());
   const [to, setTo] = useState(today());
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
+
+  const driversQuery = useDrivers();
+  const driversList = driversQuery.data ?? [];
 
   const query = useMemo(
     () => ({
@@ -61,9 +67,10 @@ export function OrdersPage() {
       to,
       ...(selectedTab !== 'all' ? { status: selectedTab } : {}),
       ...(channel ? { channel } : {}),
+      ...(driverId ? { driver_id: parseInt(driverId, 10) } : {}),
       limit: 150,
     }),
-    [from, to, selectedTab, channel],
+    [from, to, selectedTab, channel, driverId],
   );
 
   const orders = useOrders(query);
@@ -134,6 +141,19 @@ export function OrdersPage() {
       ),
     },
     {
+      key: 'delivery_driver_name',
+      header: 'Cadete',
+      render: (o) => (
+        <span>
+          {o.delivery_driver_name ? (
+            <Badge tone="accent">🛵 {o.delivery_driver_name}</Badge>
+          ) : (
+            <span style={{ color: '#aaa', fontSize: '0.85rem' }}>-</span>
+          )}
+        </span>
+      ),
+    },
+    {
       key: 'status',
       header: 'Estado',
       render: (o) => {
@@ -186,12 +206,67 @@ export function OrdersPage() {
     },
   ];
 
+  const handleShareRouteSheet = () => {
+    const assignedOrders = orderList.filter((o) => o.status !== 'cancelled');
+    const targetDriver = driversList.find((d) => String(d.id) === driverId);
+    const driverName = targetDriver ? targetDriver.name : 'General';
+    let totalCash = 0;
+
+    const lines = [
+      `🛵 *HOJA DE RUTA - ${driverName.toUpperCase()}*`,
+      `📅 Fecha: ${from === to ? from : `${from} al ${to}`}`,
+      `------------------------------------------`,
+    ];
+
+    assignedOrders.forEach((o, idx) => {
+      const isCash = o.payment_method === 'cash';
+      if (isCash) totalCash += o.total;
+      lines.push(
+        `*${idx + 1}. Pedido #${o.order_number}* (${o.customer_name || 'Sin nombre'})`,
+        `📍 ${o.address || 'Retiro local'}`,
+        `📞 Tel: ${o.customer_phone || 'Sin tel'}`,
+        `💵 Cobro: ${isCash ? `Efectivo ${formatARS(o.total)}` : `Ya abonado (${o.payment_method || 'Digital'})`}`,
+        o.address ? `🗺️ Maps: https://maps.google.com/?q=${encodeURIComponent(o.address + ', Córdoba')}` : '',
+        `------------------------------------------`,
+      );
+    });
+
+    lines.push(
+      `📦 Total pedidos: ${assignedOrders.length}`,
+      `💵 Total a cobrar en efectivo: ${formatARS(totalCash)}`,
+    );
+
+    const cleanPhone = targetDriver?.phone?.replace(/\D/g, '') ?? '';
+    const waPhone = cleanPhone.startsWith('549')
+      ? cleanPhone
+      : cleanPhone.startsWith('54')
+      ? '549' + cleanPhone.slice(2)
+      : cleanPhone.length === 10
+      ? '549' + cleanPhone
+      : cleanPhone;
+
+    const waUrl = waPhone
+      ? `https://wa.me/${waPhone}?text=${encodeURIComponent(lines.filter(Boolean).join('\n'))}`
+      : `https://wa.me/?text=${encodeURIComponent(lines.filter(Boolean).join('\n'))}`;
+
+    window.open(waUrl, '_blank');
+  };
+
   return (
     <section>
       <PageHeader
         eyebrow="Delivery & Takeaway"
         title="Pedidos"
         description="Recepción, confirmación y despacho de pedidos online, WhatsApp y telefónicos."
+        actions={
+          <Button
+            variant="secondary"
+            onClick={handleShareRouteSheet}
+            disabled={orderList.length === 0}
+          >
+            📋 Hoja de Ruta WhatsApp
+          </Button>
+        }
       />
 
       {/* Tarjetas resumen */}
@@ -242,6 +317,16 @@ export function OrdersPage() {
             {CHANNELS.map((ch) => (
               <option key={ch.value} value={ch.value}>
                 {ch.label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Cadete">
+          <Select value={driverId} onChange={(e) => setDriverId(e.target.value)}>
+            <option value="">Todos los cadetes</option>
+            {driversList.map((d) => (
+              <option key={d.id} value={d.id}>
+                🛵 {d.name}
               </option>
             ))}
           </Select>

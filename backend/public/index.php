@@ -19,6 +19,7 @@ use Pizzalog\Controllers\PublicController;
 use Pizzalog\Controllers\AuthController;
 use Pizzalog\Controllers\CategoryController;
 use Pizzalog\Controllers\CustomerController;
+use Pizzalog\Controllers\DeliveryDriverController;
 use Pizzalog\Controllers\FiscalController;
 use Pizzalog\Controllers\SupplierController;
 use Pizzalog\Controllers\SupplyController;
@@ -135,8 +136,17 @@ $router->get('/orders', [OrderController::class, 'index'], [$auth]);
 $router->get('/orders/{id}', [OrderController::class, 'show'], [$auth]);
 $router->post('/orders', [OrderController::class, 'store'], [$auth]);
 $router->put('/orders/{id}/status', [OrderController::class, 'updateStatus'], [$auth]);
+$router->put('/orders/{id}/assign-driver', [OrderController::class, 'assignDriver'], [$auth]);
 $router->post('/orders/{id}/complete', [OrderController::class, 'complete'], [$auth]);
 $router->post('/orders/{id}/cancel', [OrderController::class, 'cancel'], [$auth]);
+
+// --- Cadetes / Repartidores ------------------------------------------
+$router->get('/drivers', [DeliveryDriverController::class, 'index'], [$auth]);
+$router->get('/drivers/settlement', [DeliveryDriverController::class, 'settlement'], [$auth, $manage]);
+$router->get('/drivers/{id}', [DeliveryDriverController::class, 'show'], [$auth]);
+$router->post('/drivers', [DeliveryDriverController::class, 'store'], [$auth, $manage]);
+$router->put('/drivers/{id}', [DeliveryDriverController::class, 'update'], [$auth, $manage]);
+$router->delete('/drivers/{id}', [DeliveryDriverController::class, 'destroy'], [$auth, $manage]);
 
 // --- Menú público / checkout (SIN autenticación) ----------------------
 // El negocio se identifica por su slug. Precios siempre del servidor.
@@ -144,6 +154,8 @@ $router->post('/orders/{id}/cancel', [OrderController::class, 'cancel'], [$auth]
 $router->get('/public/{slug}/menu/secreta', [PublicController::class, 'secretMenu']);
 $router->get('/public/{slug}/menu', [PublicController::class, 'menu']);
 $router->post('/public/{slug}/orders', [PublicController::class, 'createOrder']);
+$router->get('/public/{slug}/table/{id}', [PublicController::class, 'tableInfo']);
+$router->post('/public/{slug}/table-order', [PublicController::class, 'createTableOrder']);
 
 // --- Facturación ------------------------------------------------------
 // Emisores (cuentas): solo admin. Comprobantes y resumen: admin/manager.

@@ -1,4 +1,11 @@
-import type { CreateOrderInput, CreateOrderResponse, Menu } from '../types';
+import type {
+  CreateOrderInput,
+  CreateOrderResponse,
+  CreateTableOrderInput,
+  CreateTableOrderResponse,
+  Menu,
+  TableInfo,
+} from '../types';
 
 declare global {
   interface Window {
@@ -28,16 +35,18 @@ async function unwrap<T>(res: Response): Promise<T> {
 }
 
 /**
- * Las tres vistas de la carta:
- *  - 'carta'   → /{slug}         · pedís
- *  - 'secreta' → /{slug}/secreta · pedís, pero solo lo que no está en el listado
- *  - 'salon'   → /{slug}/salon   · solo mirás (QR de la mesa)
+ * Las vistas de la carta:
+ *  - 'carta'   → /{slug}           · delivery / retiro
+ *  - 'secreta' → /{slug}/secreta   · productos ocultos
+ *  - 'salon'   → /{slug}/salon     · solo lectura
+ *  - 'mesa'    → /{slug}/mesa/{id} · auto-pedido interactivo para comensales en el salón
  */
-export type Mode = 'carta' | 'secreta' | 'salon';
+export type Mode = 'carta' | 'secreta' | 'salon' | 'mesa';
 
 export interface Route {
   slug: string | null;
   mode: Mode;
+  tableId: string | null;
 }
 
 export function routeFromPath(): Route {
@@ -48,20 +57,39 @@ export function routeFromPath(): Route {
     const fallback = window.__PIZZALOG_CONFIG__?.defaultSlug || window.__PIZZALOG_CONFIG__?.slug;
     if (fallback) {
       window.history.replaceState(null, '', `/${fallback}`);
-      return { slug: fallback, mode: 'carta' };
+      return { slug: fallback, mode: 'carta', tableId: null };
     }
-    return { slug: null, mode: 'carta' };
+    return { slug: null, mode: 'carta', tableId: null };
   }
 
   const second = (parts[1] ?? '').toLowerCase();
-  const mode: Mode = second === 'salon' ? 'salon' : second === 'secreta' ? 'secreta' : 'carta';
+  let mode: Mode = 'carta';
+  let tableId: string | null = null;
 
-  return { slug: decodeURIComponent(first).toLowerCase(), mode };
+  if (second === 'salon') {
+    mode = 'salon';
+  } else if (second === 'secreta') {
+    mode = 'secreta';
+  } else if (second === 'mesa') {
+    mode = 'mesa';
+    tableId = parts[2] ? decodeURIComponent(parts[2]) : null;
+  }
+
+  return { slug: decodeURIComponent(first).toLowerCase(), mode, tableId };
 }
 
 export function fetchMenu(slug: string, mode: Mode): Promise<Menu> {
   const path = mode === 'secreta' ? `/public/${slug}/menu/secreta` : `/public/${slug}/menu`;
   return fetch(`${API}${path}`).then((r) => unwrap<Menu>(r));
+}
+
+export function fetchTableInfo(
+  slug: string,
+  tableId: string,
+): Promise<{ table: TableInfo; business: { name: string; slug: string } }> {
+  return fetch(`${API}/public/${slug}/table/${tableId}`).then((r) =>
+    unwrap<{ table: TableInfo; business: { name: string; slug: string } }>(r),
+  );
 }
 
 export function createOrder(slug: string, input: CreateOrderInput): Promise<CreateOrderResponse> {
@@ -70,6 +98,17 @@ export function createOrder(slug: string, input: CreateOrderInput): Promise<Crea
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
   }).then((r) => unwrap<CreateOrderResponse>(r));
+}
+
+export function createTableOrder(
+  slug: string,
+  input: CreateTableOrderInput,
+): Promise<CreateTableOrderResponse> {
+  return fetch(`${API}/public/${slug}/table-order`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  }).then((r) => unwrap<CreateTableOrderResponse>(r));
 }
 
 export const money = (n: number) =>
