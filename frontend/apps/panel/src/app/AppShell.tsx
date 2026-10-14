@@ -15,7 +15,22 @@ export function AppShell() {
   return (
     <div className="shell">
       <aside className="shell__nav">
-        <div className="shell__brand">Pizzalog</div>
+        <div className="shell__brand">
+          <span className="shell__brand-icon" aria-hidden="true">
+            <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect x="5" y="4.5" width="38" height="39" rx="5" stroke="#F0E6D0" strokeWidth="2.5" />
+              <path d="M5 15.5H43" stroke="#F0E6D0" strokeWidth="2.5" />
+              <circle cx="11" cy="10" r="1.5" fill="#D73828" />
+              <circle cx="17" cy="10" r="1.5" fill="#D73828" />
+              <circle cx="23" cy="10" r="1.5" fill="#D73828" />
+              <path d="M10 27.5L36.5 17.5L34 37.5L10 27.5Z" fill="#D73828" stroke="#F0E6D0" strokeWidth="1.8" strokeLinejoin="round" />
+              <circle cx="24" cy="25" r="2.3" fill="#F0E6D0" />
+              <circle cx="30.5" cy="31" r="2.1" fill="#F0E6D0" />
+              <path d="M2 31H8M1 36H6" stroke="#D73828" strokeWidth="2.5" strokeLinecap="round" />
+            </svg>
+          </span>
+          <span className="shell__brand-text">Pizzalog</span>
+        </div>
         <nav className="shell__menu">
           {items.map((m) => (
             <NavLink
