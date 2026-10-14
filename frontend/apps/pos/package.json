@@ -8,9 +8,13 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "cap:sync": "cap sync"
+    "cap:sync": "cap sync",
+    "cap:android": "cap add android",
+    "cap:open": "cap open android",
+    "build:android": "vite build && cap sync"
   },
   "dependencies": {
+    "@capacitor/android": "^6.1.2",
     "@capacitor/core": "^6.1.2",
     "@capacitor/network": "^6.0.3",
     "@capacitor/preferences": "^6.0.3",
