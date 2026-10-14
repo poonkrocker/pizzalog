@@ -6,8 +6,11 @@ vendor/
 frontend/apps/*/dist/
 .vite/
 
-# Capacitor (se generan en tu máquina con Android Studio)
-frontend/apps/pos/android/
+# Capacitor build artifacts (se generan al compilar en Android Studio / Gradle)
+frontend/apps/pos/android/.gradle/
+frontend/apps/pos/android/build/
+frontend/apps/pos/android/app/build/
+frontend/apps/pos/android/local.properties
 frontend/apps/pos/ios/
 
 # Configuración sensible (NUNCA subir)

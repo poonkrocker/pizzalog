@@ -65,9 +65,17 @@ pnpm format          # prettier
 ## Estado
 
 - [x] Scaffolding del monorepo + paquete `shared`
-- [x] App `panel`: base con login, registro de módulos (router + navegación +
-      permisos por rol) y módulo de Resumen. Falta sumar los módulos de gestión.
-- [ ] App `pos` (TPV con impresión Bluetooth y cola de ventas offline)
+- [x] App `pos` (TPV táctil con pizzas combinables mitad y mitad, impresión Bluetooth ESC/POS 58mm/80mm, cola de ventas offline idempotente con Dexie y proyecto nativo Android Capacitor listo para compilar).
 
-`shared` y `panel` compilan sin errores de tipos y el panel buildea con Vite.
-Pendiente para la UI: agregar el `.woff2` de Alberdini en `apps/panel/public/fonts/`.
+### Compilar app nativa Android (TPV)
+
+```bash
+cd frontend/apps/pos
+pnpm build
+npx cap sync android
+# Para abrir el proyecto en Android Studio:
+npx cap open android
+# O compilar directamente con Gradle:
+cd android && ./gradlew assembleDebug
+```
+El APK resultante se ubica en `frontend/apps/pos/android/app/build/outputs/apk/debug/app-debug.apk`.

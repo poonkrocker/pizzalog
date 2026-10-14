@@ -9,7 +9,7 @@ const storage = new CapacitorTokenStorage();
 // Cliente único de la app. El token se lee de forma asíncrona desde el
 // almacenamiento seguro; el ApiClient ya soporta getToken asíncrono.
 const api = createApi({
-  baseUrl: config.apiUrl,
+  baseUrl: config.getApiUrl,
   getToken: () => storage.get(),
   onUnauthorized: () => {
     void storage.clear();

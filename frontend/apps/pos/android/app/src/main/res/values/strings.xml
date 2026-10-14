@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Pizzalog TPV</string>
+    <string name="title_activity_main">Pizzalog TPV</string>
+    <string name="package_name">app.pizzalog.pos</string>
+    <string name="custom_url_scheme">app.pizzalog.pos</string>
+</resources>

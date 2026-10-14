@@ -4,7 +4,7 @@
 // el panel (web) y el TPV (Capacitor) lo configuran a su manera.
 
 export interface ApiClientConfig {
-  baseUrl: string;
+  baseUrl: string | (() => string | Promise<string>);
   getToken: () => string | null | Promise<string | null>;
   onUnauthorized?: () => void;
 }
@@ -27,8 +27,15 @@ type JsonObject = Record<string, unknown>;
 export class ApiClient {
   constructor(private readonly config: ApiClientConfig) {}
 
+  private async getBaseUrl(): Promise<string> {
+    const b = this.config.baseUrl;
+    const url = typeof b === 'function' ? await b() : b;
+    return url.replace(/\/+$/, '');
+  }
+
   async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const token = await this.config.getToken();
+    const baseUrl = await this.getBaseUrl();
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
@@ -36,7 +43,7 @@ export class ApiClient {
 
     let res: Response;
     try {
-      res = await fetch(`${this.config.baseUrl}${path}`, {
+      res = await fetch(`${baseUrl}${path}`, {
         method,
         headers,
         body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -78,9 +85,10 @@ export class ApiClient {
     const form = new FormData();
     form.append(field, file, 'imagen.jpg');
 
+    const baseUrl = await this.getBaseUrl();
     let res: Response;
     try {
-      res = await fetch(`${this.config.baseUrl}${path}`, { method: 'POST', headers, body: form });
+      res = await fetch(`${baseUrl}${path}`, { method: 'POST', headers, body: form });
     } catch {
       throw new ApiError('No se pudo conectar con el servidor', 0);
     }

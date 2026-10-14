@@ -9,6 +9,12 @@ import {
   type BtDevice,
   type PrinterSettings,
 } from './printer';
+import {
+  DEFAULT_API_URL,
+  getStoredApiUrl,
+  resetStoredApiUrl,
+  setStoredApiUrl,
+} from '@/lib/config';
 
 export function SettingsPage() {
   const [settings, setSettings] = useState<PrinterSettings | null>(null);
@@ -16,8 +22,13 @@ export function SettingsPage() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
+  const [apiUrl, setApiUrl] = useState<string>('');
+  const [apiTesting, setApiTesting] = useState(false);
+  const [apiMsg, setApiMsg] = useState<{ text: string; ok: boolean } | null>(null);
+
   useEffect(() => {
     void getPrinterSettings().then(setSettings);
+    void getStoredApiUrl().then(setApiUrl);
   }, []);
 
   async function update(patch: Partial<PrinterSettings>) {
@@ -25,6 +36,49 @@ export function SettingsPage() {
     const next = { ...settings, ...patch };
     setSettings(next);
     await savePrinterSettings(next);
+  }
+
+  async function saveUrl() {
+    setApiTesting(true);
+    setApiMsg(null);
+    try {
+      const clean = apiUrl.trim().replace(/\/+$/, '');
+      await setStoredApiUrl(clean);
+      setApiMsg({ text: '✓ URL guardada correctamente.', ok: true });
+    } catch (e) {
+      setApiMsg({ text: e instanceof Error ? e.message : 'Error al guardar URL', ok: false });
+    } finally {
+      setApiTesting(false);
+    }
+  }
+
+  async function testConnection() {
+    setApiTesting(true);
+    setApiMsg(null);
+    try {
+      const clean = apiUrl.trim().replace(/\/+$/, '');
+      const res = await fetch(`${clean}/`, { method: 'GET' });
+      if (!res.ok) throw new Error(`El servidor respondió con código ${res.status}`);
+      const data = (await res.json()) as { ok?: boolean; data?: { service?: string } };
+      if (data.ok && data.data?.service === 'pizzalog-api') {
+        setApiMsg({ text: '✓ Conexión exitosa con Pizzalog API.', ok: true });
+      } else {
+        setApiMsg({ text: '✓ Respuesta recibida del servidor.', ok: true });
+      }
+    } catch (e) {
+      setApiMsg({
+        text: `✗ Falló la conexión: ${e instanceof Error ? e.message : 'Sin respuesta'}`,
+        ok: false,
+      });
+    } finally {
+      setApiTesting(false);
+    }
+  }
+
+  async function restoreDefaultUrl() {
+    await resetStoredApiUrl();
+    setApiUrl(DEFAULT_API_URL);
+    setApiMsg({ text: `✓ URL restablecida a ${DEFAULT_API_URL}`, ok: true });
   }
 
   async function search() {
@@ -161,6 +215,53 @@ export function SettingsPage() {
           Imprimir ticket de prueba
         </button>
         {msg && <p className="settings__msg">{msg}</p>}
+      </section>
+
+      <section className="settings__block" style={{ marginTop: 32, borderTop: '1px solid var(--line)', paddingTop: 20 }}>
+        <h2 className="settings__subtitle">Servidor API</h2>
+        <p className="muted-text">
+          Configuración del endpoint backend (por defecto: <code>{DEFAULT_API_URL}</code>).
+        </p>
+        <label className="t-field" style={{ marginTop: 10 }}>
+          <span>URL del servidor:</span>
+          <input
+            type="url"
+            value={apiUrl}
+            placeholder="https://api.pizzalog.net"
+            onChange={(e) => setApiUrl(e.target.value)}
+          />
+        </label>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 8 }}>
+          <button
+            className="t-btn t-btn--primary"
+            disabled={apiTesting || !apiUrl.trim()}
+            onClick={() => void saveUrl()}
+          >
+            Guardar URL
+          </button>
+          <button
+            className="t-btn"
+            disabled={apiTesting || !apiUrl.trim()}
+            onClick={() => void testConnection()}
+          >
+            {apiTesting ? 'Probando…' : 'Probar conexión'}
+          </button>
+        </div>
+        <button
+          className="t-btn"
+          style={{ width: '100%', marginTop: 10, fontSize: 14 }}
+          onClick={() => void restoreDefaultUrl()}
+        >
+          Restablecer a URL original
+        </button>
+        {apiMsg && (
+          <p
+            className="settings__msg"
+            style={{ color: apiMsg.ok ? 'var(--success, #6cc070)' : '#f0a59b' }}
+          >
+            {apiMsg.text}
+          </p>
+        )}
       </section>
     </div>
   );
