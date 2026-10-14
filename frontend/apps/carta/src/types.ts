@@ -2,6 +2,8 @@
 // pública y sin token, así que no reusa @pizzalog/shared (pensado para el
 // panel autenticado) — mantiene su propio contrato, deliberadamente chico.
 
+export type Mode = 'carta' | 'secreta' | 'salon' | 'mesa';
+
 export interface Variant {
   id: number;
   label: string;

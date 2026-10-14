@@ -295,7 +295,7 @@ export function CashPage() {
           <DataTable
             columns={sessionColumns}
             data={history.data ?? []}
-            keyExtractor={(s) => s.id}
+            keyExtractor={(s: any) => s.id}
           />
         )}
       </div>

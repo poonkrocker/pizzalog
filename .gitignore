@@ -22,4 +22,5 @@ backend/config/config.php
 # Sistema
 .DS_Store
 *.log
+*.tsbuildinfo
 coverage/

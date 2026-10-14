@@ -8,20 +8,27 @@ export interface Column<T> {
   width?: string;
 }
 
-export function DataTable<T extends { id: number }>({
+export function DataTable<T extends { id?: number | string } | Record<string, any>>({
   columns,
   rows,
+  data,
   renderExpand,
+  onRowClick,
+  keyExtractor,
 }: {
   columns: Column<T>[];
-  rows: T[];
+  rows?: T[];
+  data?: T[];
   /** Si devuelve contenido para una fila, esa fila se puede desplegar. */
   renderExpand?: (row: T) => ReactNode | null;
+  onRowClick?: (row: T) => void;
+  keyExtractor?: (row: T) => number | string;
 }) {
-  const [open, setOpen] = useState<Set<number>>(new Set());
+  const list = data ?? rows ?? [];
+  const [open, setOpen] = useState<Set<number | string>>(new Set());
   const hasExpand = Boolean(renderExpand);
 
-  function toggle(id: number) {
+  function toggle(id: number | string) {
     setOpen((prev) => {
       const next = new Set(prev);
       next.has(id) ? next.delete(id) : next.add(id);
@@ -43,12 +50,17 @@ export function DataTable<T extends { id: number }>({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => {
+          {list.map((row, idx) => {
             const extra = hasExpand ? renderExpand!(row) : null;
-            const isOpen = open.has(row.id);
+            const rowKey = keyExtractor ? keyExtractor(row) : ((row as { id?: number | string }).id ?? idx);
+            const isOpen = open.has(rowKey);
             return (
-              <Fragment key={row.id}>
-                <tr className={extra && isOpen ? 'is-open' : undefined}>
+              <Fragment key={rowKey}>
+                <tr
+                  className={`${extra && isOpen ? 'is-open' : ''} ${onRowClick ? 'is-clickable' : ''}`}
+                  onClick={() => onRowClick?.(row)}
+                  style={onRowClick ? { cursor: 'pointer' } : undefined}
+                >
                   {columns.map((c) => (
                     <td
                       key={c.key}
@@ -59,11 +71,11 @@ export function DataTable<T extends { id: number }>({
                     </td>
                   ))}
                   {hasExpand && (
-                    <td className="table__exp">
+                    <td className="table__exp" onClick={(e) => e.stopPropagation()}>
                       {extra ? (
                         <button
                           className="exp-btn"
-                          onClick={() => toggle(row.id)}
+                          onClick={() => toggle(rowKey)}
                           aria-expanded={isOpen}
                           aria-label={isOpen ? 'Ocultar' : 'Desplegar'}
                         >

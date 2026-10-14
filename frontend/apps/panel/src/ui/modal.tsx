@@ -6,11 +6,13 @@ export function Modal({
   onClose,
   title,
   children,
+  footer,
 }: {
   open: boolean;
   onClose: () => void;
   title: string;
   children: ReactNode;
+  footer?: ReactNode;
 }) {
   if (!open) return null;
   return createPortal(
@@ -29,6 +31,7 @@ export function Modal({
           </button>
         </header>
         <div className="modal__body">{children}</div>
+        {footer && <footer className="modal__foot" style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>{footer}</footer>}
       </div>
     </div>,
     document.body,

@@ -205,6 +205,10 @@ export function ProductModal({ product, combinableProducts, canOrder, onAdd, onC
                     <span className="pick__label">{i.name}</span>
                   </label>
                 ))}
+              </section>
+            );
+          })}
+
           {/* --- Mitad y Mitad: si hay sabores combinables disponibles --- */}
           {availableHalves.length > 0 && groups.length === 0 && (
             <section className="comments" style={{ marginTop: '1rem', borderTop: '1px dashed var(--c-border, #ddd)', paddingTop: '0.75rem' }}>

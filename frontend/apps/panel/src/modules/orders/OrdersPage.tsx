@@ -350,10 +350,10 @@ export function OrdersPage() {
       )}
       {orders.isSuccess && orderList.length > 0 && (
         <DataTable
-          columns={columns}
+          columns={columns as any}
           data={orderList}
-          keyExtractor={(o) => o.id}
-          onRowClick={(o) => setSelectedOrderId(o.id)}
+          keyExtractor={(o: any) => o.id}
+          onRowClick={(o: any) => setSelectedOrderId(o.id)}
         />
       )}
 

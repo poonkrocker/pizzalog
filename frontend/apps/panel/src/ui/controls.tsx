@@ -7,12 +7,13 @@ import type {
 } from 'react';
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: 'primary' | 'ghost' | 'danger';
+  variant?: 'primary' | 'ghost' | 'danger' | 'secondary';
 };
 
 export function Button({ children, variant = 'primary', ...rest }: ButtonProps) {
+  const v = variant === 'secondary' ? 'ghost' : variant;
   return (
-    <button className={`btn btn--${variant}`} {...rest}>
+    <button className={`btn btn--${v}`} {...rest}>
       {children}
     </button>
   );
