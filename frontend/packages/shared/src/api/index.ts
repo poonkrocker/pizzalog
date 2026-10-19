@@ -56,6 +56,7 @@ export type { OrdersQuery } from './orders';
 export type { SettlementQuery } from './drivers';
 export type { AnalyticsQuery } from './analytics';
 export type { DoughCalculateParams, SimulateParams } from './production';
+export type { DoughProfileInput, SaveRecipeInput, RecipeIngredientInput } from '../types';
 export type { MovementInput } from './supplies';
 export type { OptionInput, VariantUpdateInput } from './variants';
 export type { BusinessUpdateInput, BusinessHoursResponse } from './business';

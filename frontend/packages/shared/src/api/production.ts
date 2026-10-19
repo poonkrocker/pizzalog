@@ -3,6 +3,8 @@ import type {
   CostMarginsResponse,
   DoughCalculation,
   DoughProfile,
+  DoughProfileInput,
+  SaveRecipeInput,
   SimulationResponse,
 } from '../types';
 
@@ -20,12 +22,23 @@ export interface SimulateParams {
 export function productionApi(client: ApiClient) {
   return {
     doughProfiles: () => client.get<{ profiles: DoughProfile[] }>('/production/dough-profiles'),
+    createDoughProfile: (body: DoughProfileInput) =>
+      client.post<{ profile: DoughProfile }>('/production/dough-profiles', body),
+    updateDoughProfile: (id: number, body: DoughProfileInput) =>
+      client.put<{ profile: DoughProfile }>(`/production/dough-profiles/${id}`, body),
+    deleteDoughProfile: (id: number) =>
+      client.delete<{ deleted: boolean }>(`/production/dough-profiles/${id}`),
     doughCalculate: (body: DoughCalculateParams) =>
       client.post<{ profile: DoughProfile; units: number; batches: number; calculation: DoughCalculation }>(
         '/production/dough-calculate',
         body,
       ),
     costMargins: () => client.get<CostMarginsResponse>('/production/cost-margins'),
+    saveRecipe: (body: SaveRecipeInput) =>
+      client.post<{ success: boolean; product_id: number; name: string; price: number; cost: number }>(
+        '/production/recipes',
+        body,
+      ),
     simulate: (body: SimulateParams) => client.post<SimulationResponse>('/production/simulate', body),
   };
 }

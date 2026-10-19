@@ -673,9 +673,56 @@ export interface CostMarginsSummary {
   no_price_count: number;
 }
 
+export interface SupplyItem {
+  id: number;
+  name: string;
+  category: string;
+  unit: string;
+  cost: number;
+}
+
+export interface DoughProfileInput {
+  name: string;
+  unit_weight_grams: number;
+  hydration_pct: number;
+  biga_pct: number;
+  biga_water_pct: number;
+  biga_yeast_pct: number;
+  poolish_pct: number;
+  poolish_water_pct: number;
+  poolish_yeast_pct: number;
+  direct_yeast_pct: number;
+  salt_pct: number;
+  sugar_pct: number;
+  oil_pct: number;
+  flour_white_pct: number;
+  flour_integral_pct: number;
+  flour_semola_pct: number;
+  cost_per_kg?: number;
+  notes?: string | null;
+}
+
+export interface RecipeIngredientInput {
+  ingredient_id?: number;
+  name: string;
+  category?: string;
+  quantity: number;
+  unit: string;
+  unit_cost?: number;
+}
+
+export interface SaveRecipeInput {
+  product_id?: number;
+  name: string;
+  category_name?: string;
+  price: number;
+  ingredients: RecipeIngredientInput[];
+}
+
 export interface CostMarginsResponse {
   summary: CostMarginsSummary;
   products: CostMarginProduct[];
+  supplies?: SupplyItem[];
 }
 
 export interface SimulationProduct {

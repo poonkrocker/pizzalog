@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { formatARS, type CostMarginProduct, type DoughCalculation, type DoughProfile } from '@pizzalog/shared';
 import { Button, Field, Input, Loading, PageHeader, Select } from '@/ui';
 import { useCostMargins, useDoughCalculate, useDoughProfiles, useSimulate } from './hooks';
+import { DoughProfileModal } from './DoughProfileModal';
+import { RecipeModal } from './RecipeModal';
 
 type Tab = 'masas' | 'escandallos' | 'simulador';
 
@@ -17,6 +19,12 @@ export function ProductionPage() {
   const [batches, setBatches] = useState<number>(2);
   const [calculation, setCalculation] = useState<DoughCalculation | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
+
+  // Modales de Masa y Receta
+  const [profileModalOpen, setProfileModalOpen] = useState(false);
+  const [editingProfile, setEditingProfile] = useState<DoughProfile | null>(null);
+  const [recipeModalOpen, setRecipeModalOpen] = useState(false);
+  const [editingRecipe, setEditingRecipe] = useState<CostMarginProduct | null>(null);
 
   const calcMutation = useDoughCalculate();
 
@@ -181,16 +189,60 @@ export function ProductionPage() {
             }}
           >
             <Field label="Tipo de Masa / Perfil">
-              <Select
-                value={selectedProfileId ?? ''}
-                onChange={(e) => setSelectedProfileId(Number(e.target.value))}
-              >
-                {profiles.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </Select>
+              <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                <Select
+                  value={selectedProfileId ?? ''}
+                  onChange={(e) => setSelectedProfileId(Number(e.target.value))}
+                  style={{ flex: 1 }}
+                >
+                  {profiles.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </Select>
+                <button
+                  type="button"
+                  title="Editar receta de esta masa"
+                  onClick={() => {
+                    setEditingProfile(activeProfile);
+                    setProfileModalOpen(true);
+                  }}
+                  style={{
+                    padding: '0.45rem 0.65rem',
+                    borderRadius: '6px',
+                    border: '1px solid #ccc',
+                    background: '#f8f8f8',
+                    cursor: 'pointer',
+                    fontSize: '0.82rem',
+                    fontWeight: 600,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  ✏️ Editar
+                </button>
+                <button
+                  type="button"
+                  title="Crear un nuevo perfil de masa"
+                  onClick={() => {
+                    setEditingProfile(null);
+                    setProfileModalOpen(true);
+                  }}
+                  style={{
+                    padding: '0.45rem 0.65rem',
+                    borderRadius: '6px',
+                    border: '1px solid #2a9d8f',
+                    background: '#2a9d8f',
+                    color: '#fff',
+                    cursor: 'pointer',
+                    fontSize: '0.82rem',
+                    fontWeight: 700,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  + Nueva Masa
+                </button>
+              </div>
             </Field>
 
             <Field label="Cantidad de Pizzas / Unidades">
@@ -621,12 +673,37 @@ export function ProductionPage() {
                   </button>
                 </div>
 
-                <div style={{ width: '220px' }}>
-                  <Input
-                    placeholder="Buscar producto o categoría..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                  />
+                <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center' }}>
+                  <div style={{ width: '220px' }}>
+                    <Input
+                      placeholder="Buscar producto o categoría..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingRecipe(null);
+                      setRecipeModalOpen(true);
+                    }}
+                    style={{
+                      padding: '0.55rem 0.95rem',
+                      borderRadius: '6px',
+                      border: 'none',
+                      background: 'var(--c-accent, #e63946)',
+                      color: '#fff',
+                      fontWeight: 750,
+                      cursor: 'pointer',
+                      fontSize: '0.85rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    + Nueva Receta / Pizza
+                  </button>
                 </div>
               </div>
 
@@ -701,20 +778,41 @@ export function ProductionPage() {
                               {formatARS(p.suggested_price)}
                             </td>
                             <td style={{ padding: '0.75rem 1rem', textAlign: 'center' }}>
-                              <button
-                                type="button"
-                                onClick={() => setExpandedPid(isExpanded ? null : p.id)}
-                                style={{
-                                  padding: '0.3rem 0.6rem',
-                                  border: '1px solid #ccc',
-                                  borderRadius: '4px',
-                                  background: '#fff',
-                                  cursor: 'pointer',
-                                  fontSize: '0.78rem',
-                                }}
-                              >
-                                {isExpanded ? '▲ Cerrar' : `▼ Ver (${p.ingredients.length})`}
-                              </button>
+                              <div style={{ display: 'flex', gap: '0.35rem', justifyContent: 'center' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => setExpandedPid(isExpanded ? null : p.id)}
+                                  style={{
+                                    padding: '0.3rem 0.6rem',
+                                    border: '1px solid #ccc',
+                                    borderRadius: '4px',
+                                    background: '#fff',
+                                    cursor: 'pointer',
+                                    fontSize: '0.78rem',
+                                  }}
+                                >
+                                  {isExpanded ? '▲ Cerrar' : `▼ Ver (${p.ingredients.length})`}
+                                </button>
+                                <button
+                                  type="button"
+                                  title="Editar receta, ingredientes y precio"
+                                  onClick={() => {
+                                    setEditingRecipe(p);
+                                    setRecipeModalOpen(true);
+                                  }}
+                                  style={{
+                                    padding: '0.3rem 0.55rem',
+                                    border: '1px solid #cbd5e1',
+                                    borderRadius: '4px',
+                                    background: '#f8fafc',
+                                    cursor: 'pointer',
+                                    fontSize: '0.78rem',
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  ✏️ Editar
+                                </button>
+                              </div>
                             </td>
                           </tr>
 
@@ -722,8 +820,29 @@ export function ProductionPage() {
                           {isExpanded && (
                             <tr key={`${p.id}-details`} style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
                               <td colSpan={7} style={{ padding: '0.75rem 1.5rem 1.25rem 1.5rem' }}>
-                                <div style={{ fontSize: '0.8rem', fontWeight: 700, textTransform: 'uppercase', color: '#64748b', marginBottom: '0.5rem' }}>
-                                  Composición & Costos de Receta para: {p.name}
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                                  <div style={{ fontSize: '0.8rem', fontWeight: 700, textTransform: 'uppercase', color: '#64748b' }}>
+                                    Composición & Costos de Receta para: {p.name}
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingRecipe(p);
+                                      setRecipeModalOpen(true);
+                                    }}
+                                    style={{
+                                      padding: '0.25rem 0.65rem',
+                                      border: '1px solid #cbd5e1',
+                                      borderRadius: '4px',
+                                      background: '#fff',
+                                      cursor: 'pointer',
+                                      fontSize: '0.75rem',
+                                      fontWeight: 600,
+                                      color: '#1e293b',
+                                    }}
+                                  >
+                                    ✏️ Modificar Ingredientes / Gramajes
+                                  </button>
                                 </div>
                                 {p.ingredients.length === 0 ? (
                                   <p style={{ fontStyle: 'italic', color: '#888', fontSize: '0.85rem' }}>
@@ -952,6 +1071,28 @@ export function ProductionPage() {
           )}
         </div>
       )}
+
+      {/* Modal para Crear / Editar Perfil de Masa */}
+      <DoughProfileModal
+        open={profileModalOpen}
+        onClose={() => setProfileModalOpen(false)}
+        profile={editingProfile}
+        onSaved={(saved) => {
+          profilesQuery.refetch();
+          setSelectedProfileId(saved.id);
+        }}
+      />
+
+      {/* Modal para Crear / Editar Recetas & Escandallos */}
+      <RecipeModal
+        open={recipeModalOpen}
+        onClose={() => setRecipeModalOpen(false)}
+        product={editingRecipe}
+        supplies={marginsData?.supplies ?? []}
+        onSaved={() => {
+          marginsQuery.refetch();
+        }}
+      />
     </section>
   );
 }

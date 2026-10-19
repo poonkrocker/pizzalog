@@ -7,8 +7,9 @@ use Pizzalog\Core\Response;
 
 /**
  * Módulo de Producción:
- *  - Calculadora de Masas y Amasado (Biga, Poolish, Masa Directa, Fainá).
- *  - Escandallos de Recetas, Márgenes y Food Cost (máx 30%).
+ *  - Calculadora de Masas y Amasado (Biga, Poolish, Masa Directa, Fainá, Detroit Style).
+ *  - CRUD de Perfiles de Masa (crear, editar, ajustar fórmulas y harinas).
+ *  - Escandallos y Creación/Edición de Recetas de Productos con cálculo en tiempo real.
  *  - Simulador de Costos e Inflación.
  */
 class ProductionController
@@ -22,29 +23,150 @@ class ProductionController
         $bid = (int) $req->auth['business_id'];
         $pdo = Database::pdo();
 
-        // Verificar si la tabla dough_profiles existe
-        $tableExists = false;
-        try {
-            $stmt = $pdo->query('SHOW TABLES LIKE "dough_profiles"');
-            $tableExists = (bool) $stmt->fetchColumn();
-        } catch (\Throwable $e) {
-            $tableExists = false;
+        $this->ensureProfilesTable($pdo, $bid);
+
+        $stmt = $pdo->prepare(
+            'SELECT * FROM dough_profiles WHERE business_id = ? AND is_active = 1 ORDER BY id ASC'
+        );
+        $stmt->execute([$bid]);
+        $rows = $stmt->fetchAll();
+
+        Response::ok(['profiles' => array_map([$this, 'formatProfile'], $rows)]);
+    }
+
+    /**
+     * POST /production/dough-profiles
+     * Crea un nuevo perfil de masa configurable.
+     */
+    public function doughProfileStore(Request $req): void
+    {
+        $bid = (int) $req->auth['business_id'];
+        $b   = $req->body;
+        $pdo = Database::pdo();
+
+        $this->ensureProfilesTable($pdo, $bid);
+
+        $name = trim((string) ($b['name'] ?? ''));
+        if ($name === '') {
+            Response::error('El nombre del perfil de masa es obligatorio', 422);
+            return;
         }
 
-        if ($tableExists) {
-            $stmt = $pdo->prepare(
-                'SELECT * FROM dough_profiles WHERE business_id = ? AND is_active = 1 ORDER BY id ASC'
-            );
-            $stmt->execute([$bid]);
-            $rows = $stmt->fetchAll();
-            if (!empty($rows)) {
-                Response::ok(['profiles' => array_map([$this, 'formatProfile'], $rows)]);
-                return;
-            }
+        $unitWeightGrams = max(10, (float) ($b['unit_weight_grams'] ?? 220));
+        $hydrationPct    = max(10, (float) ($b['hydration_pct'] ?? 67.9));
+        $bigaPct         = max(0, (float) ($b['biga_pct'] ?? 0));
+        $bigaWaterPct    = max(0, (float) ($b['biga_water_pct'] ?? 50));
+        $bigaYeastPct    = max(0, (float) ($b['biga_yeast_pct'] ?? 0.5));
+        $poolishPct      = max(0, (float) ($b['poolish_pct'] ?? 0));
+        $poolishWaterPct = max(0, (float) ($b['poolish_water_pct'] ?? 100));
+        $poolishYeastPct = max(0, (float) ($b['poolish_yeast_pct'] ?? 0));
+        $directYeastPct  = max(0, (float) ($b['direct_yeast_pct'] ?? 0));
+        $saltPct         = max(0, (float) ($b['salt_pct'] ?? 2.7));
+        $sugarPct        = max(0, (float) ($b['sugar_pct'] ?? 0));
+        $oilPct          = max(0, (float) ($b['oil_pct'] ?? 0));
+        $flourWhitePct   = max(0, (float) ($b['flour_white_pct'] ?? 100));
+        $flourIntegPct   = max(0, (float) ($b['flour_integral_pct'] ?? 0));
+        $flourSemolaPct  = max(0, (float) ($b['flour_semola_pct'] ?? 0));
+        $costPerKg       = max(0, (float) ($b['cost_per_kg'] ?? 932.30));
+        $notes           = !empty($b['notes']) ? trim((string) $b['notes']) : null;
+
+        $stmt = $pdo->prepare(
+            'INSERT INTO dough_profiles 
+             (business_id, name, unit_weight_grams, hydration_pct, biga_pct, biga_water_pct, biga_yeast_pct,
+              poolish_pct, poolish_water_pct, poolish_yeast_pct, direct_yeast_pct, salt_pct, sugar_pct, oil_pct,
+              flour_white_pct, flour_integral_pct, flour_semola_pct, cost_per_kg, notes, is_active)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)'
+        );
+        $stmt->execute([
+            $bid, $name, $unitWeightGrams, $hydrationPct, $bigaPct, $bigaWaterPct, $bigaYeastPct,
+            $poolishPct, $poolishWaterPct, $poolishYeastPct, $directYeastPct, $saltPct, $sugarPct, $oilPct,
+            $flourWhitePct, $flourIntegPct, $flourSemolaPct, $costPerKg, $notes,
+        ]);
+
+        $newId = (int) $pdo->lastInsertId();
+        $stmt = $pdo->prepare('SELECT * FROM dough_profiles WHERE id = ?');
+        $stmt->execute([$newId]);
+        $row = $stmt->fetch();
+
+        Response::ok(['profile' => $this->formatProfile($row)]);
+    }
+
+    /**
+     * PUT /production/dough-profiles/{id}
+     * Actualiza un perfil de masa existente.
+     */
+    public function doughProfileUpdate(Request $req): void
+    {
+        $bid = (int) $req->auth['business_id'];
+        $id  = (int) $req->params['id'];
+        $b   = $req->body;
+        $pdo = Database::pdo();
+
+        $this->ensureProfilesTable($pdo, $bid);
+
+        $name = trim((string) ($b['name'] ?? ''));
+        if ($name === '') {
+            Response::error('El nombre del perfil de masa es obligatorio', 422);
+            return;
         }
 
-        // Fallback predeterminado con fórmulas de Arrabbiata
-        Response::ok(['profiles' => $this->defaultProfiles($bid)]);
+        $unitWeightGrams = max(10, (float) ($b['unit_weight_grams'] ?? 220));
+        $hydrationPct    = max(10, (float) ($b['hydration_pct'] ?? 67.9));
+        $bigaPct         = max(0, (float) ($b['biga_pct'] ?? 0));
+        $bigaWaterPct    = max(0, (float) ($b['biga_water_pct'] ?? 50));
+        $bigaYeastPct    = max(0, (float) ($b['biga_yeast_pct'] ?? 0.5));
+        $poolishPct      = max(0, (float) ($b['poolish_pct'] ?? 0));
+        $poolishWaterPct = max(0, (float) ($b['poolish_water_pct'] ?? 100));
+        $poolishYeastPct = max(0, (float) ($b['poolish_yeast_pct'] ?? 0));
+        $directYeastPct  = max(0, (float) ($b['direct_yeast_pct'] ?? 0));
+        $saltPct         = max(0, (float) ($b['salt_pct'] ?? 2.7));
+        $sugarPct        = max(0, (float) ($b['sugar_pct'] ?? 0));
+        $oilPct          = max(0, (float) ($b['oil_pct'] ?? 0));
+        $flourWhitePct   = max(0, (float) ($b['flour_white_pct'] ?? 100));
+        $flourIntegPct   = max(0, (float) ($b['flour_integral_pct'] ?? 0));
+        $flourSemolaPct  = max(0, (float) ($b['flour_semola_pct'] ?? 0));
+        $costPerKg       = max(0, (float) ($b['cost_per_kg'] ?? 932.30));
+        $notes           = !empty($b['notes']) ? trim((string) $b['notes']) : null;
+
+        $stmt = $pdo->prepare(
+            'UPDATE dough_profiles 
+             SET name = ?, unit_weight_grams = ?, hydration_pct = ?, biga_pct = ?, biga_water_pct = ?, biga_yeast_pct = ?,
+                 poolish_pct = ?, poolish_water_pct = ?, poolish_yeast_pct = ?, direct_yeast_pct = ?, salt_pct = ?, sugar_pct = ?, oil_pct = ?,
+                 flour_white_pct = ?, flour_integral_pct = ?, flour_semola_pct = ?, cost_per_kg = ?, notes = ?
+             WHERE id = ? AND business_id = ?'
+        );
+        $stmt->execute([
+            $name, $unitWeightGrams, $hydrationPct, $bigaPct, $bigaWaterPct, $bigaYeastPct,
+            $poolishPct, $poolishWaterPct, $poolishYeastPct, $directYeastPct, $saltPct, $sugarPct, $oilPct,
+            $flourWhitePct, $flourIntegPct, $flourSemolaPct, $costPerKg, $notes,
+            $id, $bid,
+        ]);
+
+        $stmt = $pdo->prepare('SELECT * FROM dough_profiles WHERE id = ?');
+        $stmt->execute([$id]);
+        $row = $stmt->fetch();
+        if (!$row) {
+            Response::error('Perfil no encontrado', 404);
+            return;
+        }
+
+        Response::ok(['profile' => $this->formatProfile($row)]);
+    }
+
+    /**
+     * DELETE /production/dough-profiles/{id}
+     * Desactiva un perfil de masa.
+     */
+    public function doughProfileDestroy(Request $req): void
+    {
+        $bid = (int) $req->auth['business_id'];
+        $id  = (int) $req->params['id'];
+        $pdo = Database::pdo();
+
+        $stmt = $pdo->prepare('UPDATE dough_profiles SET is_active = 0 WHERE id = ? AND business_id = ?');
+        $stmt->execute([$id, $bid]);
+
+        Response::ok(['deleted' => true]);
     }
 
     /**
@@ -60,12 +182,13 @@ class ProductionController
         $units     = max(1, (int) ($b['units'] ?? 100));
         $batches   = max(1, (int) ($b['batches'] ?? 2));
 
-        // Obtener perfil
+        $pdo = Database::pdo();
+        $this->ensureProfilesTable($pdo, $bid);
+
         $profile = null;
         if ($profileId) {
-            $pdo = Database::pdo();
             try {
-                $stmt = $pdo->prepare('SELECT * FROM dough_profiles WHERE id = ? AND business_id = ?');
+                $stmt = $pdo->prepare('SELECT * FROM dough_profiles WHERE id = ? AND business_id = ? AND is_active = 1');
                 $stmt->execute([$profileId, $bid]);
                 $r = $stmt->fetch();
                 if ($r) $profile = $this->formatProfile($r);
@@ -73,8 +196,15 @@ class ProductionController
         }
 
         if (!$profile) {
-            $defaults = $this->defaultProfiles($bid);
-            $profile = $defaults[0];
+            $stmt = $pdo->prepare('SELECT * FROM dough_profiles WHERE business_id = ? AND is_active = 1 ORDER BY id ASC LIMIT 1');
+            $stmt->execute([$bid]);
+            $r = $stmt->fetch();
+            if ($r) {
+                $profile = $this->formatProfile($r);
+            } else {
+                $defaults = $this->defaultProfiles($bid);
+                $profile = $defaults[0];
+            }
         }
 
         // Obtener costos actuales de insumos de masa
@@ -92,7 +222,8 @@ class ProductionController
 
     /**
      * GET /production/cost-margins
-     * Escandallo completo de productos: costo, precio, margen $ y %, food cost y precio sugerido.
+     * Escandallo completo de productos: costo, precio, margen $ y %, food cost, precio sugerido
+     * y catálogo de insumos disponibles para armar recetas.
      */
     public function costMargins(Request $req): void
     {
@@ -112,7 +243,7 @@ class ProductionController
 
         // 2) Obtener recetas detalladas desde product_ingredients + supplies
         $recStmt = $pdo->prepare(
-            'SELECT pi.product_id, i.name AS ingredient_name, i.category AS ingredient_category,
+            'SELECT pi.product_id, pi.ingredient_id, i.name AS ingredient_name, i.category AS ingredient_category,
                     pi.quantity, pi.unit, COALESCE(s.cost, 0) AS unit_cost
              FROM product_ingredients pi
              JOIN ingredients i ON i.id = pi.ingredient_id
@@ -129,6 +260,7 @@ class ProductionController
             $qty = (float) ($rr['quantity'] ?? 0);
             $uCost = (float) ($rr['unit_cost'] ?? 0);
             $recipesByProduct[$pid][] = [
+                'ingredient_id'   => (int) $rr['ingredient_id'],
                 'name'            => $rr['ingredient_name'],
                 'category'        => $rr['ingredient_category'],
                 'quantity'        => $qty,
@@ -196,6 +328,20 @@ class ProductionController
         $avgFoodCost = $totalRevPotential > 0 ? round(($totalCostPotential / $totalRevPotential) * 100, 1) : 0.0;
         $avgMarginPct = $totalRevPotential > 0 ? round((($totalRevPotential - $totalCostPotential) / $totalRevPotential) * 100, 1) : 0.0;
 
+        // Catálogo de insumos disponibles para armado de nuevas recetas
+        $suppliesList = [];
+        try {
+            $sStmt = $pdo->prepare('SELECT id, name, category, unit, cost FROM supplies WHERE business_id = ? AND is_active = 1 ORDER BY name ASC');
+            $sStmt->execute([$bid]);
+            $suppliesList = array_map(static fn(array $r): array => [
+                'id'       => (int) $r['id'],
+                'name'     => $r['name'],
+                'category' => $r['category'] ?? 'General',
+                'unit'     => $r['unit'] ?? 'kg',
+                'cost'     => (float) ($r['cost'] ?? 0),
+            ], $sStmt->fetchAll());
+        } catch (\Throwable $e) {}
+
         Response::ok([
             'summary' => [
                 'total_products'     => count($items),
@@ -205,7 +351,121 @@ class ProductionController
                 'no_price_count'     => $noPriceCount,
             ],
             'products' => $items,
+            'supplies' => $suppliesList,
         ]);
+    }
+
+    /**
+     * POST /production/recipes
+     * Guarda o actualiza la receta (composición e insumos) de un producto,
+     * calculando su costo exacto y actualizando products.cost.
+     */
+    public function saveRecipe(Request $req): void
+    {
+        $bid = (int) $req->auth['business_id'];
+        $b   = $req->body;
+        $pdo = Database::pdo();
+
+        $pid      = !empty($b['product_id']) ? (int) $b['product_id'] : null;
+        $name     = trim((string) ($b['name'] ?? ''));
+        $catName  = trim((string) ($b['category_name'] ?? 'Pizza'));
+        $price    = max(0, (float) ($b['price'] ?? 0));
+        $ingredients = is_array($b['ingredients'] ?? null) ? $b['ingredients'] : [];
+
+        if ($name === '') {
+            Response::error('El nombre del producto es obligatorio', 422);
+            return;
+        }
+
+        $supplyCosts = $this->getSupplyCosts($bid);
+
+        $pdo->beginTransaction();
+        try {
+            // 1) Resolver producto
+            if ($pid) {
+                $stmt = $pdo->prepare('SELECT id FROM products WHERE id = ? AND business_id = ?');
+                $stmt->execute([$pid, $bid]);
+                if (!$stmt->fetchColumn()) {
+                    $pdo->rollBack();
+                    Response::error('Producto no encontrado', 404);
+                    return;
+                }
+                $updateStmt = $pdo->prepare('UPDATE products SET name = ?, price = ? WHERE id = ? AND business_id = ?');
+                $updateStmt->execute([$name, $price, $pid, $bid]);
+            } else {
+                // Resolver categoría
+                $stmtCat = $pdo->prepare('SELECT id FROM categories WHERE business_id = ? AND name = ? LIMIT 1');
+                $stmtCat->execute([$bid, $catName]);
+                $catId = $stmtCat->fetchColumn();
+                if (!$catId) {
+                    $stmtCatIns = $pdo->prepare('INSERT INTO categories (business_id, name, is_active) VALUES (?, ?, 1)');
+                    $stmtCatIns->execute([$bid, $catName]);
+                    $catId = (int) $pdo->lastInsertId();
+                }
+
+                $stmtIns = $pdo->prepare(
+                    'INSERT INTO products (business_id, category_id, name, price, cost, is_active) VALUES (?, ?, ?, ?, 0.00, 1)'
+                );
+                $stmtIns->execute([$bid, $catId, $name, $price]);
+                $pid = (int) $pdo->lastInsertId();
+            }
+
+            // 2) Actualizar product_ingredients
+            $pdo->prepare('DELETE FROM product_ingredients WHERE product_id = ?')->execute([$pid]);
+
+            $totalCost = 0.0;
+            $insStmt = $pdo->prepare(
+                'INSERT INTO product_ingredients (product_id, ingredient_id, quantity, unit) VALUES (?, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE quantity = VALUES(quantity), unit = VALUES(unit)'
+            );
+
+            foreach ($ingredients as $ing) {
+                $ingName = trim((string) ($ing['name'] ?? ''));
+                if ($ingName === '') continue;
+
+                $qty = max(0, (float) ($ing['quantity'] ?? 0));
+                $unit = trim((string) ($ing['unit'] ?? 'kg'));
+                $ingCat = trim((string) ($ing['category'] ?? 'otro'));
+
+                // Resolver ingrediente
+                $stmtIng = $pdo->prepare('SELECT id FROM ingredients WHERE business_id = ? AND name = ? LIMIT 1');
+                $stmtIng->execute([$bid, $ingName]);
+                $ingId = $stmtIng->fetchColumn();
+                if (!$ingId) {
+                    $validCats = ['masa','salsa','queso','fiambre','vegetal','fruta','condimento','otro'];
+                    $catToSet = in_array($ingCat, $validCats, true) ? $ingCat : 'otro';
+                    $stmtIngIns = $pdo->prepare('INSERT INTO ingredients (business_id, name, category, is_active) VALUES (?, ?, ?, 1)');
+                    $stmtIngIns->execute([$bid, $ingName, $catToSet]);
+                    $ingId = (int) $pdo->lastInsertId();
+                }
+
+                if ($qty > 0) {
+                    $insStmt->execute([$pid, $ingId, $qty, $unit]);
+
+                    $uCost = (float) ($supplyCosts[$ingName] ?? ($ing['unit_cost'] ?? 0));
+                    $totalCost += ($qty * $uCost);
+                }
+            }
+
+            $totalCost = round($totalCost, 2);
+
+            // 3) Actualizar cost en products
+            $pdo->prepare('UPDATE products SET cost = ? WHERE id = ? AND business_id = ?')
+                ->execute([$totalCost, $pid, $bid]);
+
+            $pdo->commit();
+
+            Response::ok([
+                'success'    => true,
+                'product_id' => $pid,
+                'name'       => $name,
+                'price'      => $price,
+                'cost'       => $totalCost,
+            ]);
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            Response::error('Error al guardar receta: ' . $e->getMessage(), 500);
+        }
     }
 
     /**
@@ -283,8 +543,77 @@ class ProductionController
     }
 
     // -----------------------------------------------------------------
-    // Auxiliares de Cálculo de Amasado
+    // Auxiliares de Cálculo y Persistencia
     // -----------------------------------------------------------------
+
+    private function ensureProfilesTable(\PDO $pdo, int $bid): void
+    {
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS dough_profiles (
+                id                   BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                business_id          BIGINT UNSIGNED NOT NULL,
+                name                 VARCHAR(100)    NOT NULL,
+                unit_weight_grams    DECIMAL(10,2)   NOT NULL DEFAULT 220.00,
+                hydration_pct        DECIMAL(5,2)    NOT NULL DEFAULT 67.90,
+                biga_pct             DECIMAL(5,2)    NOT NULL DEFAULT 25.00,
+                biga_water_pct       DECIMAL(5,2)    NOT NULL DEFAULT 50.00,
+                biga_yeast_pct       DECIMAL(6,3)    NOT NULL DEFAULT 0.500,
+                poolish_pct          DECIMAL(5,2)    NOT NULL DEFAULT 0.00,
+                poolish_water_pct    DECIMAL(5,2)    NOT NULL DEFAULT 100.00,
+                poolish_yeast_pct    DECIMAL(6,3)    NOT NULL DEFAULT 0.000,
+                direct_yeast_pct     DECIMAL(6,3)    NOT NULL DEFAULT 0.000,
+                salt_pct             DECIMAL(5,2)    NOT NULL DEFAULT 2.70,
+                sugar_pct            DECIMAL(5,2)    NOT NULL DEFAULT 0.00,
+                oil_pct              DECIMAL(5,2)    NOT NULL DEFAULT 0.00,
+                flour_white_pct      DECIMAL(5,2)    NOT NULL DEFAULT 81.75,
+                flour_integral_pct   DECIMAL(5,2)    NOT NULL DEFAULT 12.17,
+                flour_semola_pct     DECIMAL(5,2)    NOT NULL DEFAULT 6.08,
+                cost_per_kg          DECIMAL(10,2)   NOT NULL DEFAULT 932.30,
+                notes                TEXT            NULL,
+                is_active            TINYINT(1)      NOT NULL DEFAULT 1,
+                created_at           TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at           TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (id),
+                KEY idx_dp_business (business_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+        );
+
+        // Si no hay perfiles para este negocio, sembrar perfiles por defecto
+        $stmt = $pdo->prepare('SELECT COUNT(*) FROM dough_profiles WHERE business_id = ? AND is_active = 1');
+        $stmt->execute([$bid]);
+        if ((int) $stmt->fetchColumn() === 0) {
+            $ins = $pdo->prepare(
+                'INSERT INTO dough_profiles 
+                 (business_id, name, unit_weight_grams, hydration_pct, biga_pct, biga_water_pct, biga_yeast_pct,
+                  poolish_pct, poolish_water_pct, poolish_yeast_pct, direct_yeast_pct, salt_pct, sugar_pct, oil_pct,
+                  flour_white_pct, flour_integral_pct, flour_semola_pct, cost_per_kg, notes, is_active)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)'
+            );
+            foreach ($this->defaultProfiles($bid) as $p) {
+                $ins->execute([
+                    $bid,
+                    $p['name'],
+                    $p['unit_weight_grams'],
+                    $p['hydration_pct'],
+                    $p['biga_pct'],
+                    $p['biga_water_pct'],
+                    $p['biga_yeast_pct'],
+                    $p['poolish_pct'],
+                    $p['poolish_water_pct'],
+                    $p['poolish_yeast_pct'],
+                    $p['direct_yeast_pct'],
+                    $p['salt_pct'],
+                    $p['sugar_pct'],
+                    $p['oil_pct'],
+                    $p['flour_white_pct'],
+                    $p['flour_integral_pct'],
+                    $p['flour_semola_pct'],
+                    $p['cost_per_kg'],
+                    $p['notes'],
+                ]);
+            }
+        }
+    }
 
     private function computeDough(array $p, int $units, int $batches, array $costs): array
     {
@@ -338,7 +667,7 @@ class ProductionController
             ];
         }
 
-        // Fórmulas para masas con harina (Pizza, Molde, Focaccia)
+        // Fórmulas para masas con harina (Pizza, Molde, Focaccia, Detroit)
         $unitGrams = (float) $p['unit_weight_grams'];
         $hydrPct   = (float) $p['hydration_pct'];
         $bigaPct   = (float) $p['biga_pct'];
@@ -422,19 +751,34 @@ class ProductionController
             $waLines[] = "──────────────────";
         }
 
-        $waLines[] = "💧 *PASO 2: EMPASTE / MASA FINAL*";
-        $waLines[] = "• Harina restante: *{$finalFlourKg} kg*";
-        if ($flourSemolaKg > 0) $waLines[] = "  ↳ Sémola: {$flourSemolaKg} kg";
-        if ($flourIntegKg > 0)  $waLines[] = "  ↳ Integral: {$flourIntegKg} kg";
-        $waLines[] = "• Agua restante: *{$finalWaterKg} L*";
-        $waLines[] = "• Sal fina (2.7%): *" . ($saltKg * 1000) . " g*";
-        if ($directYeastKg > 0) $waLines[] = "• Levadura directa: *" . ($directYeastKg * 1000) . " g*";
-        if ($sugarKg > 0)       $waLines[] = "• Azúcar: *" . ($sugarKg * 1000) . " g*";
+        if ($bigaFlourKg <= 0 && $poolishFlourKg <= 0) {
+            $waLines[] = "🥣 *AMASADO DIRECTO (SIN PREFERMENTO)*";
+            $waLines[] = "• Harina Total: *{$finalFlourKg} kg*";
+            if ($flourSemolaKg > 0) $waLines[] = "  ↳ Sémola: {$flourSemolaKg} kg";
+            if ($flourIntegKg > 0)  $waLines[] = "  ↳ Integral: {$flourIntegKg} kg";
+            $waLines[] = "• Agua Total ({$hydrPct}%): *{$finalWaterKg} L*";
+            $waLines[] = "• Levadura directa: *" . ($directYeastKg * 1000) . " g*";
+            $waLines[] = "• Sal fina ({$saltPct}%): *" . ($saltKg * 1000) . " g*";
+            if ($sugarKg > 0) $waLines[] = "• Azúcar: *" . ($sugarKg * 1000) . " g*";
+            if ($oilKg > 0)   $waLines[] = "• Aceite: *" . ($oilKg * 1000) . " cc*";
+        } else {
+            $waLines[] = "💧 *PASO 2: EMPASTE / MASA FINAL*";
+            $waLines[] = "• Harina restante: *{$finalFlourKg} kg*";
+            if ($flourSemolaKg > 0) $waLines[] = "  ↳ Sémola: {$flourSemolaKg} kg";
+            if ($flourIntegKg > 0)  $waLines[] = "  ↳ Integral: {$flourIntegKg} kg";
+            $waLines[] = "• Agua restante: *{$finalWaterKg} L*";
+            $waLines[] = "• Sal fina ({$saltPct}%): *" . ($saltKg * 1000) . " g*";
+            if ($directYeastKg > 0) $waLines[] = "• Levadura directa: *" . ($directYeastKg * 1000) . " g*";
+            if ($sugarKg > 0)       $waLines[] = "• Azúcar: *" . ($sugarKg * 1000) . " g*";
+            if ($oilKg > 0)         $waLines[] = "• Aceite: *" . ($oilKg * 1000) . " cc*";
+        }
 
         if ($batches > 1) {
             $waLines[] = "──────────────────";
             $waLines[] = "⚖️ *DIVIDIDO EN {$batches} AMASADAS:*";
-            $waLines[] = "• Biga p/ amasada: " . round($bigaTotalKg / $batches, 3) . " kg";
+            if ($bigaTotalKg > 0) {
+                $waLines[] = "• Biga p/ amasada: " . round($bigaTotalKg / $batches, 3) . " kg";
+            }
             $waLines[] = "• Harina p/ amasada: " . round($finalFlourKg / $batches, 3) . " kg";
             $waLines[] = "• Agua p/ amasada: " . round($finalWaterKg / $batches, 3) . " L";
             $waLines[] = "• Sal p/ amasada: " . round(($saltKg * 1000) / $batches, 1) . " g";
@@ -538,6 +882,50 @@ class ProductionController
             [
                 'id'                => 2,
                 'business_id'       => $bid,
+                'name'              => 'Pizza Napolitana (Amasado Directo sin Biga)',
+                'unit_weight_grams' => 220.00,
+                'hydration_pct'     => 66.00,
+                'biga_pct'          => 0.00,
+                'biga_water_pct'    => 0.00,
+                'biga_yeast_pct'    => 0.000,
+                'poolish_pct'       => 0.00,
+                'poolish_water_pct' => 0.00,
+                'poolish_yeast_pct' => 0.000,
+                'direct_yeast_pct'  => 0.350,
+                'salt_pct'          => 2.70,
+                'sugar_pct'         => 0.00,
+                'oil_pct'           => 0.00,
+                'flour_white_pct'   => 90.00,
+                'flour_integral_pct'=> 5.00,
+                'flour_semola_pct'  => 5.00,
+                'cost_per_kg'       => 920.00,
+                'notes'             => 'Amasado directo sin prefermento: 220g bollo, 66% hidratación, levadura directa 0.35%, sal 2.7%.',
+            ],
+            [
+                'id'                => 3,
+                'business_id'       => $bid,
+                'name'              => 'Pizza Detroit Style (Bandeja Cuadrada)',
+                'unit_weight_grams' => 380.00,
+                'hydration_pct'     => 72.00,
+                'biga_pct'          => 0.00,
+                'biga_water_pct'    => 0.00,
+                'biga_yeast_pct'    => 0.000,
+                'poolish_pct'       => 0.00,
+                'poolish_water_pct' => 0.00,
+                'poolish_yeast_pct' => 0.000,
+                'direct_yeast_pct'  => 0.400,
+                'salt_pct'          => 2.50,
+                'sugar_pct'         => 1.00,
+                'oil_pct'           => 3.00,
+                'flour_white_pct'   => 90.00,
+                'flour_integral_pct'=> 0.00,
+                'flour_semola_pct'  => 10.00,
+                'cost_per_kg'       => 960.00,
+                'notes'             => 'Detroit Style clásica: 380g masa gruesa aireada con costra crocante en los bordes, oliva 3%, azúcar 1%.',
+            ],
+            [
+                'id'                => 4,
+                'business_id'       => $bid,
                 'name'              => 'Pizza Napolitana (Biga 19%)',
                 'unit_weight_grams' => 220.00,
                 'hydration_pct'     => 67.90,
@@ -558,7 +946,7 @@ class ProductionController
                 'notes'             => 'Variante Biga 19% para fermentaciones más lentas.',
             ],
             [
-                'id'                => 3,
+                'id'                => 5,
                 'business_id'       => $bid,
                 'name'              => 'Pizza Napolitana (Biga 15%)',
                 'unit_weight_grams' => 220.00,
@@ -580,7 +968,7 @@ class ProductionController
                 'notes'             => 'Variante Biga 15% para clima cálido / verano.',
             ],
             [
-                'id'                => 4,
+                'id'                => 6,
                 'business_id'       => $bid,
                 'name'              => 'Pizza Molde Porteña 600g',
                 'unit_weight_grams' => 600.00,
@@ -602,7 +990,7 @@ class ProductionController
                 'notes'             => 'Molde gruesa 600g: 75.3% hidratación, 15% sémola rimacinata, levadura directa 0.19%.',
             ],
             [
-                'id'                => 5,
+                'id'                => 7,
                 'business_id'       => $bid,
                 'name'              => 'Focaccia Alta Hidratación',
                 'unit_weight_grams' => 330.00,
@@ -624,7 +1012,7 @@ class ProductionController
                 'notes'             => 'Focaccia con Poolish 20% (100% agua, 10% levadura), 73.68% hidr, azúcar 2%, sal 3%.',
             ],
             [
-                'id'                => 6,
+                'id'                => 8,
                 'business_id'       => $bid,
                 'name'              => 'Fainá Tradicional de Garbanzos',
                 'unit_weight_grams' => 185.00,

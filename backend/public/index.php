@@ -99,8 +99,12 @@ $router->get('/analytics/sales-over-time', [AnalyticsController::class, 'salesOv
 
 // --- Producción / Masas / Escandallos (Calculadora) -------------------
 $router->get('/production/dough-profiles', [ProductionController::class, 'doughProfiles'], [$auth]);
+$router->post('/production/dough-profiles', [ProductionController::class, 'doughProfileStore'], [$auth, $manage]);
+$router->put('/production/dough-profiles/{id}', [ProductionController::class, 'doughProfileUpdate'], [$auth, $manage]);
+$router->delete('/production/dough-profiles/{id}', [ProductionController::class, 'doughProfileDestroy'], [$auth, $manage]);
 $router->post('/production/dough-calculate', [ProductionController::class, 'doughCalculate'], [$auth]);
 $router->get('/production/cost-margins', [ProductionController::class, 'costMargins'], [$auth, $manage]);
+$router->post('/production/recipes', [ProductionController::class, 'saveRecipe'], [$auth, $manage]);
 $router->post('/production/simulate', [ProductionController::class, 'simulate'], [$auth, $manage]);
 
 // --- Empleados (solo admin) -------------------------------------------
