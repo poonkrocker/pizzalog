@@ -7,6 +7,7 @@ import { SalePage } from '@/modules/sale/SalePage';
 import { SalonPage } from '@/modules/salon/SalonPage';
 import { SessionPage } from '@/modules/salon/SessionPage';
 import { KitchenPage } from '@/modules/kitchen/KitchenPage';
+import { CashPage } from '@/modules/cash/CashPage';
 import { SettingsPage } from '@/print/SettingsPage';
 
 export function App() {
@@ -22,6 +23,7 @@ export function App() {
           }
         >
           <Route path="/" element={<HomePage />} />
+          <Route path="/caja" element={<CashPage />} />
           <Route path="/venta" element={<SalePage />} />
           <Route path="/salon" element={<SalonPage />} />
           <Route path="/salon/:id" element={<SessionPage />} />

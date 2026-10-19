@@ -11,6 +11,8 @@ frontend/apps/pos/android/.gradle/
 frontend/apps/pos/android/build/
 frontend/apps/pos/android/app/build/
 frontend/apps/pos/android/local.properties
+frontend/apps/pos/android/.idea/
+.idea/
 frontend/apps/pos/ios/
 
 # Configuración sensible (NUNCA subir)

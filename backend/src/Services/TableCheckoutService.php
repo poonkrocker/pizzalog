@@ -38,7 +38,9 @@ class TableCheckoutService
     ): array {
         $items = $this->sessions->getOrderedItems($bid, $sessionId);
         if ($items === []) {
-            throw new \RuntimeException('La cuenta no tiene ítems para cobrar');
+            // Si la mesa no tiene consumos registrados, se cierra y libera la mesa directamente
+            $this->sessions->markClosed($bid, $sessionId);
+            return [];
         }
 
         // Definir los grupos a facturar.

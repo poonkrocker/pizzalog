@@ -38,8 +38,8 @@ export function SessionPage() {
     try {
       await closeSession.mutateAsync({ sessionId: sid, payment_method: method });
       navigate('/salon');
-    } catch {
-      setError('No se pudo cobrar la cuenta');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo cobrar la cuenta');
     }
   }
 

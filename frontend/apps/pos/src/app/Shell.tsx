@@ -2,11 +2,15 @@ import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '@/lib/auth';
 import { useOnline } from '@/lib/network';
 import { useSync } from '@/offline/sync';
+import { useCurrentCashSession } from '@/modules/cash/hooks';
 
 export function Shell() {
   const { user, logout } = useAuth();
   const online = useOnline();
   const { pendingCount } = useSync();
+  const { data: cashSession } = useCurrentCashSession();
+
+  const isCashOpen = Boolean(cashSession && cashSession.status === 'open');
 
   return (
     <div className="shell">
@@ -16,6 +20,23 @@ export function Shell() {
           {pendingCount > 0 && (
             <span className="pending-pill">{pendingCount} por enviar</span>
           )}
+          <NavLink
+            to="/caja"
+            style={{
+              textDecoration: 'none',
+              padding: '3px 8px',
+              borderRadius: '12px',
+              fontSize: '12px',
+              fontWeight: 700,
+              background: isCashOpen ? 'rgba(108, 192, 112, 0.2)' : 'rgba(253, 183, 64, 0.2)',
+              color: isCashOpen ? 'var(--success)' : 'var(--ocre)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+            }}
+          >
+            {isCashOpen ? '🟢 Caja' : '🟡 Abrir Caja'}
+          </NavLink>
           <span className={`net-pill${online ? '' : ' net-pill--off'}`}>
             <span className="net-dot" />
             {online ? 'En línea' : 'Sin conexión'}
@@ -40,6 +61,10 @@ export function Shell() {
         <NavLink to="/" end className="nav-item">
           <span className="nav-item__icon">▦</span>
           Inicio
+        </NavLink>
+        <NavLink to="/caja" className="nav-item">
+          <span className="nav-item__icon">💵</span>
+          Turno
         </NavLink>
         <NavLink to="/venta" className="nav-item">
           <span className="nav-item__icon">＄</span>

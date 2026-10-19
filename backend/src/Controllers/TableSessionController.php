@@ -228,7 +228,7 @@ class TableSessionController
         try {
             $saleIds = (new TableCheckoutService())
                 ->close($bid, (int) $req->auth['user_id'], $id, $paymentMethod, $splits, $cashSessionId, $note);
-        } catch (\RuntimeException $e) {
+        } catch (\Throwable $e) {
             Response::error($e->getMessage(), 422);
         }
 
