@@ -64,16 +64,31 @@ class SaleService
         $subtotal = round($subtotal, 2);
         $total    = round($subtotal - $discount, 2);
 
-        $stmt = $pdo->prepare(
-            'INSERT INTO sales
-                (business_id, sale_number, client_uuid, user_id, cash_session_id,
-                 subtotal, discount, total, payment_method, status, channel, note, table_session_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, "completed", ?, ?, ?)'
-        );
-        $stmt->execute([
-            $bid, $saleNumber, $clientUuid, $userId, $cashSessionId,
-            $subtotal, $discount, $total, $paymentMethod, $channel, $note, $tableSessionId,
-        ]);
+        $hasTableSessionCol = $this->ensureTableSessionSchema($pdo);
+
+        if ($hasTableSessionCol) {
+            $stmt = $pdo->prepare(
+                'INSERT INTO sales
+                    (business_id, sale_number, client_uuid, user_id, cash_session_id,
+                     subtotal, discount, total, payment_method, status, channel, note, table_session_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, "completed", ?, ?, ?)'
+            );
+            $stmt->execute([
+                $bid, $saleNumber, $clientUuid, $userId, $cashSessionId,
+                $subtotal, $discount, $total, $paymentMethod, $channel, $note, $tableSessionId,
+            ]);
+        } else {
+            $stmt = $pdo->prepare(
+                'INSERT INTO sales
+                    (business_id, sale_number, client_uuid, user_id, cash_session_id,
+                     subtotal, discount, total, payment_method, status, channel, note)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, "completed", ?, ?)'
+            );
+            $stmt->execute([
+                $bid, $saleNumber, $clientUuid, $userId, $cashSessionId,
+                $subtotal, $discount, $total, $paymentMethod, $channel, $note,
+            ]);
+        }
         $saleId = (int) $pdo->lastInsertId();
 
         $itemStmt = $pdo->prepare(
@@ -126,5 +141,32 @@ class SaleService
         }
 
         return $saleId;
+    }
+
+    private function ensureTableSessionSchema(\PDO $pdo): bool
+    {
+        static $hasCol = null;
+        if ($hasCol !== null) {
+            return $hasCol;
+        }
+
+        try {
+            $col = $pdo->query("SHOW COLUMNS FROM sales LIKE 'table_session_id'")->fetch();
+            if (!$col) {
+                $pdo->exec("ALTER TABLE sales ADD COLUMN table_session_id BIGINT UNSIGNED NULL AFTER channel");
+                $col = $pdo->query("SHOW COLUMNS FROM sales LIKE 'table_session_id'")->fetch();
+            }
+            $hasCol = (bool) $col;
+
+            // Asegurar que channel soporte dine_in
+            $channelCol = $pdo->query("SHOW COLUMNS FROM sales LIKE 'channel'")->fetch();
+            if ($channelCol && isset($channelCol['Type']) && !str_contains($channelCol['Type'], 'dine_in')) {
+                $pdo->exec("ALTER TABLE sales MODIFY channel ENUM('counter','web','whatsapp','pedidosya','rappi','phone','dine_in') NOT NULL DEFAULT 'counter'");
+            }
+        } catch (\Throwable) {
+            $hasCol = false;
+        }
+
+        return $hasCol ?? false;
     }
 }
