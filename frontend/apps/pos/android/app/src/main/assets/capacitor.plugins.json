@@ -1,0 +1,14 @@
+[
+	{
+		"pkg": "@capacitor/network",
+		"classpath": "com.capacitorjs.plugins.network.NetworkPlugin"
+	},
+	{
+		"pkg": "@capacitor/preferences",
+		"classpath": "com.capacitorjs.plugins.preferences.PreferencesPlugin"
+	},
+	{
+		"pkg": "@e-is/capacitor-bluetooth-serial",
+		"classpath": "com.bluetoothserial.plugin.BluetoothSerialPlugin"
+	}
+]
