@@ -521,3 +521,183 @@ export interface AnalyticsSalesPoint {
   revenue: number;
 }
 
+export interface AnalyticsIngredient {
+  id: number;
+  name: string;
+  category: string;
+  units: number;
+  sales_count: number;
+}
+
+export interface ProductCombination {
+  p1_id: number;
+  p2_id: number;
+  p1_name: string;
+  p2_name: string;
+  pair_orders: number;
+  total_revenue: number;
+}
+
+export interface IngredientCombination {
+  i1_id: number;
+  i2_id: number;
+  i1_name: string;
+  i2_name: string;
+  i1_category: string;
+  i2_category: string;
+  orders_count: number;
+  occurrences: number;
+}
+
+export interface AnalyticsWinningCombinations {
+  product_combinations: ProductCombination[];
+  ingredient_combinations: IngredientCombination[];
+}
+
+// --- Producción / Calculadora de Masas & Costos ---------------------------
+
+export interface DoughProfile {
+  id: number;
+  business_id: number;
+  name: string;
+  unit_weight_grams: number;
+  hydration_pct: number;
+  biga_pct: number;
+  biga_water_pct: number;
+  biga_yeast_pct: number;
+  poolish_pct: number;
+  poolish_water_pct: number;
+  poolish_yeast_pct: number;
+  direct_yeast_pct: number;
+  salt_pct: number;
+  sugar_pct: number;
+  oil_pct: number;
+  flour_white_pct: number;
+  flour_integral_pct: number;
+  flour_semola_pct: number;
+  cost_per_kg: number;
+  notes: string | null;
+}
+
+export interface DoughCalculation {
+  type: 'pizza' | 'faina';
+  total_weight_kg: number;
+  total_flour_kg?: number;
+  total_water_kg?: number;
+  weight_per_unit_g: number;
+  units: number;
+  batches: number;
+  flour_blend?: {
+    white_kg: number;
+    semola_kg: number;
+    integral_kg: number;
+  };
+  biga?: {
+    active: boolean;
+    pct: number;
+    flour_kg: number;
+    water_kg: number;
+    yeast_g: number;
+    total_kg: number;
+  };
+  poolish?: {
+    active: boolean;
+    pct: number;
+    flour_kg: number;
+    water_kg: number;
+    yeast_g: number;
+    total_kg: number;
+  };
+  empaste?: {
+    flour_kg: number;
+    water_kg: number;
+    salt_g: number;
+    direct_yeast_g: number;
+    sugar_g: number;
+    oil_cc: number;
+  };
+  total?: {
+    chickpea_flour_kg: number;
+    water_liters: number;
+    salt_grams: number;
+    oil_liters: number;
+  };
+  per_batch: {
+    batches?: number;
+    flour_kg?: number;
+    water_kg?: number;
+    biga_kg?: number;
+    salt_g?: number;
+    chickpea_flour_kg?: number;
+    water_liters?: number;
+    salt_grams?: number;
+    oil_liters?: number;
+  };
+  cost: {
+    total: number;
+    per_kg: number;
+    per_unit: number;
+  };
+  whatsapp_text: string;
+}
+
+export interface RecipeIngredient {
+  name: string;
+  category: string;
+  quantity: number;
+  unit: string;
+  unit_cost: number;
+  total_cost: number;
+}
+
+export interface CostMarginProduct {
+  id: number;
+  name: string;
+  category: string;
+  price: number;
+  cost: number;
+  margin: number;
+  margin_pct: number;
+  food_cost_pct: number;
+  markup_pct: number;
+  suggested_price: number;
+  status: 'ok' | 'review' | 'no_price';
+  ingredients: RecipeIngredient[];
+}
+
+export interface CostMarginsSummary {
+  total_products: number;
+  avg_food_cost_pct: number;
+  avg_margin_pct: number;
+  review_count: number;
+  no_price_count: number;
+}
+
+export interface CostMarginsResponse {
+  summary: CostMarginsSummary;
+  products: CostMarginProduct[];
+}
+
+export interface SimulationProduct {
+  id: number;
+  name: string;
+  category: string;
+  current_price: number;
+  current_cost: number;
+  simulated_price: number;
+  simulated_cost: number;
+  simulated_margin: number;
+  simulated_food_cost: number;
+}
+
+export interface SimulationResponse {
+  simulation: {
+    cost_delta_pct: number;
+    price_delta_pct: number;
+    orig_avg_food_cost: number;
+    sim_avg_food_cost: number;
+    delta_food_cost: number;
+  };
+  products: SimulationProduct[];
+}
+

@@ -12,6 +12,7 @@ import { SuppliesPage } from './supplies/SuppliesPage';
 import { SuppliersPage } from './suppliers/SuppliersPage';
 import { CustomersPage } from './customers/CustomersPage';
 import { BusinessPage } from './business/BusinessPage';
+import { ProductionPage } from './production/ProductionPage';
 
 // Registro central de módulos del panel.
 // Para sumar uno: crear su carpeta en modules/, importar su página y agregar
@@ -48,6 +49,14 @@ export const modules: ModuleDef[] = [
     roles: ['admin', 'manager'],
     element: <ProductsPage />,
     icon: '\u25C9',
+  },
+  {
+    id: 'production',
+    title: 'Calculadora & Costos',
+    path: 'calculadora',
+    roles: ['admin', 'manager'],
+    element: <ProductionPage />,
+    icon: '🥣',
   },
   {
     id: 'sales',

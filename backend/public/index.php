@@ -27,6 +27,7 @@ use Pizzalog\Controllers\VariantController;
 use Pizzalog\Controllers\BusinessController;
 use Pizzalog\Controllers\UploadController;
 use Pizzalog\Controllers\ProductController;
+use Pizzalog\Controllers\ProductionController;
 use Pizzalog\Controllers\SaleController;
 use Pizzalog\Controllers\TableAreaController;
 use Pizzalog\Controllers\TableController;
@@ -93,7 +94,14 @@ $router->get('/analytics/summary', [AnalyticsController::class, 'summary'], [$au
 $router->get('/analytics/top-products', [AnalyticsController::class, 'topProducts'], [$auth, $manage]);
 $router->get('/analytics/product-margins', [AnalyticsController::class, 'productMargins'], [$auth, $manage]);
 $router->get('/analytics/ingredients', [AnalyticsController::class, 'ingredients'], [$auth, $manage]);
+$router->get('/analytics/winning-combinations', [AnalyticsController::class, 'winningCombinations'], [$auth, $manage]);
 $router->get('/analytics/sales-over-time', [AnalyticsController::class, 'salesOverTime'], [$auth, $manage]);
+
+// --- Producción / Masas / Escandallos (Calculadora) -------------------
+$router->get('/production/dough-profiles', [ProductionController::class, 'doughProfiles'], [$auth]);
+$router->post('/production/dough-calculate', [ProductionController::class, 'doughCalculate'], [$auth]);
+$router->get('/production/cost-margins', [ProductionController::class, 'costMargins'], [$auth, $manage]);
+$router->post('/production/simulate', [ProductionController::class, 'simulate'], [$auth, $manage]);
 
 // --- Empleados (solo admin) -------------------------------------------
 $router->get('/users', [UserController::class, 'index'], [$auth, $admin]);

@@ -25,3 +25,20 @@ export function useSalesOverTime(params: AnalyticsQuery) {
     queryFn: () => api.analytics.salesOverTime(params).then((r) => r.points),
   });
 }
+
+export function useAnalyticsIngredients(params: AnalyticsQuery) {
+  const api = useApi();
+  return useQuery({
+    queryKey: ['analytics', 'ingredients', params],
+    queryFn: () => api.analytics.ingredients(params),
+  });
+}
+
+export function useWinningCombinations(params: AnalyticsQuery) {
+  const api = useApi();
+  return useQuery({
+    queryKey: ['analytics', 'winning-combinations', params],
+    queryFn: () => api.analytics.winningCombinations(params),
+  });
+}
+

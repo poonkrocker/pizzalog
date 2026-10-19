@@ -16,6 +16,7 @@ import { ordersApi } from './orders';
 import { cashApi } from './cash';
 import { analyticsApi } from './analytics';
 import { driversApi } from './drivers';
+import { productionApi } from './production';
 
 // Crea la fachada de la API. Cada dominio es un módulo independiente: sumar
 // uno nuevo (cash, inventory, fiscal...) es agregar su archivo y una línea
@@ -41,6 +42,7 @@ export function createApi(config: ApiClientConfig) {
     cash: cashApi(client),
     analytics: analyticsApi(client),
     drivers: driversApi(client),
+    production: productionApi(client),
   };
 }
 
@@ -53,6 +55,7 @@ export type { SalesQuery } from './sales';
 export type { OrdersQuery } from './orders';
 export type { SettlementQuery } from './drivers';
 export type { AnalyticsQuery } from './analytics';
+export type { DoughCalculateParams, SimulateParams } from './production';
 export type { MovementInput } from './supplies';
 export type { OptionInput, VariantUpdateInput } from './variants';
 export type { BusinessUpdateInput, BusinessHoursResponse } from './business';

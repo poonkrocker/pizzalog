@@ -223,6 +223,91 @@ class AnalyticsController
     }
 
     /**
+     * GET /analytics/winning-combinations
+     * Combinaciones ganadoras:
+     *  - de productos (cross-selling: productos que se compran juntos en un mismo pedido)
+     *  - de ingredientes (sabores / toppings que co-ocurren con mayor frecuencia en las ventas)
+     */
+    public function winningCombinations(Request $req): void
+    {
+        [$bid, $fromDt, $toDt] = $this->ctx($req);
+        $pdo = Database::pdo();
+
+        // 1) Combinaciones de productos comprados juntos en el mismo ticket/pedido
+        $stmtProd = $pdo->prepare(
+            'SELECT 
+                LEAST(si1.product_id, si2.product_id) AS p1_id,
+                GREATEST(si1.product_id, si2.product_id) AS p2_id,
+                MAX(CASE WHEN si1.product_id <= si2.product_id THEN COALESCE(p1.name, si1.product_name) ELSE COALESCE(p2.name, si2.product_name) END) AS p1_name,
+                MAX(CASE WHEN si1.product_id <= si2.product_id THEN COALESCE(p2.name, si2.product_name) ELSE COALESCE(p1.name, si1.product_name) END) AS p2_name,
+                COUNT(DISTINCT s.id) AS pair_orders,
+                SUM(si1.line_total + si2.line_total) AS total_revenue
+             FROM sale_items si1
+             JOIN sale_items si2 ON si1.sale_id = si2.sale_id AND si1.id < si2.id
+             JOIN sales s ON s.id = si1.sale_id
+             LEFT JOIN products p1 ON p1.id = si1.product_id
+             LEFT JOIN products p2 ON p2.id = si2.product_id
+             WHERE s.business_id = ? AND s.status = "completed"
+               AND s.created_at BETWEEN ? AND ?
+               AND si1.product_id IS NOT NULL AND si2.product_id IS NOT NULL
+               AND si1.product_id != si2.product_id
+             GROUP BY p1_id, p2_id
+             ORDER BY pair_orders DESC, total_revenue DESC
+             LIMIT 10'
+        );
+        $stmtProd->execute([$bid, $fromDt, $toDt]);
+        $productCombinations = array_map(static fn(array $r): array => [
+            'p1_id'         => (int) $r['p1_id'],
+            'p2_id'         => (int) $r['p2_id'],
+            'p1_name'       => $r['p1_name'] ?? 'Producto 1',
+            'p2_name'       => $r['p2_name'] ?? 'Producto 2',
+            'pair_orders'   => (int) $r['pair_orders'],
+            'total_revenue' => (float) $r['total_revenue'],
+        ], $stmtProd->fetchAll());
+
+        // 2) Combinaciones de ingredientes vendidos juntos (excluyendo masa base para destacar toppings)
+        $stmtIng = $pdo->prepare(
+            'SELECT 
+                LEAST(i1.id, i2.id) AS i1_id,
+                GREATEST(i1.id, i2.id) AS i2_id,
+                MAX(CASE WHEN i1.id <= i2.id THEN i1.name ELSE i2.name END) AS i1_name,
+                MAX(CASE WHEN i1.id <= i2.id THEN i2.name ELSE i1.name END) AS i2_name,
+                MAX(CASE WHEN i1.id <= i2.id THEN i1.category ELSE i2.category END) AS i1_category,
+                MAX(CASE WHEN i1.id <= i2.id THEN i2.category ELSE i1.category END) AS i2_category,
+                COUNT(DISTINCT s.id) AS orders_count,
+                SUM(si.quantity)     AS occurrences
+             FROM sale_items si
+             JOIN sales s ON s.id = si.sale_id
+             JOIN product_ingredients pi1 ON pi1.product_id = si.product_id
+             JOIN product_ingredients pi2 ON pi2.product_id = si.product_id AND pi1.ingredient_id < pi2.ingredient_id
+             JOIN ingredients i1 ON i1.id = pi1.ingredient_id
+             JOIN ingredients i2 ON i2.id = pi2.ingredient_id
+             WHERE s.business_id = ? AND s.status = "completed"
+               AND s.created_at BETWEEN ? AND ?
+               AND i1.category != "masa" AND i2.category != "masa"
+             GROUP BY i1_id, i2_id
+             ORDER BY occurrences DESC, orders_count DESC
+             LIMIT 12'
+        );
+        $stmtIng->execute([$bid, $fromDt, $toDt]);
+        $ingredientCombinations = array_map(static fn(array $r): array => [
+            'i1_id'        => (int) $r['i1_id'],
+            'i2_id'        => (int) $r['i2_id'],
+            'i1_name'      => $r['i1_name'],
+            'i2_name'      => $r['i2_name'],
+            'i1_category'  => $r['i1_category'],
+            'i2_category'  => $r['i2_category'],
+            'orders_count' => (int) $r['orders_count'],
+            'occurrences'  => (float) $r['occurrences'],
+        ], $stmtIng->fetchAll());
+
+        Response::ok([
+            'product_combinations'    => $productCombinations,
+            'ingredient_combinations' => $ingredientCombinations,
+        ]);
+    }
+
+    /**
      * GET /analytics/sales-over-time
      * Serie diaria para graficar la tendencia de facturación.
      */

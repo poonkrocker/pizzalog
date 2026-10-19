@@ -1,8 +1,10 @@
 import type { ApiClient } from './client';
 import type {
+  AnalyticsIngredient,
   AnalyticsSalesPoint,
   AnalyticsSummary,
   AnalyticsTopProduct,
+  AnalyticsWinningCombinations,
 } from '../types';
 
 export interface AnalyticsQuery {
@@ -32,6 +34,10 @@ export function analyticsApi(client: ApiClient) {
     productMargins: (params?: AnalyticsQuery) =>
       client.get<{ products: any[] }>(`/analytics/product-margins${queryStr(params)}`),
     ingredients: (params?: AnalyticsQuery) =>
-      client.get<{ ingredients: any[]; by_category: any[] }>(`/analytics/ingredients${queryStr(params)}`),
+      client.get<{ ingredients: AnalyticsIngredient[]; by_category: Array<{ category: string; units: number }> }>(
+        `/analytics/ingredients${queryStr(params)}`,
+      ),
+    winningCombinations: (params?: AnalyticsQuery) =>
+      client.get<AnalyticsWinningCombinations>(`/analytics/winning-combinations${queryStr(params)}`),
   };
 }

@@ -2,7 +2,13 @@ import { useMemo, useState } from 'react';
 import { formatARS, type AnalyticsQuery } from '@pizzalog/shared';
 import { useAuth } from '@/lib/auth';
 import { Field, Input, Loading, PageHeader, Select } from '@/ui';
-import { useAnalyticsSummary, useSalesOverTime, useTopProducts } from './hooks';
+import {
+  useAnalyticsIngredients,
+  useAnalyticsSummary,
+  useSalesOverTime,
+  useTopProducts,
+  useWinningCombinations,
+} from './hooks';
 import { Link } from 'react-router-dom';
 
 function todayStr(): string {
@@ -21,6 +27,19 @@ function firstOfMonthStr(): string {
 }
 
 type Preset = 'today' | '7days' | 'month' | 'custom';
+
+function ingredientCategoryLabel(cat: string): { label: string; icon: string; bg: string } {
+  switch (cat) {
+    case 'queso': return { label: 'Queso', icon: '🧀', bg: '#fef3c7' };
+    case 'vegetal': return { label: 'Vegetal', icon: '🥬', bg: '#dcfce7' };
+    case 'fiambre': return { label: 'Fiambre', icon: '🥓', bg: '#fee2e2' };
+    case 'salsa': return { label: 'Salsa', icon: '🥫', bg: '#ffedd5' };
+    case 'fruta': return { label: 'Fruta', icon: '🍐', bg: '#fef9c3' };
+    case 'condimento': return { label: 'Condimento', icon: '🌿', bg: '#e0e7ff' };
+    case 'masa': return { label: 'Masa', icon: '🌾', bg: '#f3e8ff' };
+    default: return { label: 'Insumo', icon: '🍴', bg: '#f3f4f6' };
+  }
+}
 
 export function DashboardPage() {
   const { user } = useAuth();
@@ -48,15 +67,25 @@ export function DashboardPage() {
   const summary = useAnalyticsSummary(query);
   const topProducts = useTopProducts({ ...query, limit: 6 });
   const salesOverTime = useSalesOverTime(query);
+  const ingredientsQuery = useAnalyticsIngredients(query);
+  const combinationsQuery = useWinningCombinations(query);
 
   const s = summary.data;
   const products = topProducts.data ?? [];
   const points = salesOverTime.data ?? [];
+  const ingredients = ingredientsQuery.data?.ingredients ?? [];
+  const ingCategories = ingredientsQuery.data?.by_category ?? [];
+  const productCombos = combinationsQuery.data?.product_combinations ?? [];
+  const ingredientCombos = combinationsQuery.data?.ingredient_combinations ?? [];
 
   // Calcular valor máximo para escalar el gráfico de barras diario
   const maxRevenue = useMemo(() => {
     return Math.max(...points.map((p) => p.revenue), 100);
   }, [points]);
+
+  const maxIngredientUnits = useMemo(() => {
+    return Math.max(...ingredients.map((i) => i.units), 1);
+  }, [ingredients]);
 
   return (
     <section>
@@ -121,6 +150,24 @@ export function DashboardPage() {
           }}
         >
           🍕 Catálogo & Variantes
+        </Link>
+        <Link
+          to="/calculadora"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.4rem',
+            padding: '0.5rem 1rem',
+            background: 'var(--c-surface, #fff)',
+            border: '1px solid var(--c-border, #ddd)',
+            borderRadius: '6px',
+            color: 'inherit',
+            textDecoration: 'none',
+            fontWeight: 600,
+            fontSize: '0.9rem',
+          }}
+        >
+          🥣 Calculadora de Masas & Costos
         </Link>
       </div>
 
@@ -453,6 +500,191 @@ export function DashboardPage() {
                     </div>
                     <div style={{ textAlign: 'right', fontWeight: 700, color: 'var(--c-accent, #e63946)' }}>
                       {formatARS(p.revenue)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Sección de Ingredientes Más Vendidos y Combinaciones de Toppings */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
+              gap: '1.5rem',
+              marginBottom: '2rem',
+            }}
+          >
+            {/* 1) Ingredientes Más Demandados */}
+            <div
+              style={{
+                background: 'var(--c-surface, #fff)',
+                border: '1px solid var(--c-border, #ddd)',
+                borderRadius: '8px',
+                padding: '1.25rem',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                <h3 style={{ margin: 0, fontSize: '1.1rem' }}>🌱 Ingredientes Más Demandados</h3>
+                <span style={{ fontSize: '0.8rem', color: '#777' }}>Popularidad en recetas</span>
+              </div>
+
+              {ingredients.length === 0 ? (
+                <p style={{ color: '#888', fontStyle: 'italic', fontSize: '0.9rem' }}>
+                  Sin datos de ingredientes registrados para el período seleccionado.
+                </p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  {ingredients.slice(0, 8).map((ing, idx) => {
+                    const badge = ingredientCategoryLabel(ing.category);
+                    const pct = Math.round((ing.units / maxIngredientUnits) * 100);
+                    return (
+                      <div key={ing.id || ing.name} style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.88rem' }}>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontWeight: 600 }}>
+                            <span
+                              style={{
+                                fontSize: '0.72rem',
+                                padding: '0.15rem 0.4rem',
+                                borderRadius: '4px',
+                                background: badge.bg,
+                                fontWeight: 700,
+                              }}
+                            >
+                              {badge.icon} {badge.label}
+                            </span>
+                            {ing.name}
+                          </span>
+                          <span style={{ color: '#555', fontWeight: 700 }}>
+                            {ing.units} <span style={{ fontSize: '0.75rem', fontWeight: 400, color: '#888' }}>unid ({ing.sales_count} ventas)</span>
+                          </span>
+                        </div>
+                        <div style={{ width: '100%', height: '6px', background: '#f0f0f0', borderRadius: '3px', overflow: 'hidden' }}>
+                          <div
+                            style={{
+                              height: '100%',
+                              width: `${pct}%`,
+                              background: '#2a9d8f',
+                              borderRadius: '3px',
+                              transition: 'width 0.3s ease',
+                            }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* 2) Combinaciones Favoritas de Ingredientes */}
+            <div
+              style={{
+                background: 'var(--c-surface, #fff)',
+                border: '1px solid var(--c-border, #ddd)',
+                borderRadius: '8px',
+                padding: '1.25rem',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                <h3 style={{ margin: 0, fontSize: '1.1rem' }}>✨ Toppings & Sabores Ganadores</h3>
+                <span style={{ fontSize: '0.8rem', color: '#777' }}>Co-ocurrencia en ventas</span>
+              </div>
+
+              {ingredientCombos.length === 0 ? (
+                <p style={{ color: '#888', fontStyle: 'italic', fontSize: '0.9rem' }}>
+                  Sin combinaciones de ingredientes registradas aún en el período.
+                </p>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.6rem' }}>
+                  {ingredientCombos.slice(0, 8).map((ic, idx) => (
+                    <div
+                      key={`${ic.i1_id}-${ic.i2_id}`}
+                      style={{
+                        padding: '0.6rem 0.8rem',
+                        background: '#fafafa',
+                        border: '1px solid #eee',
+                        borderRadius: '6px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between',
+                      }}
+                    >
+                      <div style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.3rem', color: '#2b2d42' }}>
+                        {ic.i1_name} <span style={{ color: 'var(--c-accent, #e63946)', fontWeight: 800 }}>+</span> {ic.i2_name}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: '#666', display: 'flex', justifyContent: 'space-between' }}>
+                        <span>🔥 {ic.occurrences} pizzas</span>
+                        <span>{ic.orders_count} pedidos</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Sección de Combinaciones Ganadoras de Productos (Cross-Selling) */}
+          <div
+            style={{
+              background: 'var(--c-surface, #fff)',
+              border: '1px solid var(--c-border, #ddd)',
+              borderRadius: '8px',
+              padding: '1.25rem',
+              marginBottom: '2rem',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.1rem' }}>🤝 Parejas Ganadoras de Productos (Venta Cruzada)</h3>
+                <span style={{ fontSize: '0.8rem', color: '#777' }}>
+                  Productos que los clientes piden juntos con mayor frecuencia en el mismo ticket
+                </span>
+              </div>
+              <span style={{ fontSize: '0.8rem', background: '#fff3cd', color: '#856404', padding: '0.2rem 0.5rem', borderRadius: '4px', fontWeight: 600 }}>
+                Ideal para armar Promos y Combos
+              </span>
+            </div>
+
+            {productCombos.length === 0 ? (
+              <p style={{ color: '#888', fontStyle: 'italic', fontSize: '0.9rem' }}>
+                Sin combinaciones de productos suficientes en el período analizado.
+              </p>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '0.85rem' }}>
+                {productCombos.slice(0, 6).map((pc, idx) => (
+                  <div
+                    key={`${pc.p1_id}-${pc.p2_id}`}
+                    style={{
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '8px',
+                      padding: '0.85rem 1rem',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      background: idx === 0 ? '#f0fdf4' : '#ffffff',
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontSize: '0.75rem', color: '#888', fontWeight: 700 }}>
+                        {idx === 0 ? '⭐ Dúo #1' : `#${idx + 1}`}
+                      </div>
+                      <div style={{ fontSize: '0.9rem', fontWeight: 700, margin: '0.15rem 0' }}>
+                        {pc.p1_name}
+                      </div>
+                      <div style={{ fontSize: '0.82rem', color: '#4b5563' }}>
+                        + {pc.p2_name}
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: '#2a9d8f', fontWeight: 600, marginTop: '0.2rem' }}>
+                        Juntos en {pc.pair_orders} pedidos
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: '0.75rem', color: '#666' }}>Facturado</div>
+                      <div style={{ fontWeight: 800, fontSize: '0.95rem', color: 'var(--c-accent, #e63946)' }}>
+                        {formatARS(pc.total_revenue)}
+                      </div>
                     </div>
                   </div>
                 ))}
