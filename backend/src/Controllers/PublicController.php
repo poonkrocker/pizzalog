@@ -230,6 +230,11 @@ class PublicController
             if (!empty($it['half_product_id'])) {
                 $productIds[] = (int) $it['half_product_id'];
             }
+            if (!empty($it['extra_product_ids']) && is_array($it['extra_product_ids'])) {
+                foreach ($it['extra_product_ids'] as $eid) {
+                    if ((int) $eid > 0) $productIds[] = (int) $eid;
+                }
+            }
         }
 
         $products = $this->loadOrderableProducts($bid, array_values(array_unique($productIds)));
@@ -281,6 +286,19 @@ class PublicController
                 $unitPrice = max($unitPrice, (float) $halfProd['price']);
             }
 
+            if (!empty($it['extra_product_ids']) && is_array($it['extra_product_ids'])) {
+                $extraNames = [];
+                foreach ($it['extra_product_ids'] as $eid) {
+                    $eid = (int) $eid;
+                    if (isset($products[$eid])) {
+                        $extraNames[] = $products[$eid]['name'];
+                        $unitPrice += (float) $products[$eid]['price'];
+                    }
+                }
+                if ($extraNames !== []) {
+                    $name .= ' (+ ' . implode(', ', $extraNames) . ')';
+                }
+            }
             $lineTotal = round($unitPrice * $qty, 2);
 
             $selections = $it['combo_selections'] ?? null;
@@ -404,6 +422,11 @@ class PublicController
             if (!empty($it['half_product_id'])) {
                 $productIds[] = (int) $it['half_product_id'];
             }
+            if (!empty($it['extra_product_ids']) && is_array($it['extra_product_ids'])) {
+                foreach ($it['extra_product_ids'] as $eid) {
+                    if ((int) $eid > 0) $productIds[] = (int) $eid;
+                }
+            }
         }
 
         $products = $this->loadOrderableProducts($bid, array_values(array_unique($productIds)));
@@ -446,6 +469,19 @@ class PublicController
                 }
             }
 
+            if (!empty($it['extra_product_ids']) && is_array($it['extra_product_ids'])) {
+                $extraNames = [];
+                foreach ($it['extra_product_ids'] as $eid) {
+                    $eid = (int) $eid;
+                    if (isset($products[$eid])) {
+                        $extraNames[] = $products[$eid]['name'];
+                        $unitPrice += (float) $products[$eid]['price'];
+                    }
+                }
+                if ($extraNames !== []) {
+                    $name .= ' (+ ' . implode(', ', $extraNames) . ')';
+                }
+            }
             $lineTotal       = round($unitPrice * $qty, 2);
             $totalRound     += $lineTotal;
             $totalItemsCount += $qty;

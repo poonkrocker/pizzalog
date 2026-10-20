@@ -308,10 +308,15 @@ class TableSessionRepository
 
                 $origPrice   = null;
                 $discountPct = 0.0;
+                if (!empty($it['name']) && is_string($it['name'])) {
+                    $name = trim($it['name']);
+                }
 
                 if (isset($it['unit_price']) && is_numeric($it['unit_price']) && (int) $product['is_open_price'] !== 1) {
                     $sentPrice = max(0.0, (float) $it['unit_price']);
-                    if ($sentPrice < $price) {
+                    if ($sentPrice > $price) {
+                        $price = $sentPrice;
+                    } elseif ($sentPrice < $price) {
                         $origPrice   = $price;
                         $price       = $sentPrice;
                         $discountPct = isset($it['discount_pct']) && is_numeric($it['discount_pct'])

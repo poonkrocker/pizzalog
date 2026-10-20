@@ -13,6 +13,7 @@ import { SuppliersPage } from './suppliers/SuppliersPage';
 import { CustomersPage } from './customers/CustomersPage';
 import { BusinessPage } from './business/BusinessPage';
 import { ProductionPage } from './production/ProductionPage';
+import { StaffPage } from './staff/StaffPage';
 
 // Registro central de módulos del panel.
 // Para sumar uno: crear su carpeta en modules/, importar su página y agregar
@@ -41,6 +42,14 @@ export const modules: ModuleDef[] = [
     roles: ['admin', 'manager'],
     element: <DriversPage />,
     icon: '🛵',
+  },
+  {
+    id: 'staff',
+    title: 'Personal & Sueldos',
+    path: 'personal',
+    roles: ['admin', 'manager'],
+    element: <StaffPage />,
+    icon: '👥',
   },
   {
     id: 'products',

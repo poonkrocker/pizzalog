@@ -86,6 +86,9 @@ class VariantRepository
         $pdo->beginTransaction();
         try {
             // 1) Snapshot de precios actuales por label (para preservarlos)
+            $pstmt = $pdo->prepare('SELECT price FROM products WHERE id = ? AND business_id = ? LIMIT 1');
+            $pstmt->execute([$productId, $bid]);
+            $basePrice = (float) ($pstmt->fetchColumn() ?: 0.00);
             $prev = $pdo->prepare(
                 'SELECT label, price FROM product_variants WHERE product_id = ? AND business_id = ?'
             );
@@ -134,7 +137,8 @@ class VariantRepository
                 );
                 foreach ($combos as $ci => $combo) {
                     $label = implode(' / ', array_column($combo, 'value'));
-                    $price = $priceByLabel[$label] ?? 0.00;
+                    $prevPrice = $priceByLabel[$label] ?? 0.00;
+                    $price = $prevPrice > 0 ? $prevPrice : $basePrice;
                     $insVar->execute([$bid, $productId, $label, $price, $ci]);
                     $variantId = (int) $pdo->lastInsertId();
                     foreach ($combo as $v) {

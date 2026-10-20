@@ -185,7 +185,18 @@ export function VariantsModal({ product, onClose }: { product: Product; onClose:
 
       {rows.length > 0 && (
         <div className="variant-grid">
-          <h3 className="variant-grid__title">Combinaciones ({rows.length})</h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <h3 className="variant-grid__title" style={{ margin: 0 }}>Combinaciones ({rows.length})</h3>
+            <button
+              type="button"
+              className="link"
+              onClick={() =>
+                setRows((prev) => prev.map((r) => ({ ...r, price: String(product.price) })))
+              }
+            >
+              Igualar todas al precio general (${product.price.toLocaleString('es-AR')})
+            </button>
+          </div>
           {rows.map((r, i) => (
             <div key={r.id} className="variant-row">
               <span className="variant-row__label">{r.label}</span>

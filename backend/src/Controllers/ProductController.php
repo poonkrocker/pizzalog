@@ -173,6 +173,7 @@ class ProductController
 
             $ids = $this->ingredients->resolveNames($bid, $d['ingredients']);
             $this->ingredients->syncProduct($id, $ids);
+            $pdo->prepare('UPDATE product_variants SET price = ? WHERE product_id = ? AND business_id = ?')->execute([$d['price'], $id, $bid]);
 
             $pdo->commit();
         } catch (\Throwable $e) {
@@ -224,6 +225,9 @@ class ProductController
         Database::pdo()
             ->prepare('UPDATE products SET name = ?, price = ?, category_id = ? WHERE id = ? AND business_id = ?')
             ->execute([$name, $price, $categoryId, $id, $bid]);
+        if ($req->input('price') !== null) {
+            Database::pdo()->prepare('UPDATE product_variants SET price = ? WHERE product_id = ? AND business_id = ?')->execute([$price, $id, $bid]);
+        }
 
         Response::ok(['product' => $this->hydrate($bid, $this->findOwned($req, $id))]);
     }

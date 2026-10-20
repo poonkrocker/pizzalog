@@ -6,6 +6,7 @@ import { lineKey, type CartLine } from '../lib/cart';
 interface Props {
   product: Product;
   combinableProducts?: Product[];
+  extraProducts?: Product[];
   /** En modo salón no se pide: el modal es solo de lectura. */
   canOrder: boolean;
   onAdd: (line: Omit<CartLine, 'quantity'>, qty: number) => void;
@@ -26,12 +27,17 @@ function Placeholder({ name }: { name: string }) {
  *  - simple  → precio y listo
  *  - variantes → elegís una (obligatorio; el back rechaza si no mandás variant_id)
  *  - mitad y mitad → elegís 2° sabor entre pizzas combinables (cobra la más cara)
+ *  - extras de pizza → agregados opcionales de la categoría Extras
  *  - combo   → stepper: un paso por grupo, "elegí 3 pizzas" con contador
- *
- * El precio del combo es el del combo, no la suma de lo elegido: por eso los
- * ítems del combo se muestran sin precio, para que nadie sume de más.
  */
-export function ProductModal({ product, combinableProducts, canOrder, onAdd, onClose }: Props) {
+export function ProductModal({
+  product,
+  combinableProducts,
+  extraProducts,
+  canOrder,
+  onAdd,
+  onClose,
+}: Props) {
   const variants = useMemo(
     () => (product.variants ?? []).filter((v) => v.is_active === 1),
     [product],
@@ -45,10 +51,19 @@ export function ProductModal({ product, combinableProducts, canOrder, onAdd, onC
   const [qty, setQty] = useState(1);
   const [isHalfHalf, setIsHalfHalf] = useState(false);
   const [secondHalfId, setSecondHalfId] = useState<number | undefined>(undefined);
+  const [selectedExtraIds, setSelectedExtraIds] = useState<number[]>([]);
 
   const availableHalves = useMemo(() => {
     return (combinableProducts ?? []).filter((p) => p.id !== product.id && p.is_available_now);
   }, [combinableProducts, product.id]);
+
+  const availableExtras = useMemo(() => {
+    return (extraProducts ?? []).filter((p) => p.id !== product.id && p.is_available_now);
+  }, [extraProducts, product.id]);
+
+  const selectedExtras = useMemo(() => {
+    return availableExtras.filter((e) => selectedExtraIds.includes(e.id));
+  }, [availableExtras, selectedExtraIds]);
 
   const secondHalf = useMemo(() => {
     return availableHalves.find((p) => p.id === secondHalfId);
@@ -60,10 +75,17 @@ export function ProductModal({ product, combinableProducts, canOrder, onAdd, onC
       base = variants.find((v) => v.id === variantId)?.price ?? product.price;
     }
     if (isHalfHalf && secondHalf) {
-      return Math.max(base, secondHalf.price);
+      base = Math.max(base, secondHalf.price);
     }
-    return base;
-  }, [variantId, variants, product.price, isHalfHalf, secondHalf]);
+    const extrasSum = selectedExtras.reduce((sum, e) => sum + e.price, 0);
+    return base + extrasSum;
+  }, [variantId, variants, product.price, isHalfHalf, secondHalf, selectedExtras]);
+
+  function toggleExtra(extraId: number) {
+    setSelectedExtraIds((prev) =>
+      prev.includes(extraId) ? prev.filter((id) => id !== extraId) : [...prev, extraId],
+    );
+  }
 
   function togglePick(group: { id: number; select_count: number }, productId: number) {
     setPicks((prev) => {
@@ -71,8 +93,6 @@ export function ProductModal({ product, combinableProducts, canOrder, onAdd, onC
       if (current.includes(productId)) {
         return { ...prev, [group.id]: current.filter((x) => x !== productId) };
       }
-      // Al llegar al tope, el próximo tap reemplaza al más viejo en vez de no
-      // hacer nada: si no, el botón parece roto.
       const next =
         current.length >= group.select_count
           ? [...current.slice(1), productId]
@@ -104,18 +124,29 @@ export function ProductModal({ product, combinableProducts, canOrder, onAdd, onC
         : undefined;
 
     const variantLabel = variants.find((v) => v.id === variantId)?.label;
-    const effectiveName =
+    const baseName =
       isHalfHalf && secondHalf
         ? `Pizza 1/2 ${product.name} + 1/2 ${secondHalf.name}`
         : variantLabel
-        ? `${product.name} · ${variantLabel}`
-        : product.name;
+          ? `${product.name} · ${variantLabel}`
+          : product.name;
+    const effectiveName =
+      selectedExtras.length > 0
+        ? `${baseName} (+ ${selectedExtras.map((e) => e.name).join(', ')})`
+        : baseName;
 
     onAdd(
       {
-        key: lineKey(product, variantId, selections, isHalfHalf ? secondHalf?.id : undefined),
+        key: lineKey(
+          product,
+          variantId,
+          selections,
+          isHalfHalf ? secondHalf?.id : undefined,
+          selectedExtraIds,
+        ),
         product_id: product.id,
         half_product_id: isHalfHalf ? secondHalf?.id : undefined,
+        ...(selectedExtraIds.length > 0 ? { extra_product_ids: selectedExtraIds } : {}),
         name: effectiveName,
         unit_price: unitPrice,
         image_url: product.image_url,
@@ -209,10 +240,46 @@ export function ProductModal({ product, combinableProducts, canOrder, onAdd, onC
             );
           })}
 
+          {/* --- Extras para agregar a la pizza --- */}
+          {availableExtras.length > 0 && groups.length === 0 && (
+            <section className="comments" style={{ marginTop: '0.85rem' }}>
+              <h3 className="comments__title">🧀 ¿querés sumarle algún extra?</h3>
+              {availableExtras.map((ex) => {
+                const checked = selectedExtraIds.includes(ex.id);
+                return (
+                  <label key={ex.id} className={`pick${checked ? ' pick--on' : ''}`}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleExtra(ex.id)}
+                    />
+                    <span className="pick__label">+ {ex.name}</span>
+                    <span className="pick__price">+{money(ex.price)}</span>
+                  </label>
+                );
+              })}
+            </section>
+          )}
+
           {/* --- Mitad y Mitad: si hay sabores combinables disponibles --- */}
           {availableHalves.length > 0 && groups.length === 0 && (
-            <section className="comments" style={{ marginTop: '1rem', borderTop: '1px dashed var(--c-border, #ddd)', paddingTop: '0.75rem' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', cursor: 'pointer', fontWeight: 600 }}>
+            <section
+              className="comments"
+              style={{
+                marginTop: '1rem',
+                borderTop: '1px dashed var(--c-border, #ddd)',
+                paddingTop: '0.75rem',
+              }}
+            >
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.6rem',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                }}
+              >
                 <input
                   type="checkbox"
                   checked={isHalfHalf}
@@ -225,14 +292,29 @@ export function ProductModal({ product, combinableProducts, canOrder, onAdd, onC
               </label>
 
               {isHalfHalf && (
-                <div style={{ marginTop: '0.75rem', padding: '0.6rem 0.8rem', background: 'var(--c-surface, #f9f9f9)', borderRadius: '6px' }}>
+                <div
+                  style={{
+                    marginTop: '0.75rem',
+                    padding: '0.6rem 0.8rem',
+                    background: 'var(--c-surface, #f9f9f9)',
+                    borderRadius: '6px',
+                  }}
+                >
                   <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.8rem', color: '#666' }}>
                     Elegí el 2° sabor (se cobra el precio de la mitad más cara):
                   </p>
                   <select
                     value={secondHalfId ?? ''}
-                    onChange={(e) => setSecondHalfId(e.target.value ? Number(e.target.value) : undefined)}
-                    style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #ccc', fontSize: '0.85rem' }}
+                    onChange={(e) =>
+                      setSecondHalfId(e.target.value ? Number(e.target.value) : undefined)
+                    }
+                    style={{
+                      width: '100%',
+                      padding: '0.5rem',
+                      borderRadius: '4px',
+                      border: '1px solid #ccc',
+                      fontSize: '0.85rem',
+                    }}
                   >
                     <option value="">-- Seleccioná el segundo sabor --</option>
                     {availableHalves.map((h) => (

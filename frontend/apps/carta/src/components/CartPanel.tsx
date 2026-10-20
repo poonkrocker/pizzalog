@@ -107,6 +107,8 @@ export function CartPanel({
             quantity: l.quantity,
             ...(l.variant_id !== undefined ? { variant_id: l.variant_id } : {}),
             ...(l.half_product_id !== undefined ? { half_product_id: l.half_product_id } : {}),
+          ...(l.extra_product_ids && l.extra_product_ids.length > 0 ? { extra_product_ids: l.extra_product_ids } : {}),
+
             ...(l.combo_selections ? { combo_selections: l.combo_selections } : {}),
             ...(l.notes ? { notes: l.notes } : {}),
           })),
@@ -146,6 +148,7 @@ export function CartPanel({
           quantity: l.quantity,
           ...(l.variant_id !== undefined ? { variant_id: l.variant_id } : {}),
           ...(l.half_product_id !== undefined ? { half_product_id: l.half_product_id } : {}),
+          ...(l.extra_product_ids && l.extra_product_ids.length > 0 ? { extra_product_ids: l.extra_product_ids } : {}),
           ...(l.combo_selections ? { combo_selections: l.combo_selections } : {}),
           ...(l.notes ? { notes: l.notes } : {}),
         })),

@@ -166,15 +166,32 @@ class AnalyticsController
     }
 
     /**
+     * Filtro SQL para excluir los ingredientes básicos de la pizza (masa, salsa, muzza)
+     * en los rankings de ingredientes más demandados y toppings ganadores.
+     */
+    private function excludeBasicPizzaIngredientsSql(string $alias = 'i'): string
+    {
+        return " AND {$alias}.category NOT IN ('masa', 'salsa')
+                 AND LOWER({$alias}.name) NOT LIKE '%masa%'
+                 AND LOWER({$alias}.name) NOT LIKE '%bollo%'
+                 AND LOWER({$alias}.name) NOT LIKE '%salsa%'
+                 AND LOWER({$alias}.name) NOT LIKE '%pomodoro%'
+                 AND LOWER({$alias}.name) NOT LIKE '%muzza%'
+                 AND LOWER({$alias}.name) NOT LIKE '%mozzarella%' ";
+    }
+
+    /**
      * GET /analytics/ingredients?limit=20
      * EL diferencial: qué ingredientes prefiere la gente, por unidades
      * vendidas de las pizzas que los contienen, más un desglose por tipo.
+     * Excluye básicos de la pizza: masa, salsa y muzzarella.
      */
     public function ingredients(Request $req): void
     {
         [$bid, $fromDt, $toDt] = $this->ctx($req);
         $limit = min(max((int) ($req->query['limit'] ?? 20), 1), 100);
         $pdo = Database::pdo();
+        $excludeSql = $this->excludeBasicPizzaIngredientsSql('i');
 
         $stmt = $pdo->prepare(
             'SELECT i.id, i.name, i.category,
@@ -185,8 +202,9 @@ class AnalyticsController
                JOIN product_ingredients pi ON pi.product_id = si.product_id
                JOIN ingredients i ON i.id = pi.ingredient_id
               WHERE s.business_id = ? AND s.status = "completed"
-                AND s.created_at BETWEEN ? AND ?
-              GROUP BY i.id, i.name, i.category
+                AND s.created_at BETWEEN ? AND ?'
+              . $excludeSql .
+            ' GROUP BY i.id, i.name, i.category
               ORDER BY units DESC
               LIMIT ' . $limit
         );
@@ -206,8 +224,9 @@ class AnalyticsController
                JOIN product_ingredients pi ON pi.product_id = si.product_id
                JOIN ingredients i ON i.id = pi.ingredient_id
               WHERE s.business_id = ? AND s.status = "completed"
-                AND s.created_at BETWEEN ? AND ?
-              GROUP BY i.category
+                AND s.created_at BETWEEN ? AND ?'
+              . $excludeSql .
+            ' GROUP BY i.category
               ORDER BY units DESC'
         );
         $stmt->execute([$bid, $fromDt, $toDt]);
@@ -226,7 +245,8 @@ class AnalyticsController
      * GET /analytics/winning-combinations
      * Combinaciones ganadoras:
      *  - de productos (cross-selling: productos que se compran juntos en un mismo pedido)
-     *  - de ingredientes (sabores / toppings que co-ocurren con mayor frecuencia en las ventas)
+     *  - de ingredientes (sabores / toppings que co-ocurren con mayor frecuencia en las ventas,
+     *    excluyendo masa, salsa y muzzarella).
      */
     public function winningCombinations(Request $req): void
     {
@@ -265,7 +285,10 @@ class AnalyticsController
             'total_revenue' => (float) $r['total_revenue'],
         ], $stmtProd->fetchAll());
 
-        // 2) Combinaciones de ingredientes vendidos juntos (excluyendo masa base para destacar toppings)
+        // 2) Combinaciones de ingredientes vendidos juntos (excluyendo masa, salsa y muzza)
+        $excludeI1 = $this->excludeBasicPizzaIngredientsSql('i1');
+        $excludeI2 = $this->excludeBasicPizzaIngredientsSql('i2');
+
         $stmtIng = $pdo->prepare(
             'SELECT 
                 LEAST(i1.id, i2.id) AS i1_id,
@@ -283,9 +306,10 @@ class AnalyticsController
              JOIN ingredients i1 ON i1.id = pi1.ingredient_id
              JOIN ingredients i2 ON i2.id = pi2.ingredient_id
              WHERE s.business_id = ? AND s.status = "completed"
-               AND s.created_at BETWEEN ? AND ?
-               AND i1.category != "masa" AND i2.category != "masa"
-             GROUP BY i1_id, i2_id
+               AND s.created_at BETWEEN ? AND ?'
+             . $excludeI1
+             . $excludeI2 .
+            ' GROUP BY i1_id, i2_id
              ORDER BY occurrences DESC, orders_count DESC
              LIMIT 12'
         );

@@ -7,6 +7,16 @@ import { SocialIcon, socialLabel } from './components/Icons';
 import { ProductModal } from './components/ProductModal';
 import { CartPanel } from './components/CartPanel';
 
+/** Identifica si una categoría es de "Extras" para agregar a una pizza y no una categoría separada. */
+function isExtrasCategoryName(name: string): boolean {
+  return /^(extras?|agregados?|adicionales?)(\s+.*)?$/i.test(name.trim());
+}
+
+/** Identifica si una categoría o producto corresponde a pizzas (para ofrecerle extras). */
+function isPizzaCategoryName(name: string): boolean {
+  return /pizza|pizzeta|calz[oó]n|fugazz/i.test(name);
+}
+
 /** Contador de visitas nostálgico (honesto: cuenta TUS visitas en este teléfono). */
 function useVisitCount(): number {
   const [n] = useState(() => {
@@ -81,16 +91,67 @@ export function App() {
     }
   }, [slug, mode, route.tableId]);
 
+  // Categorías "Extras" (no aparecen como pestaña separada sino como extra dentro de las pizzas).
+  const extraCatIds = useMemo(() => {
+    const set = new Set<number>();
+    for (const c of menu?.categories ?? []) {
+      if (isExtrasCategoryName(c.name)) set.add(c.id);
+    }
+    return set;
+  }, [menu?.categories]);
+
+  const pizzaCatIds = useMemo(() => {
+    const set = new Set<number>();
+    for (const c of menu?.categories ?? []) {
+      if (!extraCatIds.has(c.id) && isPizzaCategoryName(c.name)) {
+        set.add(c.id);
+      }
+    }
+    return set;
+  }, [menu?.categories, extraCatIds]);
+
   // Los de precio abierto son cargos internos (envío, propina): no van al público.
-  const products = useMemo(
+  const allPublicProducts = useMemo(
     () => (menu?.products ?? []).filter((p) => p.is_open_price !== 1),
     [menu],
   );
 
+  // Productos que pertenecen a la categoría "Extras"
+  const extraProducts = useMemo(
+    () =>
+      allPublicProducts.filter(
+        (p) => p.category_id !== null && extraCatIds.has(p.category_id) && p.is_available_now,
+      ),
+    [allPublicProducts, extraCatIds],
+  );
+
+  // Productos principales de la carta (excluyendo la categoría Extras)
+  const products = useMemo(
+    () =>
+      allPublicProducts.filter((p) => p.category_id === null || !extraCatIds.has(p.category_id)),
+    [allPublicProducts, extraCatIds],
+  );
+
   const visibleCats = useMemo(() => {
     const withProducts = new Set(products.map((p) => p.category_id));
-    return (menu?.categories ?? []).filter((c) => withProducts.has(c.id));
-  }, [menu, products]);
+    return (menu?.categories ?? []).filter((c) => !extraCatIds.has(c.id) && withProducts.has(c.id));
+  }, [menu, products, extraCatIds]);
+
+  function canTakePizzaExtras(p: Product): boolean {
+    if (extraProducts.length === 0) return false;
+    if (p.is_combo === 1) return false;
+    if (p.is_combinable === 1) return true;
+    if (p.category_id !== null && pizzaCatIds.has(p.category_id)) return true;
+    // Si ninguna categoría tiene la palabra "pizza" en su nombre, permitir en productos principales (salvo bebidas/postres)
+    if (pizzaCatIds.size === 0) {
+      const catName =
+        (menu?.categories ?? []).find((c) => c.id === p.category_id)?.name ?? '';
+      if (!/bebida|cerveza|vino|trago|gaseosa|agua|postre|helado/i.test(catName)) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   // El orden lo manda el panel: categorías ordenadas y luego productos por su sort_order.
   const shown = useMemo(() => {
@@ -178,8 +239,6 @@ export function App() {
           </div>
         )}
 
-        {/* "Cómo llegar" abre Google Maps directo: sin iframe, sin API key, y en
-            el celular lo levanta la app nativa con la navegación lista. */}
         {(b.google_maps_url || b.address) && (
           <a
             className="masthead__addr"
@@ -268,8 +327,9 @@ export function App() {
         {shown.map((p) => {
           const variants = (p.variants ?? []).filter((v) => v.is_active === 1);
           const from = variants.length ? Math.min(...variants.map((v) => v.price)) : p.price;
-          // Necesita abrir la ficha si hay que elegir algo (variante o combo).
-          const needsChoice = variants.length > 0 || p.is_combo === 1;
+          const hasExtras = canTakePizzaExtras(p);
+          // Necesita abrir la ficha si hay que elegir algo (variante, combo o extras de pizza).
+          const needsChoice = variants.length > 0 || p.is_combo === 1 || hasExtras;
 
           function quickAdd(e: React.MouseEvent) {
             e.stopPropagation(); // no abrir la foto
@@ -280,7 +340,7 @@ export function App() {
             }
             cart.add(
               {
-                key: `${p.id}/0/`,
+                key: `${p.id}/0/0//`,
                 product_id: p.id,
                 name: p.name,
                 unit_price: p.price,
@@ -313,8 +373,6 @@ export function App() {
                 )}
                 {!p.is_available_now && <span className="post__off">en otro horario</span>}
 
-                {/* Agregar rápido, sin entrar a la foto. Con variantes/combo,
-                    abre la ficha para elegir. */}
                 {canOrder && p.is_available_now && (
                   <button
                     className="post__add"
@@ -364,7 +422,6 @@ export function App() {
         <p className="guest__tag">Hecho con Pizzalog.net © {new Date().getFullYear()}</p>
       </footer>
 
-      {/* Barra fija del carrito: solo si hay algo y se puede pedir. */}
       {canOrder && cart.count > 0 && (
         <button className="cartbar" onClick={() => setCartOpen(true)}>
           <span className="cartbar__n">{cart.count}</span>
@@ -376,9 +433,10 @@ export function App() {
       {open && (
         <ProductModal
           product={open}
-          combinableProducts={(menu?.products ?? []).filter(
+          combinableProducts={products.filter(
             (p) => p.is_combinable === 1 || (open.category_id !== null && p.category_id === open.category_id),
           )}
+          extraProducts={canTakePizzaExtras(open) ? extraProducts : []}
           canOrder={canOrder}
           onAdd={(line, qty) => cart.add(line, qty)}
           onClose={() => setOpen(null)}

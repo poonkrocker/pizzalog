@@ -16,6 +16,7 @@ export interface CartLine {
   image_url: string | null;
   variant_id?: number;
   half_product_id?: number;
+  extra_product_ids?: number[];
   combo_selections?: ComboSelection[];
   combo_labels?: string[]; // "Muzzarella", "Fugazzeta"… solo para mostrar
   notes?: string;
@@ -39,12 +40,13 @@ export function lineKey(
   variantId: number | undefined,
   selections: ComboSelection[] | undefined,
   halfProductId?: number,
+  extraProductIds?: number[],
 ): string {
   const combo = (selections ?? [])
     .map((s) => `${s.group_id}:${[...s.product_ids].sort((a, b) => a - b).join('-')}`)
     .sort()
     .join('|');
-  return `${product.id}/${variantId ?? 0}/${halfProductId ?? 0}/${combo}`;
+  return `${product.id}/${variantId ?? 0}/${halfProductId ?? 0}/${combo}/${(extraProductIds ?? []).slice().sort((a, b) => a - b).join(',')}`;
 }
 
 /**

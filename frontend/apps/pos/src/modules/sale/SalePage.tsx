@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ApiError, uuid, type Product, type ProductVariant, type SaleInput } from '@pizzalog/shared';
+import { ApiError, formatARS, uuid, type Product, type ProductVariant, type SaleInput } from '@pizzalog/shared';
 import { useOnline } from '@/lib/network';
 import { Cart } from './Cart';
 import { ProductGrid } from './ProductGrid';
@@ -27,13 +27,41 @@ const METHODS: { value: string; label: string }[] = [
   { value: 'other', label: 'Otro' },
 ];
 
+function isExtrasCategoryName(name: string): boolean {
+  return /^(extras?|agregados?|adicionales?)(\s+.*)?$/i.test(name.trim());
+}
+
 export function SalePage() {
   const catalog = useCatalog();
   const checkout = useCheckout();
   const online = useOnline();
 
-  const products = catalog.data?.products ?? [];
-  const categories = catalog.data?.categories ?? [];
+  const allProducts = catalog.data?.products ?? [];
+  const allCategories = catalog.data?.categories ?? [];
+
+  const extraCatIds = useMemo(() => {
+    const set = new Set<number>();
+    for (const c of allCategories) {
+      if (isExtrasCategoryName(c.name)) set.add(c.id);
+    }
+    return set;
+  }, [allCategories]);
+
+  const extraProducts = useMemo(
+    () => allProducts.filter((p) => p.category_id !== null && extraCatIds.has(p.category_id)),
+    [allProducts, extraCatIds],
+  );
+
+  const categories = useMemo(
+    () => allCategories.filter((c) => !extraCatIds.has(c.id)),
+    [allCategories, extraCatIds],
+  );
+
+  const products = useMemo(
+    () => allProducts.filter((p) => p.category_id === null || !extraCatIds.has(p.category_id)),
+    [allProducts, extraCatIds],
+  );
+
   const hasUncategorized = products.some((p) => p.category_id === null);
 
   const [activeTab, setActiveTab] = useState('');
@@ -43,6 +71,7 @@ export function SalePage() {
   const [variantFor, setVariantFor] = useState<Product | null>(null);
   const [keypadFor, setKeypadFor] = useState<Product | null>(null);
   const [showHalfHalf, setShowHalfHalf] = useState(false);
+  const [showExtraModal, setShowExtraModal] = useState(false);
   const [globalDiscount, setGlobalDiscount] = useState<number>(0);
   const [paying, setPaying] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -146,16 +175,40 @@ export function SalePage() {
     });
   }
 
-  function pickVariant(product: Product, variant: ProductVariant) {
+  function pickVariant(product: Product, variant: ProductVariant | undefined, selectedExtras: Product[]) {
+    const extrasSum = selectedExtras.reduce((s, e) => s + e.price, 0);
+    const extrasKey = selectedExtras.map((e) => e.id).sort((a, b) => a - b).join(',');
+    const basePrice = variant ? variant.price : product.price;
+    const baseLabel = variant ? `${product.name} — ${variant.label}` : product.name;
+    const label =
+      selectedExtras.length > 0
+        ? `${baseLabel} (+ ${selectedExtras.map((e) => e.name).join(', ')})`
+        : baseLabel;
+
     addLine({
-      key: `p${product.id}-v${variant.id}`,
+      key: `p${product.id}-v${variant?.id ?? 0}-ex${extrasKey}`,
       product,
-      variant,
+      ...(variant ? { variant } : {}),
       quantity: 1,
-      unitPrice: variant.price,
-      label: `${product.name} — ${variant.label}`,
+      unitPrice: basePrice + extrasSum,
+      label,
     });
     setVariantFor(null);
+  }
+
+  function attachExtraToLine(lineKey: string, extra: Product) {
+    setCart((prev) =>
+      prev.map((l) => {
+        if (l.key !== lineKey) return l;
+        return {
+          ...l,
+          key: `${l.key}-ex${extra.id}-${uuid().slice(0, 4)}`,
+          unitPrice: l.unitPrice + extra.price,
+          label: `${l.label} (+ ${extra.name})`,
+        };
+      }),
+    );
+    setShowExtraModal(false);
   }
 
   function confirmOpenPrice(product: Product, amount: number) {
@@ -258,6 +311,24 @@ export function SalePage() {
           >
             🍕 Mitad y Mitad
           </button>
+          {extraProducts.length > 0 && (
+            <button
+              type="button"
+              className="cat-tab"
+              disabled={cart.length === 0}
+              style={{
+                background: 'rgba(253, 183, 64, 0.16)',
+                color: 'var(--ocre, #fdb740)',
+                borderColor: 'var(--ocre, #fdb740)',
+                fontWeight: 700,
+                opacity: cart.length === 0 ? 0.5 : 1,
+              }}
+              onClick={() => setShowExtraModal(true)}
+              title="Agregar un extra a una pizza del pedido"
+            >
+              🧀 + Extra a pizza
+            </button>
+          )}
           {categories.map((c) => (
             <button
               key={c.id}
@@ -298,9 +369,39 @@ export function SalePage() {
       {variantFor && (
         <VariantPicker
           product={variantFor}
-          onPick={(v) => pickVariant(variantFor, v)}
+          extras={extraProducts}
+          onPick={(v, selectedExtras) => pickVariant(variantFor, v, selectedExtras)}
           onClose={() => setVariantFor(null)}
         />
+      )}
+
+      {showExtraModal && (
+        <div className="overlay" onClick={() => setShowExtraModal(false)}>
+          <div className="sheet sheet--tall" onClick={(e) => e.stopPropagation()}>
+            <h2 className="sheet__title">🧀 Agregar Extra a Pizza</h2>
+            <p className="muted-text" style={{ marginTop: 0 }}>
+              Se sumará a: <strong>{cart[cart.length - 1]?.label ?? ''}</strong>
+            </p>
+            <div className="variant-pick-grid">
+              {extraProducts.map((ex) => (
+                <button
+                  key={ex.id}
+                  className="variant-pick"
+                  onClick={() => {
+                    const last = cart[cart.length - 1];
+                    if (last) attachExtraToLine(last.key, ex);
+                  }}
+                >
+                  <span className="variant-pick__label">+ {ex.name}</span>
+                  <span className="variant-pick__price">+{formatARS(ex.price)}</span>
+                </button>
+              ))}
+            </div>
+            <button className="sheet__cancel" onClick={() => setShowExtraModal(false)}>
+              Cancelar
+            </button>
+          </div>
+        </div>
       )}
 
       {toAccount && (

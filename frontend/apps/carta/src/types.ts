@@ -121,6 +121,7 @@ export interface OrderItemInput {
   quantity: number;
   variant_id?: number;
   half_product_id?: number;
+  extra_product_ids?: number[];
   notes?: string;
   combo_selections?: ComboSelection[];
 }

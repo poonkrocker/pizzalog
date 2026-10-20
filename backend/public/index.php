@@ -33,6 +33,7 @@ use Pizzalog\Controllers\TableAreaController;
 use Pizzalog\Controllers\TableController;
 use Pizzalog\Controllers\TableSessionController;
 use Pizzalog\Controllers\UserController;
+use Pizzalog\Controllers\StaffController;
 
 require dirname(__DIR__) . '/bootstrap.php';
 
@@ -127,6 +128,29 @@ $router->get('/attendance/summary', [AttendanceController::class, 'summary'], [$
 $router->post('/attendance', [AttendanceController::class, 'store'], [$auth, $manage]);
 $router->put('/attendance/{id}', [AttendanceController::class, 'update'], [$auth, $manage]);
 $router->delete('/attendance/{id}', [AttendanceController::class, 'destroy'], [$auth, $manage]);
+
+// --- Personal: Horas, Retiros a Cuenta, Liquidaciones y Portal --------
+$router->get('/staff/overview', [StaffController::class, 'overview'], [$auth, $manage]);
+$router->post('/staff/people', [StaffController::class, 'storePerson'], [$auth, $manage]);
+$router->put('/staff/people/{id}', [StaffController::class, 'updatePerson'], [$auth, $manage]);
+$router->get('/staff/hours', [StaffController::class, 'listHours'], [$auth, $manage]);
+$router->post('/staff/hours', [StaffController::class, 'storeHour'], [$auth, $manage]);
+$router->post('/staff/hours/shift-batch', [StaffController::class, 'storeShiftBatch'], [$auth, $manage]);
+$router->delete('/staff/hours/{id}', [StaffController::class, 'destroyHour'], [$auth, $manage]);
+$router->get('/staff/withdrawals', [StaffController::class, 'listWithdrawals'], [$auth, $manage]);
+$router->post('/staff/withdrawals', [StaffController::class, 'storeWithdrawal'], [$auth, $manage]);
+$router->put('/staff/withdrawals/{id}', [StaffController::class, 'updateWithdrawal'], [$auth, $manage]);
+$router->delete('/staff/withdrawals/{id}', [StaffController::class, 'destroyWithdrawal'], [$auth, $manage]);
+$router->get('/staff/settlements', [StaffController::class, 'listSettlements'], [$auth, $manage]);
+$router->post('/staff/settlements/preview', [StaffController::class, 'previewSettlement'], [$auth, $manage]);
+$router->post('/staff/settlements', [StaffController::class, 'storeSettlement'], [$auth, $manage]);
+$router->put('/staff/settlements/{id}/status', [StaffController::class, 'updateSettlementStatus'], [$auth, $manage]);
+$router->delete('/staff/settlements/{id}', [StaffController::class, 'destroySettlement'], [$auth, $manage]);
+
+// --- Portal Online Individual de Empleado (público por código) --------
+$router->get('/public/staff-portal/{code}', [StaffController::class, 'portalShow']);
+$router->post('/public/staff-portal/{code}/withdrawals', [StaffController::class, 'portalStoreWithdrawal']);
+$router->post('/public/staff-portal/{code}/hours', [StaffController::class, 'portalStoreHour']);
 
 // --- Caja / arqueo ----------------------------------------------------
 // Operación (abrir, mover, cerrar, ver la propia): cualquier sesión.

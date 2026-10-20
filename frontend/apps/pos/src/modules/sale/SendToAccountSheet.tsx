@@ -46,6 +46,7 @@ export function SendToAccountSheet({
       qty: l.quantity,
       ...(l.variant ? { variant_id: l.variant.id } : {}),
       unit_price: l.unitPrice,
+      name: l.label,
       ...(l.discountPct ? { discount_pct: l.discountPct } : {}),
     }));
   }

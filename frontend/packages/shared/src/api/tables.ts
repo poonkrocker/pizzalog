@@ -5,6 +5,7 @@ export interface RoundItemInput {
   product_id: number;
   variant_id?: number;
   unit_price?: number;
+  name?: string;
   discount_pct?: number;
   qty: number;
   note?: string;
