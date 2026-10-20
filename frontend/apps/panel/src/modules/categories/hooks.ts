@@ -28,3 +28,13 @@ export function useDeleteCategory() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['categories'] }),
   });
 }
+
+export function useReorderCategories() {
+  const api = useApi();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: number[]) => api.categories.reorder(ids),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['categories'] }),
+  });
+}
+

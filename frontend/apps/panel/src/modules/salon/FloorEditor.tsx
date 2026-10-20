@@ -5,7 +5,7 @@ import type { Table } from '@pizzalog/shared';
 const W = 960;
 const H = 600;
 const GRID = 40;
-const SNAP = 10;
+const SNAP = 20;
 
 const snap = (v: number) => Math.round(v / SNAP) * SNAP;
 
@@ -48,7 +48,7 @@ export function FloorEditor({ tables, selectedId, onSelect, onMove }: Props) {
                 <Rect
                   width={t.width}
                   height={t.height}
-                  cornerRadius={isRound ? Math.min(t.width, t.height) / 2 : 8}
+                  cornerRadius={isRound ? Math.min(t.width, t.height) / 2 : t.kind === 'bar' ? 2 : 6}
                   fill={selected ? '#fdb740' : t.kind === 'bar' ? '#58a6cf' : '#f0e6d0'}
                   stroke={selected ? '#d73828' : '#231f20'}
                   strokeWidth={selected ? 3 : 1.5}

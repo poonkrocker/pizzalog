@@ -37,8 +37,9 @@ export function ProductForm({ product, categories, onDone }: Props) {
   const [isCombinable, setIsCombinable] = useState(Boolean(product?.is_combinable));
   const [error, setError] = useState<string | null>(null);
 
-  // Visibilidad en la carta online (migración 011).
+  // Visibilidad en la carta online y salón (migración 011 y 024).
   const [showOnline, setShowOnline] = useState(product ? Boolean(product.show_online) : true);
+  const [showInSalon, setShowInSalon] = useState(product ? (product.show_in_salon !== undefined ? Boolean(product.show_in_salon) : true) : true);
   const [isAvailable, setIsAvailable] = useState(product ? Boolean(product.is_available) : true);
   const [isSecret, setIsSecret] = useState(Boolean(product?.is_secret));
   const [isVeganOpt, setIsVeganOpt] = useState(Boolean(product?.is_vegan_opt));
@@ -88,6 +89,7 @@ export function ProductForm({ product, categories, onDone }: Props) {
           is_combinable: isCombinable ? 1 : 0,
           image_url: imageUrl,
           show_online: showOnline ? 1 : 0,
+          show_in_salon: showInSalon ? 1 : 0,
           is_available: isAvailable ? 1 : 0,
           is_secret: isSecret ? 1 : 0,
           is_vegan_opt: isVeganOpt ? 1 : 0,
@@ -199,6 +201,14 @@ export function ProductForm({ product, categories, onDone }: Props) {
         checked={isOpenPrice}
         onChange={(e) => setIsOpenPrice(e.target.checked)}
       />
+      <Checkbox
+        label="Disponible en salón / comandera / TPV"
+        checked={showInSalon}
+        onChange={(e) => setShowInSalon(e.target.checked)}
+      />
+      <p className="field__hint" style={{ marginTop: '-8px', marginBottom: '12px' }}>
+        Destildalo si este producto es <b>exclusivo de la carta online / delivery</b> (no se mostrará al tomar comandas en mesas ni en el salón).
+      </p>
       <fieldset className="visibility-block">
         <legend className="visibility-block__title">Carta online</legend>
 

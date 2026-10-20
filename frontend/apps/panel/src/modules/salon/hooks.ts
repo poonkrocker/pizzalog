@@ -25,8 +25,15 @@ export function useDeleteArea() {
   const api = useApi();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: number) => api.tables.deleteArea(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['table-areas'] }),
+    mutationFn: (args: number | { id: number; cascade?: boolean }) => {
+      const id = typeof args === 'number' ? args : args.id;
+      const cascade = typeof args === 'number' ? false : Boolean(args.cascade);
+      return api.tables.deleteArea(id, cascade);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['table-areas'] });
+      qc.invalidateQueries({ queryKey: ['tables'] });
+    },
   });
 }
 

@@ -17,6 +17,8 @@ export interface CartLine {
   variant?: ProductVariant;
   quantity: number;
   unitPrice: number;
+  originalPrice?: number;
+  discountPct?: number;
   label: string;
 }
 

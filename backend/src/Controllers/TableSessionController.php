@@ -224,10 +224,11 @@ class TableSessionController
         $cashSessionId = $req->input('cash_session_id');
         $cashSessionId = is_numeric($cashSessionId) ? (int) $cashSessionId : null;
         $note          = trim((string) $req->input('note', '')) ?: null;
+        $discount      = max(0.0, (float) $req->input('discount', 0.0));
 
         try {
             $saleIds = (new TableCheckoutService())
-                ->close($bid, (int) $req->auth['user_id'], $id, $paymentMethod, $splits, $cashSessionId, $note);
+                ->close($bid, (int) $req->auth['user_id'], $id, $paymentMethod, $splits, $cashSessionId, $note, $discount);
         } catch (\Throwable $e) {
             Response::error($e->getMessage(), 422);
         }

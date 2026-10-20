@@ -2,6 +2,9 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { formatARS } from '@pizzalog/shared';
 import { useCashMovement, useCloseCashSession, useCurrentCashSession, useOpenCashSession } from './hooks';
+import { config } from '@/lib/config';
+import { cashCloseTicket } from '@/print/tickets';
+import { getPrinterSettings, isNative, tryPrint } from '@/print/printer';
 
 export function CashPage() {
   const navigate = useNavigate();
@@ -26,6 +29,8 @@ export function CashPage() {
   const [closingAmount, setClosingAmount] = useState<string>('');
   const [closeNote, setCloseNote] = useState<string>('');
   const [closeError, setCloseError] = useState<string | null>(null);
+  const [lastClosePrint, setLastClosePrint] = useState<string | null>(null);
+  const [printMsg, setPrintMsg] = useState<string | null>(null);
 
   const isOpen = Boolean(session && session.status === 'open');
 
@@ -33,6 +38,19 @@ export function CashPage() {
     if (!session) return 0;
     return session.expected_amount ?? session.opening_amount ?? 0;
   }, [session]);
+
+  const methodTotals = useMemo(() => {
+    const map: Record<string, number> = {};
+    if (!session?.sales_by_method) return map;
+    if (Array.isArray(session.sales_by_method)) {
+      for (const m of session.sales_by_method) {
+        map[m.payment_method] = (map[m.payment_method] ?? 0) + Number(m.total);
+      }
+    } else {
+      Object.assign(map, session.sales_by_method);
+    }
+    return map;
+  }, [session?.sales_by_method]);
 
   const countedAmount = parseFloat(closingAmount) || 0;
   const difference = closingAmount.trim() === '' ? 0 : countedAmount - expectedAmount;
@@ -75,7 +93,34 @@ export function CashPage() {
       return;
     }
     try {
-      await closeCash.mutateAsync({ closingAmount: amt, note: closeNote.trim() || undefined });
+      const res = await closeCash.mutateAsync({ closingAmount: amt, note: closeNote.trim() || undefined });
+      const closedSession = res?.session ?? {
+        ...session,
+        closing_amount: amt,
+        expected_amount: expectedAmount,
+        difference: difference,
+        status: 'closed',
+        closed_at: new Date().toISOString(),
+      };
+
+      try {
+        const settings = await getPrinterSettings();
+        const payload = cashCloseTicket({
+          businessName: config.businessName,
+          session: closedSession,
+          width: settings.width,
+        });
+        setLastClosePrint(payload);
+        setPrintMsg(null);
+        if (isNative()) {
+          void tryPrint(payload).then((err) => {
+            if (err) setPrintMsg(err);
+          });
+        }
+      } catch (printErr: any) {
+        console.error('Error al generar ticket de cierre:', printErr);
+      }
+
       setCloseOpen(false);
       setClosingAmount('');
       setCloseNote('');
@@ -114,6 +159,49 @@ export function CashPage() {
       <h1 className="page-title" style={{ fontSize: '24px', margin: '0 0 16px 0', color: 'var(--text)' }}>
         Control de Turno & Caja
       </h1>
+
+      {lastClosePrint && (
+        <div
+          style={{
+            margin: '0 0 16px',
+            padding: '12px 16px',
+            background: 'var(--surface-2)',
+            border: '1px solid var(--line)',
+            borderRadius: 'var(--r)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '10px',
+          }}
+        >
+          <div>
+            <strong style={{ display: 'block', fontSize: '14px', color: 'var(--cream)' }}>
+              Turno cerrado correctamente
+            </strong>
+            <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+              Informe de caja térmico listo
+            </span>
+          </div>
+          <button
+            type="button"
+            className="t-btn"
+            style={{ fontSize: '13px', minHeight: '38px', padding: '0 14px', background: 'var(--ocre)', color: 'var(--charcoal)' }}
+            onClick={async () => {
+              const err = await tryPrint(lastClosePrint);
+              if (err) setPrintMsg(err);
+              else alert('Enviado a la impresora');
+            }}
+          >
+            🖨️ Re-imprimir Informe
+          </button>
+        </div>
+      )}
+
+      {printMsg && (
+        <div style={{ background: '#3b2220', border: '1px solid #732a24', color: '#f0a59b', padding: '10px 14px', borderRadius: '10px', marginBottom: '16px', fontSize: '14px' }}>
+          Impresora: {printMsg}
+        </div>
+      )}
 
       {queryError && (
         <div style={{ background: '#3b2220', border: '1px solid #732a24', color: '#f0a59b', padding: '12px', borderRadius: '10px', marginBottom: '16px' }}>
@@ -263,15 +351,15 @@ export function CashPage() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '8px' }}>
                 <div style={{ fontSize: '13px' }}>
                   <span style={{ color: 'var(--muted)' }}>💳 Tarjeta: </span>
-                  <strong>{formatARS(session.sales_by_method['card'] ?? 0)}</strong>
+                  <strong>{formatARS(methodTotals['card'] ?? 0)}</strong>
                 </div>
                 <div style={{ fontSize: '13px' }}>
                   <span style={{ color: 'var(--muted)' }}>🏦 Transfer.: </span>
-                  <strong>{formatARS(session.sales_by_method['transfer'] ?? 0)}</strong>
+                  <strong>{formatARS(methodTotals['transfer'] ?? 0)}</strong>
                 </div>
                 <div style={{ fontSize: '13px' }}>
                   <span style={{ color: 'var(--muted)' }}>📱 MP / Otros: </span>
-                  <strong>{formatARS((session.sales_by_method['mp'] ?? 0) + (session.sales_by_method['other'] ?? 0))}</strong>
+                  <strong>{formatARS((methodTotals['mp'] ?? 0) + (methodTotals['other'] ?? 0))}</strong>
                 </div>
               </div>
             </div>

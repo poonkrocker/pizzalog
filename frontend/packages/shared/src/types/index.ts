@@ -16,6 +16,7 @@ export interface Category {
   id: number;
   name: string;
   sort_order: number;
+  product_count?: number;
   products_count?: number;
 }
 
@@ -38,8 +39,9 @@ export interface Product {
   is_combo: number;
   is_open_price: number;
   is_combinable?: number;
-  // Visibilidad (migración 011)
+  // Visibilidad (migración 011 y 024)
   show_online: number;
+  show_in_salon?: number;
   is_available: number;
   is_secret: number;
   is_vegan_opt: number;
@@ -489,7 +491,7 @@ export interface CashSession {
   cash_sales?: number;
   movements_in?: number;
   movements_out?: number;
-  sales_by_method?: Record<string, number>;
+  sales_by_method?: Array<{ payment_method: string; total: number; count: number }> | Record<string, number>;
   movements?: CashMovement[];
 }
 

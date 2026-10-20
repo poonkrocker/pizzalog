@@ -43,6 +43,7 @@ export function SalePage() {
   const [variantFor, setVariantFor] = useState<Product | null>(null);
   const [keypadFor, setKeypadFor] = useState<Product | null>(null);
   const [showHalfHalf, setShowHalfHalf] = useState(false);
+  const [globalDiscount, setGlobalDiscount] = useState<number>(0);
   const [paying, setPaying] = useState(false);
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<{ kind: 'online' | 'queued' | 'round'; detail?: string } | null>(null);
@@ -67,10 +68,42 @@ export function SalePage() {
     return products.filter((p) => p.category_id === Number(activeTab));
   }, [products, activeTab]);
 
-  const total = useMemo(
+  const subtotal = useMemo(
     () => cart.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0),
     [cart],
   );
+
+  const total = useMemo(
+    () => Math.max(0, subtotal - globalDiscount),
+    [subtotal, globalDiscount],
+  );
+
+  function setLineDiscount(key: string, pct: number) {
+    setCart((prev) =>
+      prev.map((l) => {
+        if (l.key !== key) return l;
+        const orig = l.originalPrice ?? l.unitPrice;
+        if (pct <= 0) {
+          return {
+            ...l,
+            unitPrice: orig,
+            originalPrice: undefined,
+            discountPct: undefined,
+            label: l.label.replace(/ \(-?\d+%\)$/, ''),
+          };
+        }
+        const discountedPrice = Math.round(orig * (1 - pct / 100));
+        const cleanLabel = l.label.replace(/ \(-?\d+%\)$/, '');
+        return {
+          ...l,
+          originalPrice: orig,
+          unitPrice: discountedPrice,
+          discountPct: pct,
+          label: `${cleanLabel} (-${pct}%)`,
+        };
+      }),
+    );
+  }
 
   function addLine(line: CartLine) {
     setCart((prev) => {
@@ -134,6 +167,7 @@ export function SalePage() {
   }
   function clearCart() {
     setCart([]);
+    setGlobalDiscount(0);
   }
 
   async function doCheckout(method: string) {
@@ -149,6 +183,7 @@ export function SalePage() {
         quantity: l.quantity,
       })),
       payment_method: method,
+      discount: globalDiscount > 0 ? globalDiscount : undefined,
       channel: channel === 'delivery' ? 'delivery' : 'takeaway',
     };
     try {
@@ -158,6 +193,7 @@ export function SalePage() {
         businessName: config.businessName,
         lines: cart.map((l) => ({ qty: l.quantity, label: l.label, unitPrice: l.unitPrice })),
         total,
+        discount: globalDiscount,
         paymentMethod: method,
         channel: input.channel ?? 'takeaway',
         width: settings.width,
@@ -233,9 +269,13 @@ export function SalePage() {
 
       <Cart
         lines={cart}
+        subtotal={subtotal}
+        discount={globalDiscount}
         total={total}
         onInc={inc}
         onDec={dec}
+        onSetLineDiscount={setLineDiscount}
+        onSetGlobalDiscount={setGlobalDiscount}
         onClear={clearCart}
         checkoutLabel={channel === 'here' ? 'A la cuenta' : 'Cobrar'}
         onCheckout={() => (channel === 'here' ? setToAccount(true) : setPaying(true))}

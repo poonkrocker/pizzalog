@@ -21,6 +21,8 @@ export function SessionPage() {
   const navigate = useNavigate();
   const [addOpen, setAddOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
+  const [discountPct, setDiscountPct] = useState<number>(0);
+  const [customDiscount, setCustomDiscount] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
 
   if (sessionId === null) return <div className="boot">Mesa inválida.</div>;
@@ -33,10 +35,22 @@ export function SessionPage() {
   const rounds = s.rounds ?? [];
   const sid = sessionId; // ya validado != null arriba
 
+  const discountAmount = customDiscount.trim() !== ''
+    ? Math.min(total, parseFloat(customDiscount) || 0)
+    : discountPct > 0
+      ? Math.round((total * discountPct) / 100)
+      : 0;
+
+  const finalTotal = Math.max(0, total - discountAmount);
+
   async function pay(method: string) {
     setError(null);
     try {
-      await closeSession.mutateAsync({ sessionId: sid, payment_method: method });
+      await closeSession.mutateAsync({
+        sessionId: sid,
+        payment_method: method,
+        discount: discountAmount,
+      });
       navigate('/salon');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo cobrar la cuenta');
@@ -134,10 +148,74 @@ export function SessionPage() {
       {payOpen && (
         <div className="overlay" onClick={() => !closeSession.isPending && setPayOpen(false)}>
           <div className="sheet" onClick={(e) => e.stopPropagation()}>
-            <h2 className="sheet__title">¿Cómo paga?</h2>
-            <p className="sheet__total">
-              Total: <strong>{formatARS(total)}</strong>
-            </p>
+            <h2 className="sheet__title">Cobrar mesa {tablesLabel}</h2>
+            <div style={{ marginBottom: '16px', background: 'rgba(0,0,0,0.04)', padding: '12px', borderRadius: '8px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                <span>Subtotal consumos:</span>
+                <span>{formatARS(total)}</span>
+              </div>
+              {discountAmount > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#d73828', marginBottom: '4px', fontWeight: 600 }}>
+                  <span>Descuento aplicado:</span>
+                  <span>−{formatARS(discountAmount)}</span>
+                </div>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '18px', fontWeight: 700, borderTop: '1px solid rgba(0,0,0,0.1)', paddingTop: '6px' }}>
+                <span>Total a cobrar:</span>
+                <strong style={{ color: 'var(--ocre, #d73828)' }}>{formatARS(finalTotal)}</strong>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <span style={{ fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
+                Descuento a la mesa:
+              </span>
+              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '8px' }}>
+                {[0, 10, 15, 20, 30, 50].map((pct) => (
+                  <button
+                    key={pct}
+                    type="button"
+                    className="t-btn"
+                    style={{
+                      padding: '4px 10px',
+                      fontSize: '12px',
+                      background: discountPct === pct && customDiscount === '' ? 'var(--ocre, #d73828)' : 'rgba(0,0,0,0.08)',
+                      color: discountPct === pct && customDiscount === '' ? '#fff' : 'inherit',
+                    }}
+                    onClick={() => {
+                      setDiscountPct(pct);
+                      setCustomDiscount('');
+                    }}
+                  >
+                    {pct === 0 ? 'Sin desc.' : `${pct}%`}
+                  </button>
+                ))}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '12px' }}>O monto $:</span>
+                <input
+                  type="number"
+                  min="0"
+                  max={total}
+                  placeholder="$ Monto"
+                  value={customDiscount}
+                  onChange={(e) => {
+                    setCustomDiscount(e.target.value);
+                    setDiscountPct(0);
+                  }}
+                  style={{
+                    padding: '6px 10px',
+                    borderRadius: '6px',
+                    border: '1px solid rgba(0,0,0,0.2)',
+                    width: '120px',
+                    fontSize: '14px',
+                    background: 'var(--c-surface, #fff)',
+                    color: 'inherit',
+                  }}
+                />
+              </div>
+            </div>
+
             {error && <p className="t-error">{error}</p>}
             <div className="method-grid">
               {METHODS.map((m) => (

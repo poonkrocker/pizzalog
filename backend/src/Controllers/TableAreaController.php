@@ -57,7 +57,7 @@ class TableAreaController
         Response::ok(['area' => $this->repo->getArea($bid, $id)]);
     }
 
-    /** DELETE /table-areas/{id} — bloquea si tiene mesas activas */
+    /** DELETE /table-areas/{id} — si cascade=1 desactiva también sus mesas */
     public function destroy(Request $req): void
     {
         $bid = (int) $req->auth['business_id'];
@@ -65,8 +65,14 @@ class TableAreaController
         if (!$this->repo->getArea($bid, $id)) {
             Response::error('Sector no encontrado', 404);
         }
+        $cascade = !empty($req->query['cascade']) || (bool) $req->input('cascade', false);
         if ($this->repo->areaHasTables($bid, $id)) {
-            Response::error('El sector tiene mesas asignadas; movelas o eliminalas primero', 422);
+            if (!$cascade) {
+                Response::error('El sector tiene mesas asignadas. ¿Deseas eliminarlo junto con todas sus mesas?', 422);
+            }
+            \Pizzalog\Core\Database::pdo()->prepare(
+                'UPDATE tables SET is_active = 0 WHERE area_id = ? AND business_id = ?'
+            )->execute([$id, $bid]);
         }
         $this->repo->deleteArea($bid, $id);
         Response::ok(['deleted' => true]);

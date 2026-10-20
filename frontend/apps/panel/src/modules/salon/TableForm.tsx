@@ -27,34 +27,44 @@ export function TableForm({ table, areaId, onDone }: Props) {
   const [label, setLabel] = useState(table?.label ?? '');
   const [capacity, setCapacity] = useState(String(table?.capacity ?? 4));
   const [shape, setShape] = useState<TableShape>(table?.shape ?? 'square');
+  const [width, setWidth] = useState<number>(table?.width ?? (kind === 'bar' ? 120 : 80));
+  const [height, setHeight] = useState<number>(table?.height ?? (kind === 'bar' ? 40 : 80));
   const [error, setError] = useState<string | null>(null);
 
   const isBar = kind === 'bar';
 
   function onKindChange(next: TableKind) {
     setKind(next);
-    // Una barra se dibuja como rectángulo largo por defecto.
-    if (next === 'bar' && !table) {
+    if (next === 'bar') {
       setShape('rect');
-      if (capacity === '4') setCapacity('8');
+      if (!table) {
+        setWidth(120);
+        setHeight(40);
+        if (capacity === '4') setCapacity('6');
+      }
+    } else {
+      if (!table) {
+        setWidth(80);
+        setHeight(80);
+        setShape('square');
+      }
     }
+  }
+
+  function applyPreset(w: number, h: number, s: TableShape = 'rect') {
+    setWidth(w);
+    setHeight(h);
+    setShape(s);
   }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    const dims = isBar
-      ? { width: 220, height: 60 }
-      : shape === 'rect'
-        ? { width: 120, height: 80 }
-        : { width: 80, height: 80 };
     try {
       await save.mutateAsync({
         id: table?.id,
         data: table
           ? {
-              // El backend valida el payload completo: se conservan sector,
-              // posición y dimensiones actuales de la mesa.
               area_id: table.area_id,
               label: label.trim(),
               kind,
@@ -62,8 +72,8 @@ export function TableForm({ table, areaId, onDone }: Props) {
               shape,
               pos_x: table.pos_x,
               pos_y: table.pos_y,
-              width: table.width,
-              height: table.height,
+              width: Number(width) || 40,
+              height: Number(height) || 40,
               rotation: table.rotation,
             }
           : {
@@ -74,8 +84,9 @@ export function TableForm({ table, areaId, onDone }: Props) {
               shape,
               pos_x: 80,
               pos_y: 80,
+              width: Number(width) || (isBar ? 120 : 80),
+              height: Number(height) || (isBar ? 40 : 80),
               rotation: 0,
-              ...dims,
             },
       });
       onDone();
@@ -128,6 +139,115 @@ export function TableForm({ table, areaId, onDone }: Props) {
           </Field>
         )}
       </div>
+
+      <Field label="Dimensiones (grilla modular)">
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+          {isBar ? (
+            <>
+              <button
+                type="button"
+                className={`btn btn--sm ${width === 120 && height === 40 ? 'btn--primary' : 'btn--secondary'}`}
+                onClick={() => applyPreset(120, 40)}
+              >
+                Barra 120×40 (Horiz.)
+              </button>
+              <button
+                type="button"
+                className={`btn btn--sm ${width === 40 && height === 120 ? 'btn--primary' : 'btn--secondary'}`}
+                onClick={() => applyPreset(40, 120)}
+              >
+                Barra 40×120 (Vert.)
+              </button>
+              <button
+                type="button"
+                className={`btn btn--sm ${width === 80 && height === 40 ? 'btn--primary' : 'btn--secondary'}`}
+                onClick={() => applyPreset(80, 40)}
+              >
+                Barra 80×40 (Horiz.)
+              </button>
+              <button
+                type="button"
+                className={`btn btn--sm ${width === 40 && height === 80 ? 'btn--primary' : 'btn--secondary'}`}
+                onClick={() => applyPreset(40, 80)}
+              >
+                Barra 40×80 (Vert.)
+              </button>
+              <button
+                type="button"
+                className={`btn btn--sm ${width === 160 && height === 40 ? 'btn--primary' : 'btn--secondary'}`}
+                onClick={() => applyPreset(160, 40)}
+              >
+                Barra 160×40 (4 mod)
+              </button>
+              <button
+                type="button"
+                className={`btn btn--sm ${width === 40 && height === 160 ? 'btn--primary' : 'btn--secondary'}`}
+                onClick={() => applyPreset(40, 160)}
+              >
+                Barra 40×160 (4 mod)
+              </button>
+              <button
+                type="button"
+                className={`btn btn--sm ${width === 40 && height === 40 ? 'btn--primary' : 'btn--secondary'}`}
+                onClick={() => applyPreset(40, 40, 'square')}
+              >
+                Módulo 40×40
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                type="button"
+                className={`btn btn--sm ${width === 80 && height === 80 && shape === 'square' ? 'btn--primary' : 'btn--secondary'}`}
+                onClick={() => applyPreset(80, 80, 'square')}
+              >
+                Cuadrada 80×80 (2×2)
+              </button>
+              <button
+                type="button"
+                className={`btn btn--sm ${width === 120 && height === 80 && shape === 'rect' ? 'btn--primary' : 'btn--secondary'}`}
+                onClick={() => applyPreset(120, 80, 'rect')}
+              >
+                Rectangular 120×80 (3×2)
+              </button>
+              <button
+                type="button"
+                className={`btn btn--sm ${width === 80 && height === 120 && shape === 'rect' ? 'btn--primary' : 'btn--secondary'}`}
+                onClick={() => applyPreset(80, 120, 'rect')}
+              >
+                Rectangular 80×120 (2×3)
+              </button>
+              <button
+                type="button"
+                className={`btn btn--sm ${shape === 'round' ? 'btn--primary' : 'btn--secondary'}`}
+                onClick={() => applyPreset(80, 80, 'round')}
+              >
+                Redonda Ø 80
+              </button>
+            </>
+          )}
+        </div>
+        <div className="form-row">
+          <Field label="Ancho (px)">
+            <Input
+              type="number"
+              step="20"
+              min="40"
+              value={width}
+              onChange={(e) => setWidth(Number(e.target.value))}
+            />
+          </Field>
+          <Field label="Alto (px)">
+            <Input
+              type="number"
+              step="20"
+              min="40"
+              value={height}
+              onChange={(e) => setHeight(Number(e.target.value))}
+            />
+          </Field>
+        </div>
+      </Field>
 
       {error && (
         <p className="login__error" role="alert">

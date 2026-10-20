@@ -34,7 +34,8 @@ class TableCheckoutService
         string $paymentMethod,
         array $splits = [],
         ?int $cashSessionId = null,
-        ?string $note = null
+        ?string $note = null,
+        float $discount = 0.0
     ): array {
         $items = $this->sessions->getOrderedItems($bid, $sessionId);
         if ($items === []) {
@@ -62,6 +63,7 @@ class TableCheckoutService
         $pdo->beginTransaction();
         try {
             $saleIds = [];
+            $remainingDiscount = max(0.0, $discount);
             foreach ($groups as $g) {
                 $lines = array_map(static function (array $it): array {
                     return [
@@ -75,11 +77,15 @@ class TableCheckoutService
                     ];
                 }, $g['items']);
 
+                $groupSubtotal = array_reduce($lines, static fn($acc, $l) => $acc + $l['line_total'], 0.0);
+                $groupDiscount = min($remainingDiscount, $groupSubtotal);
+                $remainingDiscount -= $groupDiscount;
+
                 $normalizedMethod = SaleController::normalizePaymentMethod($g['payment_method']);
 
                 $saleIds[] = $this->sales->create(
                     $bid, $userId, $lines, $normalizedMethod,
-                    0.0, 'dine_in', $cashSessionId, null, $note, $sessionId
+                    $groupDiscount, 'dine_in', $cashSessionId, null, $note, $sessionId
                 );
             }
 

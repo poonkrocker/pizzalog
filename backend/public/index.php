@@ -50,6 +50,7 @@ $router->get('/auth/me', [AuthController::class, 'me'], [$auth]);
 
 // --- Categorías -------------------------------------------------------
 $router->get('/categories', [CategoryController::class, 'index'], [$auth]);
+$router->put('/categories/reorder', [CategoryController::class, 'reorder'], [$auth, $manage]);
 $router->get('/categories/{id}', [CategoryController::class, 'show'], [$auth]);
 $router->post('/categories', [CategoryController::class, 'store'], [$auth, $manage]);
 $router->put('/categories/{id}', [CategoryController::class, 'update'], [$auth, $manage]);

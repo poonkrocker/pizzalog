@@ -74,8 +74,12 @@ export function useCloseSession() {
   const api = useApi();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: { sessionId: number; payment_method: string }) =>
-      api.tables.close(input.sessionId, { payment_method: input.payment_method }),
+    mutationFn: (input: { sessionId: number; payment_method: string; discount?: number; note?: string }) =>
+      api.tables.close(input.sessionId, {
+        payment_method: input.payment_method,
+        discount: input.discount,
+        note: input.note,
+      }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['floor'] }),
   });
 }

@@ -22,7 +22,10 @@ export function AddRoundSheet({
   const catalog = useCatalog();
   const addRound = useAddRound();
 
-  const products = catalog.data?.products ?? [];
+  const products = useMemo(
+    () => (catalog.data?.products ?? []).filter((p) => p.show_in_salon !== 0),
+    [catalog.data?.products],
+  );
   const categories = catalog.data?.categories ?? [];
   const hasUncat = products.some((p) => p.category_id === null);
 

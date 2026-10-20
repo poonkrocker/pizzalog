@@ -35,9 +35,9 @@ class PublicController
                                      transfer_alias, card_surcharge_pct,
                                      pay_methods_pickup, pay_methods_delivery';
 
-    private const PRODUCT_FIELDS = 'id, category_id, sort_order, name, description, price, image_url,
-                                    has_variants, is_combo, is_open_price, is_combinable, is_vegan_opt, badge_text,
-                                    visible_days, visible_from, visible_until';
+    private const PRODUCT_FIELDS = 'p.id, p.category_id, p.sort_order, p.name, p.description, p.price, p.image_url,
+                                    p.has_variants, p.is_combo, p.is_open_price, p.is_combinable, p.is_vegan_opt, p.badge_text,
+                                    p.visible_days, p.visible_from, p.visible_until, p.show_in_salon';
 
     private OrderService $orders;
     private VariantRepository $variants;
@@ -55,7 +55,8 @@ class PublicController
     /** GET /public/{slug}/menu */
     public function menu(Request $req): void
     {
-        $this->respondMenu((string) $req->param('slug'), false);
+        $mode = (string) ($req->query['mode'] ?? '');
+        $this->respondMenu((string) $req->param('slug'), false, $mode);
     }
 
     /**
@@ -65,10 +66,11 @@ class PublicController
      */
     public function secretMenu(Request $req): void
     {
-        $this->respondMenu((string) $req->param('slug'), true);
+        $mode = (string) ($req->query['mode'] ?? '');
+        $this->respondMenu((string) $req->param('slug'), true, $mode);
     }
 
-    private function respondMenu(string $slug, bool $secret): void
+    private function respondMenu(string $slug, bool $secret, string $mode = ''): void
     {
         $business = $this->businessBySlug($slug);
         $bid      = (int) $business['id'];
@@ -82,11 +84,17 @@ class PublicController
         );
         $cats->execute([$bid]);
 
+        $extraWhere = '';
+        if ($mode === 'mesa' || $mode === 'salon') {
+            $extraWhere = ' AND (p.show_in_salon = 1 OR p.show_in_salon IS NULL)';
+        }
+
         $prods = $pdo->prepare(
             'SELECT ' . self::PRODUCT_FIELDS . '
-               FROM products
-              WHERE business_id = ? AND is_active = 1 AND show_online = 1 AND is_available = 1 AND is_secret = ?
-              ORDER BY sort_order ASC, id ASC'
+               FROM products p
+          LEFT JOIN categories c ON c.id = p.category_id
+              WHERE p.business_id = ? AND p.is_active = 1 AND p.show_online = 1 AND p.is_available = 1 AND p.is_secret = ?' . $extraWhere . '
+              ORDER BY COALESCE(c.sort_order, 999999) ASC, c.name ASC, p.sort_order ASC, p.id ASC'
         );
         $prods->execute([$bid, $secret ? 1 : 0]);
 
@@ -139,6 +147,7 @@ class PublicController
                 'is_open_price'    => (int) $p['is_open_price'],
                 'is_vegan_opt'     => (int) $p['is_vegan_opt'],
                 'badge_text'       => $p['badge_text'],
+                'show_in_salon'    => (int) ($p['show_in_salon'] ?? 1),
                 'is_available_now' => ProductVisibility::isVisibleNow($p, $now),
             ];
             if ((int) $p['has_variants'] === 1) {

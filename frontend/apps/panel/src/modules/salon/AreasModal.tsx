@@ -29,6 +29,27 @@ export function AreasModal({ open, onClose }: { open: boolean; onClose: () => vo
     }
   }
 
+  async function handleDeleteArea(a: { id: number; name: string }) {
+    setError(null);
+    if (!confirm(`¿Eliminar el sector "${a.name}"?`)) return;
+    try {
+      await del.mutateAsync(a.id);
+    } catch (err: any) {
+      const msg = err instanceof ApiError ? err.message : (err?.message || '');
+      if (msg.includes('mesas') || err?.status === 422) {
+        if (confirm(`El sector "${a.name}" tiene mesas asignadas. ¿Deseas eliminar el sector junto con todas sus mesas?`)) {
+          try {
+            await del.mutateAsync({ id: a.id, cascade: true });
+          } catch (cascadeErr) {
+            setError(cascadeErr instanceof ApiError ? cascadeErr.message : 'No se pudo eliminar el sector');
+          }
+        }
+      } else {
+        setError(msg || 'No se pudo eliminar el sector');
+      }
+    }
+  }
+
   return (
     <Modal open={open} onClose={onClose} title="Sectores del salón">
       <ul className="arealist">
@@ -47,9 +68,7 @@ export function AreasModal({ open, onClose }: { open: boolean; onClose: () => vo
               </button>
               <button
                 className="link link--danger"
-                onClick={() => {
-                  if (confirm(`¿Eliminar el sector "${a.name}"?`)) del.mutate(a.id);
-                }}
+                onClick={() => void handleDeleteArea(a)}
               >
                 Eliminar
               </button>

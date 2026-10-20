@@ -6,7 +6,7 @@ import { Button, EmptyState, ErrorState, Loading, Modal, PageHeader } from '@/ui
 import { AreasModal } from './AreasModal';
 import { FloorEditor } from './FloorEditor';
 import { TableForm } from './TableForm';
-import { useAreas, useDeleteTable, useSaveLayout, useTables } from './hooks';
+import { useAreas, useDeleteTable, useSaveLayout, useSaveTable, useTables } from './hooks';
 
 export function SalonPage() {
   const api = useApi();
@@ -30,6 +30,7 @@ export function SalonPage() {
 
   const tables = useTables(activeArea);
   const saveLayout = useSaveLayout();
+  const saveTable = useSaveTable();
   const delTable = useDeleteTable();
 
   const [local, setLocal] = useState<Table[]>([]);
@@ -52,6 +53,49 @@ export function SalonPage() {
   }
 
   const selectedTable = local.find((t) => t.id === selected) ?? null;
+
+  function rotateSelected() {
+    if (!selectedTable) return;
+    setLocal((prev) =>
+      prev.map((t) =>
+        t.id === selectedTable.id
+          ? {
+              ...t,
+              width: t.height,
+              height: t.width,
+              rotation: ((t.rotation ?? 0) + 90) % 360,
+            }
+          : t,
+      ),
+    );
+    setDirty(true);
+  }
+
+  async function duplicateSelected() {
+    if (!selectedTable || activeArea === null) return;
+    const isHorizontal = selectedTable.width >= selectedTable.height;
+    const nextNum = local.length + 1;
+    const newLabel = `${selectedTable.label} (${nextNum})`;
+    try {
+      await saveTable.mutateAsync({
+        data: {
+          area_id: activeArea,
+          label: newLabel,
+          kind: selectedTable.kind,
+          capacity: selectedTable.capacity,
+          shape: selectedTable.shape,
+          pos_x: isHorizontal ? selectedTable.pos_x + selectedTable.width : selectedTable.pos_x,
+          pos_y: !isHorizontal ? selectedTable.pos_y + selectedTable.height : selectedTable.pos_y,
+          width: selectedTable.width,
+          height: selectedTable.height,
+          rotation: selectedTable.rotation,
+        },
+      });
+    } catch (e: any) {
+      alert(e?.message ?? 'No se pudo duplicar');
+    }
+  }
+
   const formOpen = creating || editTable !== null;
 
   if (areas.isLoading) return <Loading />;
@@ -103,6 +147,12 @@ export function SalonPage() {
               <>
                 <Button variant="ghost" onClick={() => setEditTable(selectedTable)}>
                   Editar «{selectedTable.label}»
+                </Button>
+                <Button variant="secondary" onClick={rotateSelected} title="Girar 90 grados (intercambia ancho y alto)">
+                  ↻ Rotar 90°
+                </Button>
+                <Button variant="secondary" onClick={() => void duplicateSelected()} title="Duplica este módulo en la grilla">
+                  ⧉ Duplicar
                 </Button>
                 <Button variant="secondary" onClick={() => setQrTable(selectedTable)}>
                   📱 Ver QR Auto-Pedido

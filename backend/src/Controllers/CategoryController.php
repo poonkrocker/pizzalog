@@ -24,11 +24,31 @@ class CategoryController
             $c['id']            = (int) $c['id'];
             $c['sort_order']    = (int) $c['sort_order'];
             $c['is_active']     = (int) $c['is_active'];
-            $c['product_count'] = (int) $c['product_count'];
+            $c['product_count']  = (int) $c['product_count'];
+            $c['products_count'] = (int) $c['product_count'];
             return $c;
         }, $stmt->fetchAll());
 
         Response::ok(['categories' => $categories]);
+    }
+
+    /** PUT /categories/reorder   Body: { ids: [1, 2, 3] } o { category_ids: [...] } */
+    public function reorder(Request $req): void
+    {
+        $bid = (int) $req->auth['business_id'];
+        $ids = (array) ($req->input('ids') ?? $req->input('category_ids') ?? []);
+
+        if (empty($ids)) {
+            Response::error('Se requiere un array de ids de categorías', 422);
+        }
+
+        $pdo = Database::pdo();
+        $stmt = $pdo->prepare('UPDATE categories SET sort_order = ? WHERE id = ? AND business_id = ?');
+        foreach ($ids as $index => $id) {
+            $stmt->execute([$index * 10, (int) $id, $bid]);
+        }
+
+        Response::ok(['reordered' => true]);
     }
 
     /** GET /categories/{id} */

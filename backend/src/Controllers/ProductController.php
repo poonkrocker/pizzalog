@@ -15,8 +15,25 @@ class ProductController
     /** Columnas del producto para el panel (gestión interna: se ve todo siempre). */
     private const FIELDS = 'id, category_id, sort_order, name, description, price, cost, image_url,
                             track_stock, stock_quantity, stock_min, is_active, has_variants, is_combo,
-                            is_open_price, is_combinable, show_online, is_available, is_secret, is_vegan_opt, badge_text,
+                            is_open_price, is_combinable, show_online, show_in_salon, is_available, is_secret, is_vegan_opt, badge_text,
                             visible_days, visible_from, visible_until';
+
+    private static bool $ensuredColumns = false;
+
+    private static function ensureColumns(): void
+    {
+        if (self::$ensuredColumns) return;
+        try {
+            $pdo = Database::pdo();
+            $col = $pdo->query("SHOW COLUMNS FROM products LIKE 'show_in_salon'")->fetch();
+            if (!$col) {
+                $pdo->exec("ALTER TABLE products ADD COLUMN show_in_salon TINYINT(1) NOT NULL DEFAULT 1 AFTER show_online");
+            }
+            self::$ensuredColumns = true;
+        } catch (\Throwable $e) {
+            // Ignorar si no hay permisos de alter table
+        }
+    }
 
     private IngredientRepository $ingredients;
     private VariantRepository $variants;
@@ -24,6 +41,7 @@ class ProductController
 
     public function __construct()
     {
+        self::ensureColumns();
         $this->ingredients = new IngredientRepository();
         $this->variants    = new VariantRepository();
         $this->combos      = new ComboRepository();
@@ -101,15 +119,15 @@ class ProductController
                 'INSERT INTO products
                     (business_id, category_id, sort_order, name, description, price, cost,
                      track_stock, stock_quantity, stock_min, is_open_price, is_combinable, image_url,
-                     show_online, is_available, is_secret, is_vegan_opt, badge_text,
+                     show_online, show_in_salon, is_available, is_secret, is_vegan_opt, badge_text,
                      visible_days, visible_from, visible_until)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $stmt->execute([
                 $bid, $d['category_id'], $sortOrder, $d['name'], $d['description'], $d['price'],
                 $d['cost'], $d['track_stock'], $d['stock_quantity'], $d['stock_min'],
                 $d['is_open_price'], $d['is_combinable'], $d['image_url'],
-                $d['show_online'], $d['is_available'], $d['is_secret'], $d['is_vegan_opt'], $d['badge_text'],
+                $d['show_online'], $d['show_in_salon'], $d['is_available'], $d['is_secret'], $d['is_vegan_opt'], $d['badge_text'],
                 $d['visible_days'], $d['visible_from'], $d['visible_until'],
             ]);
             $productId = (int) $pdo->lastInsertId();
@@ -141,14 +159,14 @@ class ProductController
                 'UPDATE products
                     SET category_id = ?, name = ?, description = ?, price = ?, cost = ?,
                         track_stock = ?, stock_quantity = ?, stock_min = ?, is_open_price = ?, is_combinable = ?,
-                        image_url = ?, show_online = ?, is_available = ?, is_secret = ?, is_vegan_opt = ?,
+                        image_url = ?, show_online = ?, show_in_salon = ?, is_available = ?, is_secret = ?, is_vegan_opt = ?,
                         badge_text = ?, visible_days = ?, visible_from = ?, visible_until = ?
                   WHERE id = ? AND business_id = ?'
             );
             $stmt->execute([
                 $d['category_id'], $d['name'], $d['description'], $d['price'], $d['cost'],
                 $d['track_stock'], $d['stock_quantity'], $d['stock_min'], $d['is_open_price'], $d['is_combinable'],
-                $d['image_url'], $d['show_online'], $d['is_available'], $d['is_secret'], $d['is_vegan_opt'],
+                $d['image_url'], $d['show_online'], $d['show_in_salon'], $d['is_available'], $d['is_secret'], $d['is_vegan_opt'],
                 $d['badge_text'], $d['visible_days'], $d['visible_from'], $d['visible_until'],
                 $id, $bid,
             ]);
@@ -276,7 +294,7 @@ class ProductController
 
         // Flags como int para que el front pueda comparar con === 1 sin dudas.
         foreach (['is_active', 'has_variants', 'is_combo', 'is_open_price', 'is_combinable',
-                  'show_online', 'is_available', 'is_secret', 'is_vegan_opt'] as $flag) {
+                  'show_online', 'show_in_salon', 'is_available', 'is_secret', 'is_vegan_opt'] as $flag) {
             if (isset($p[$flag])) {
                 $p[$flag] = (int) $p[$flag];
             }
@@ -327,6 +345,7 @@ class ProductController
             'image_url'      => substr(trim((string) $req->input('image_url', '')), 0, 300) ?: null,
             'ingredients'    => is_array($ingredients) ? $ingredients : [],
             'show_online'    => (int) (bool) $req->input('show_online', true),
+            'show_in_salon'  => (int) (bool) $req->input('show_in_salon', true),
             'is_available'   => (int) (bool) $req->input('is_available', true),
             'is_secret'      => (int) (bool) $req->input('is_secret', false),
             'is_vegan_opt'   => (int) (bool) $req->input('is_vegan_opt', false),

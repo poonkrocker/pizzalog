@@ -13,16 +13,29 @@ import {
   PageHeader,
 } from '@/ui';
 import type { Column } from '@/ui';
-import { useCategories, useDeleteCategory, useSaveCategory } from './hooks';
+import { useCategories, useDeleteCategory, useReorderCategories, useSaveCategory } from './hooks';
 
 export function CategoriesPage() {
   const categories = useCategories();
   const save = useSaveCategory();
   const del = useDeleteCategory();
+  const reorder = useReorderCategories();
   const [editing, setEditing] = useState<Category | null>(null);
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
+
+  const cats = categories.data ?? [];
+
+  async function moveCategory(index: number, direction: 'up' | 'down') {
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= cats.length) return;
+    const newCats = [...cats];
+    const [moved] = newCats.splice(index, 1);
+    if (!moved) return;
+    newCats.splice(targetIndex, 0, moved);
+    await reorder.mutateAsync(newCats.map((c) => c.id));
+  }
 
   function startCreate() {
     setEditing(null);
@@ -50,12 +63,44 @@ export function CategoriesPage() {
   }
 
   const columns: Column<Category>[] = [
+    {
+      key: 'order',
+      header: 'Orden',
+      width: '80px',
+      render: (c) => {
+        const i = cats.findIndex((x) => x.id === c.id);
+        return (
+          <div style={{ display: 'inline-flex', gap: '4px', alignItems: 'center' }}>
+            <button
+              type="button"
+              className="btn btn--icon"
+              style={{ padding: '2px 8px', fontSize: '13px', cursor: i > 0 ? 'pointer' : 'default', opacity: i > 0 ? 1 : 0.3 }}
+              disabled={i <= 0 || reorder.isPending}
+              onClick={() => moveCategory(i, 'up')}
+              title="Subir categoría"
+            >
+              ▲
+            </button>
+            <button
+              type="button"
+              className="btn btn--icon"
+              style={{ padding: '2px 8px', fontSize: '13px', cursor: i < cats.length - 1 ? 'pointer' : 'default', opacity: i < cats.length - 1 ? 1 : 0.3 }}
+              disabled={i >= cats.length - 1 || reorder.isPending}
+              onClick={() => moveCategory(i, 'down')}
+              title="Bajar categoría"
+            >
+              ▼
+            </button>
+          </div>
+        );
+      },
+    },
     { key: 'name', header: 'Categoría' },
     {
       key: 'products_count',
       header: 'Productos',
       align: 'right',
-      render: (c) => c.products_count ?? 0,
+      render: (c) => c.products_count ?? c.product_count ?? 0,
     },
     {
       key: 'actions',

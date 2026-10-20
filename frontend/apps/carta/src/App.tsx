@@ -92,11 +92,20 @@ export function App() {
     return (menu?.categories ?? []).filter((c) => withProducts.has(c.id));
   }, [menu, products]);
 
-  // El orden lo manda el panel (sort_order): la carta NO reordena por nombre.
-  const shown = useMemo(
-    () => (cat === 'all' ? products : products.filter((p) => p.category_id === cat)),
-    [products, cat],
-  );
+  // El orden lo manda el panel: categorías ordenadas y luego productos por su sort_order.
+  const shown = useMemo(() => {
+    if (cat !== 'all') {
+      return products.filter((p) => p.category_id === cat);
+    }
+    const catMap = new Map<number, number>();
+    (menu?.categories ?? []).forEach((c, idx) => catMap.set(c.id, c.sort_order ?? idx * 10));
+    return [...products].sort((a, b) => {
+      const catA = a.category_id !== null ? (catMap.get(a.category_id) ?? 999999) : 999999;
+      const catB = b.category_id !== null ? (catMap.get(b.category_id) ?? 999999) : 999999;
+      if (catA !== catB) return catA - catB;
+      return (a.sort_order ?? 0) - (b.sort_order ?? 0);
+    });
+  }, [products, cat, menu?.categories]);
 
   if (!slug) {
     return (

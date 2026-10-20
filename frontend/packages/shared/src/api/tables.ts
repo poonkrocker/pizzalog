@@ -25,7 +25,8 @@ export function tablesApi(client: ApiClient) {
       client.post<{ area: TableArea }>('/table-areas', data),
     updateArea: (id: number, data: Partial<TableArea>) =>
       client.put<{ area: TableArea }>(`/table-areas/${id}`, data),
-    deleteArea: (id: number) => client.delete<{ deleted: boolean }>(`/table-areas/${id}`),
+    deleteArea: (id: number, cascade?: boolean) =>
+      client.delete<{ deleted: boolean }>(`/table-areas/${id}${cascade ? '?cascade=1' : ''}`),
 
     // --- Mesas ---
     listTables: (areaId?: number) =>
@@ -70,8 +71,9 @@ export function tablesApi(client: ApiClient) {
       body: {
         payment_method?: string;
         splits?: CloseSplit[];
-        cash_session_id?: number;
+        cash_session_id?: number | null;
         note?: string;
+        discount?: number;
       },
     ) => client.post<{ sale_ids: number[] }>(`/table-sessions/${sessionId}/close`, body),
     cancel: (sessionId: number) =>

@@ -165,7 +165,9 @@ class SaleController
                     Response::error("Elegí una variante válida para «{$product['name']}»", 422);
                 }
                 $variantId   = $vid;
-                $unitPrice   = (float) $variants[$vid]['price'];
+                $unitPrice   = (isset($it['unit_price']) && is_numeric($it['unit_price']) && (float) $it['unit_price'] >= 0)
+                    ? (float) $it['unit_price']
+                    : (float) $variants[$vid]['price'];
                 $productName = $product['name'] . ' — ' . $variants[$vid]['label'];
             } elseif ((int) $product['is_open_price'] === 1) {
                 // Precio abierto: el monto lo define el cajero al vender.
@@ -175,7 +177,7 @@ class SaleController
                 $unitPrice = (float) $it['unit_price'];
             } else {
                 // Producto normal.
-                $unitPrice = (isset($it['unit_price']) && is_numeric($it['unit_price']))
+                $unitPrice = (isset($it['unit_price']) && is_numeric($it['unit_price']) && (float) $it['unit_price'] >= 0)
                     ? (float) $it['unit_price']
                     : (float) $product['price'];
             }

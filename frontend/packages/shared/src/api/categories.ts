@@ -9,6 +9,8 @@ export function categoriesApi(client: ApiClient) {
       client.post<{ category: Category }>('/categories', data),
     update: (id: number, data: Partial<Category>) =>
       client.put<{ category: Category }>(`/categories/${id}`, data),
+    reorder: (ids: number[]) =>
+      client.put<{ reordered: boolean }>('/categories/reorder', { ids }),
     remove: (id: number) => client.delete<{ deleted: boolean }>(`/categories/${id}`),
   };
 }
