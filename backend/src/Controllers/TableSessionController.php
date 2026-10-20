@@ -140,6 +140,35 @@ class TableSessionController
     }
 
     /**
+     * PUT /table-sessions/{id}/items/{itemId}/discount
+     * Body: { discount_pct?: number, discount_amount?: number }
+     */
+    public function discountItem(Request $req): void
+    {
+        $bid    = (int) $req->auth['business_id'];
+        $id     = (int) $req->param('id');
+        $itemId = (int) $req->param('itemId');
+
+        $session = $this->repo->getSession($bid, $id);
+        if (!$session) {
+            Response::error('Cuenta no encontrada', 404);
+        }
+        if (!$this->repo->isOpen($session)) {
+            Response::error('La cuenta no está abierta', 422);
+        }
+
+        $pctRaw = $req->input('discount_pct');
+        $amtRaw = $req->input('discount_amount');
+        $pct    = is_numeric($pctRaw) ? (float) $pctRaw : null;
+        $amt    = is_numeric($amtRaw) ? (float) $amtRaw : null;
+
+        if (!$this->repo->discountItem($bid, $id, $itemId, $pct, $amt)) {
+            Response::error('El ítem no existe o ya fue anulado', 422);
+        }
+        Response::ok(['session' => $this->repo->getSessionDetail($bid, $id)]);
+    }
+
+    /**
      * PUT /table-sessions/{id}/tables — reemplaza las mesas de la cuenta.
      * Sirve para transferir (otro conjunto) y para juntar/soltar mesas.
      * Body: { table_ids: [int, ...] }

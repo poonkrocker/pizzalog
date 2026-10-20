@@ -70,7 +70,7 @@ button { font-family: inherit; }
   font-weight: 600;
   padding: 0 22px;
   cursor: pointer;
-  color: var(--charcoal);
+  color: var(--text);
   background: var(--surface-2);
 }
 .t-btn--primary { background: var(--red); color: #fff; }
@@ -245,9 +245,21 @@ button { font-family: inherit; }
   grid-template-rows: 1fr auto;
   gap: 0;
 }
-.sale__main { overflow-y: auto; min-height: 0; }
+.sale__main {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+.sale__products {
+  flex: 1 1 0%;
+  overflow-y: auto;
+  min-height: 0;
+  -webkit-overflow-scrolling: touch;
+}
 
 .cat-tabs {
+  flex: 0 0 auto;
   display: flex;
   gap: 8px;
   overflow-x: auto;
@@ -272,6 +284,7 @@ button { font-family: inherit; }
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 12px;
+  align-content: start;
 }
 .product-btn {
   min-height: 96px;
@@ -675,17 +688,20 @@ button { font-family: inherit; }
 
 /* ---------- Selector de canal (Acá / Llevar / Delivery) ---------- */
 .channel-bar {
+  flex: 0 0 auto;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
-  padding: 10px 12px 2px;
+  padding: 0 0 12px;
 }
 .channel-btn {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  min-height: var(--tap);
+  height: 52px;
+  min-height: 52px;
+  max-height: 52px;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r);
@@ -693,6 +709,7 @@ button { font-family: inherit; }
   font-size: 15px;
   font-weight: 600;
   cursor: pointer;
+  padding: 0 10px;
 }
 .channel-btn__icon { font-size: 20px; }
 .channel-btn--active {

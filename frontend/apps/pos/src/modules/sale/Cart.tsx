@@ -9,7 +9,7 @@ interface Props {
   total: number;
   onInc: (key: string) => void;
   onDec: (key: string) => void;
-  onSetLineDiscount: (key: string, discountPct: number) => void;
+  onSetLineDiscount: (key: string, discountPct: number, fixedAmount?: number) => void;
   onSetGlobalDiscount: (discount: number) => void;
   onClear: () => void;
   checkoutLabel?: string;
@@ -30,6 +30,7 @@ export function Cart({
   onCheckout,
 }: Props) {
   const [discountLine, setDiscountLine] = useState<CartLine | null>(null);
+  const [customLineAmount, setCustomLineAmount] = useState('');
   const [globalModalOpen, setGlobalModalOpen] = useState(false);
   const [customGlobalAmount, setCustomGlobalAmount] = useState('');
 
@@ -49,6 +50,16 @@ export function Cart({
     }
     setCustomGlobalAmount('');
     setGlobalModalOpen(false);
+  }
+
+  function applyCustomLine() {
+    if (!discountLine) return;
+    const val = parseFloat(customLineAmount);
+    if (!isNaN(val) && val >= 0) {
+      onSetLineDiscount(discountLine.key, 0, val);
+    }
+    setCustomLineAmount('');
+    setDiscountLine(null);
   }
 
   return (
@@ -85,19 +96,22 @@ export function Cart({
                   <button
                     type="button"
                     style={{
-                      background: l.discountPct ? 'var(--red)' : 'var(--surface-2)',
-                      border: '1px solid var(--line)',
+                      background: l.discountPct ? 'rgba(253, 183, 64, 0.2)' : 'var(--surface-2)',
+                      border: l.discountPct ? '1px solid var(--ocre)' : '1px solid var(--line)',
                       borderRadius: '4px',
-                      color: l.discountPct ? '#fff' : 'var(--muted)',
-                      fontSize: '11px',
+                      color: 'var(--ocre)',
+                      fontSize: '12px',
                       fontWeight: 700,
-                      padding: '2px 6px',
+                      padding: '2px 7px',
                       cursor: 'pointer',
                     }}
-                    onClick={() => setDiscountLine(l)}
-                    title="Descuento en este ítem"
+                    onClick={() => {
+                      setCustomLineAmount('');
+                      setDiscountLine(l);
+                    }}
+                    title="Descuento en este producto"
                   >
-                    {l.discountPct ? `-${l.discountPct}%` : '%'}
+                    {l.discountPct ? `-${l.discountPct}%` : '% Desc.'}
                   </button>
                 </div>
               </div>
@@ -123,13 +137,13 @@ export function Cart({
           </div>
         )}
         {discount > 0 && (
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#f0a59b', marginBottom: '6px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: 'var(--ocre)', marginBottom: '6px' }}>
             <span>Descuento general:</span>
             <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               −{formatARS(discount)}
               <button
                 type="button"
-                style={{ background: 'none', border: 'none', color: '#f0a59b', cursor: 'pointer', fontSize: '14px', padding: 0 }}
+                style={{ background: 'none', border: 'none', color: 'var(--ocre)', cursor: 'pointer', fontSize: '14px', padding: 0 }}
                 onClick={() => onSetGlobalDiscount(0)}
                 title="Quitar descuento general"
               >
@@ -146,13 +160,13 @@ export function Cart({
               <button
                 type="button"
                 style={{
-                  background: discount > 0 ? 'var(--red)' : 'var(--surface-2)',
-                  color: discount > 0 ? '#fff' : 'var(--muted)',
-                  border: '1px solid var(--line)',
+                  background: discount > 0 ? 'rgba(253, 183, 64, 0.2)' : 'var(--surface-2)',
+                  color: 'var(--ocre)',
+                  border: discount > 0 ? '1px solid var(--ocre)' : '1px solid var(--line)',
                   borderRadius: '6px',
-                  fontSize: '11px',
-                  fontWeight: 600,
-                  padding: '3px 8px',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  padding: '4px 10px',
                   cursor: 'pointer',
                 }}
                 onClick={() => setGlobalModalOpen(true)}
@@ -177,30 +191,60 @@ export function Cart({
       {discountLine && (
         <div className="overlay" onClick={() => setDiscountLine(null)}>
           <div className="sheet" onClick={(e) => e.stopPropagation()}>
-            <h3 className="sheet__title">Descuento en ítem</h3>
+            <h3 className="sheet__title">Descuento en producto</h3>
             <p style={{ margin: '0 0 12px', fontSize: '15px', color: 'var(--cream)' }}>
-              {discountLine.label} ({formatARS(discountLine.originalPrice ?? discountLine.unitPrice)})
+              {discountLine.label} (<b style={{ color: 'var(--ocre)' }}>{formatARS(discountLine.originalPrice ?? discountLine.unitPrice)}</b>)
             </p>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '16px' }}>
-              {[0, 10, 15, 20, 30, 50].map((pct) => (
-                <button
-                  key={pct}
-                  type="button"
-                  className="t-btn"
-                  style={{
-                    background: (discountLine.discountPct ?? 0) === pct ? 'var(--red)' : 'var(--surface-2)',
-                    color: (discountLine.discountPct ?? 0) === pct ? '#fff' : 'var(--text)',
-                    fontSize: '14px',
-                    fontWeight: 600,
-                  }}
-                  onClick={() => {
-                    onSetLineDiscount(discountLine.key, pct);
-                    setDiscountLine(null);
-                  }}
-                >
-                  {pct === 0 ? 'Sin desc.' : `${pct}%`}
-                </button>
-              ))}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '14px' }}>
+              {[0, 10, 15, 20, 30, 50].map((pct) => {
+                const active = (discountLine.discountPct ?? 0) === pct;
+                return (
+                  <button
+                    key={pct}
+                    type="button"
+                    className="t-btn"
+                    style={{
+                      background: active ? 'rgba(253, 183, 64, 0.22)' : 'var(--surface-2)',
+                      border: active ? '2px solid var(--ocre)' : '1px solid var(--line)',
+                      color: 'var(--ocre)',
+                      fontSize: '15px',
+                      fontWeight: 700,
+                    }}
+                    onClick={() => {
+                      onSetLineDiscount(discountLine.key, pct);
+                      setDiscountLine(null);
+                    }}
+                  >
+                    {pct === 0 ? 'Sin desc.' : `${pct}%`}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+              <input
+                type="number"
+                min="0"
+                max={discountLine.originalPrice ?? discountLine.unitPrice}
+                placeholder="O descontar monto $ por unidad"
+                className="t-input"
+                value={customLineAmount}
+                onChange={(e) => setCustomLineAmount(e.target.value)}
+              />
+              <button
+                type="button"
+                className="t-btn"
+                style={{
+                  background: 'var(--surface-2)',
+                  border: '1px solid var(--ocre)',
+                  color: 'var(--ocre)',
+                  fontWeight: 700,
+                  whiteSpace: 'nowrap',
+                }}
+                onClick={applyCustomLine}
+                disabled={!customLineAmount || parseFloat(customLineAmount) <= 0}
+              >
+                Aplicar $
+              </button>
             </div>
             <button className="sheet__cancel" onClick={() => setDiscountLine(null)}>
               Cerrar
@@ -215,7 +259,7 @@ export function Cart({
           <div className="sheet" onClick={(e) => e.stopPropagation()}>
             <h3 className="sheet__title">Descuento a la venta</h3>
             <p style={{ margin: '0 0 12px', fontSize: '14px', color: 'var(--muted)' }}>
-              Subtotal actual: <b>{formatARS(subtotal)}</b>
+              Subtotal actual: <b style={{ color: 'var(--ocre)' }}>{formatARS(subtotal)}</b>
             </p>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', marginBottom: '16px' }}>
               {[0, 10, 15, 20, 30, 50].map((pct) => (
@@ -223,7 +267,13 @@ export function Cart({
                   key={pct}
                   type="button"
                   className="t-btn"
-                  style={{ fontSize: '14px', fontWeight: 600 }}
+                  style={{
+                    background: 'var(--surface-2)',
+                    border: '1px solid var(--line)',
+                    color: 'var(--ocre)',
+                    fontSize: '15px',
+                    fontWeight: 700,
+                  }}
                   onClick={() => applyGlobalPct(pct)}
                 >
                   {pct === 0 ? 'Quitar desc.' : `${pct}%`}
@@ -242,7 +292,14 @@ export function Cart({
               />
               <button
                 type="button"
-                className="t-btn t-btn--primary"
+                className="t-btn"
+                style={{
+                  background: 'var(--surface-2)',
+                  border: '1px solid var(--ocre)',
+                  color: 'var(--ocre)',
+                  fontWeight: 700,
+                  whiteSpace: 'nowrap',
+                }}
                 onClick={applyCustomGlobal}
                 disabled={!customGlobalAmount || parseFloat(customGlobalAmount) <= 0}
               >

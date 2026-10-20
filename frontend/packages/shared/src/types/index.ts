@@ -265,6 +265,8 @@ export interface RoundItem {
   name: string;
   qty: number;
   unit_price: number;
+  original_unit_price?: number | null;
+  discount_pct?: number;
   note: string | null;
   status: 'ordered' | 'cancelled';
   line_total?: number;

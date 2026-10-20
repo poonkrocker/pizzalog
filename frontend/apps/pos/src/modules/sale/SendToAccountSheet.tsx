@@ -45,7 +45,8 @@ export function SendToAccountSheet({
       product_id: l.product.id,
       qty: l.quantity,
       ...(l.variant ? { variant_id: l.variant.id } : {}),
-      ...(!l.variant && l.product.is_open_price === 1 ? { unit_price: l.unitPrice } : {}),
+      unit_price: l.unitPrice,
+      ...(l.discountPct ? { discount_pct: l.discountPct } : {}),
     }));
   }
 

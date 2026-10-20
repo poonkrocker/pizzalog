@@ -78,22 +78,34 @@ export function SalePage() {
     [subtotal, globalDiscount],
   );
 
-  function setLineDiscount(key: string, pct: number) {
+  function setLineDiscount(key: string, pct: number, fixedAmount?: number) {
     setCart((prev) =>
       prev.map((l) => {
         if (l.key !== key) return l;
         const orig = l.originalPrice ?? l.unitPrice;
+        const cleanLabel = l.label.replace(/ \(-(?:\d+(?:\.\d+)?%|\$[\d.,]+)\)$/, '');
+        if (fixedAmount !== undefined && fixedAmount > 0) {
+          const amt = Math.min(orig, fixedAmount);
+          const discountedPrice = Math.max(0, Math.round(orig - amt));
+          const computedPct = orig > 0 ? Math.round((amt / orig) * 100) : 0;
+          return {
+            ...l,
+            originalPrice: orig,
+            unitPrice: discountedPrice,
+            discountPct: computedPct,
+            label: `${cleanLabel} (-$${amt.toLocaleString('es-AR')})`,
+          };
+        }
         if (pct <= 0) {
           return {
             ...l,
             unitPrice: orig,
             originalPrice: undefined,
             discountPct: undefined,
-            label: l.label.replace(/ \(-?\d+%\)$/, ''),
+            label: cleanLabel,
           };
         }
         const discountedPrice = Math.round(orig * (1 - pct / 100));
-        const cleanLabel = l.label.replace(/ \(-?\d+%\)$/, '');
         return {
           ...l,
           originalPrice: orig,
@@ -220,23 +232,23 @@ export function SalePage() {
 
   return (
     <div className="sale">
-      <div className="channel-bar">
-        {CHANNELS.map((c) => (
-          <button
-            key={c.value}
-            className={`channel-btn${channel === c.value ? ' channel-btn--active' : ''}`}
-            disabled={c.value === 'here' && !online}
-            onClick={() => setChannel(c.value)}
-          >
-            <span className="channel-btn__icon" aria-hidden="true">
-              {c.icon}
-            </span>
-            {c.label}
-          </button>
-        ))}
-      </div>
-
       <div className="sale__main">
+        <div className="channel-bar">
+          {CHANNELS.map((c) => (
+            <button
+              key={c.value}
+              className={`channel-btn${channel === c.value ? ' channel-btn--active' : ''}`}
+              disabled={c.value === 'here' && !online}
+              onClick={() => setChannel(c.value)}
+            >
+              <span className="channel-btn__icon" aria-hidden="true">
+                {c.icon}
+              </span>
+              {c.label}
+            </button>
+          ))}
+        </div>
+
         <div className="cat-tabs">
           <button
             type="button"
@@ -264,7 +276,9 @@ export function SalePage() {
             </button>
           )}
         </div>
-        <ProductGrid products={visibleProducts} onAdd={add} />
+        <div className="sale__products">
+          <ProductGrid products={visibleProducts} onAdd={add} />
+        </div>
       </div>
 
       <Cart

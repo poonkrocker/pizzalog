@@ -6,6 +6,7 @@ import { useSaveTable } from './hooks';
 
 interface Props {
   table: Table | null; // null = alta
+  existingTables?: Table[];
   areaId: number;
   onDone: () => void;
 }
@@ -21,7 +22,23 @@ const SHAPES: { value: TableShape; label: string }[] = [
   { value: 'round', label: 'Redonda' },
 ];
 
-export function TableForm({ table, areaId, onDone }: Props) {
+function findFreePosition(existing: Table[], w: number, h: number): { x: number; y: number } {
+  for (let y = 40; y <= 520 - h; y += 40) {
+    for (let x = 40; x <= 880 - w; x += 40) {
+      const overlaps = existing.some(
+        (t) =>
+          x < t.pos_x + t.width + 20 &&
+          x + w + 20 > t.pos_x &&
+          y < t.pos_y + t.height + 20 &&
+          y + h + 20 > t.pos_y,
+      );
+      if (!overlaps) return { x, y };
+    }
+  }
+  return { x: 80, y: 80 };
+}
+
+export function TableForm({ table, existingTables = [], areaId, onDone }: Props) {
   const save = useSaveTable();
   const [kind, setKind] = useState<TableKind>(table?.kind ?? 'table');
   const [label, setLabel] = useState(table?.label ?? '');
@@ -60,6 +77,10 @@ export function TableForm({ table, areaId, onDone }: Props) {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    const w = Number(width) || (isBar ? 120 : 80);
+    const h = Number(height) || (isBar ? 40 : 80);
+    const freePos = !table ? findFreePosition(existingTables, w, h) : null;
+
     try {
       await save.mutateAsync({
         id: table?.id,
@@ -72,8 +93,8 @@ export function TableForm({ table, areaId, onDone }: Props) {
               shape,
               pos_x: table.pos_x,
               pos_y: table.pos_y,
-              width: Number(width) || 40,
-              height: Number(height) || 40,
+              width: w,
+              height: h,
               rotation: table.rotation,
             }
           : {
@@ -82,10 +103,10 @@ export function TableForm({ table, areaId, onDone }: Props) {
               kind,
               capacity: Number(capacity) || 1,
               shape,
-              pos_x: 80,
-              pos_y: 80,
-              width: Number(width) || (isBar ? 120 : 80),
-              height: Number(height) || (isBar ? 40 : 80),
+              pos_x: freePos?.x ?? 80,
+              pos_y: freePos?.y ?? 80,
+              width: w,
+              height: h,
               rotation: 0,
             },
       });
@@ -141,54 +162,54 @@ export function TableForm({ table, areaId, onDone }: Props) {
       </div>
 
       <Field label="Dimensiones (grilla modular)">
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '10px' }}>
           {isBar ? (
             <>
               <button
                 type="button"
-                className={`btn btn--sm ${width === 120 && height === 40 ? 'btn--primary' : 'btn--secondary'}`}
+                className={`btn btn--sm ${width === 120 && height === 40 ? 'btn--primary' : 'btn--ghost'}`}
                 onClick={() => applyPreset(120, 40)}
               >
                 Barra 120×40 (Horiz.)
               </button>
               <button
                 type="button"
-                className={`btn btn--sm ${width === 40 && height === 120 ? 'btn--primary' : 'btn--secondary'}`}
+                className={`btn btn--sm ${width === 40 && height === 120 ? 'btn--primary' : 'btn--ghost'}`}
                 onClick={() => applyPreset(40, 120)}
               >
                 Barra 40×120 (Vert.)
               </button>
               <button
                 type="button"
-                className={`btn btn--sm ${width === 80 && height === 40 ? 'btn--primary' : 'btn--secondary'}`}
+                className={`btn btn--sm ${width === 80 && height === 40 ? 'btn--primary' : 'btn--ghost'}`}
                 onClick={() => applyPreset(80, 40)}
               >
                 Barra 80×40 (Horiz.)
               </button>
               <button
                 type="button"
-                className={`btn btn--sm ${width === 40 && height === 80 ? 'btn--primary' : 'btn--secondary'}`}
+                className={`btn btn--sm ${width === 40 && height === 80 ? 'btn--primary' : 'btn--ghost'}`}
                 onClick={() => applyPreset(40, 80)}
               >
                 Barra 40×80 (Vert.)
               </button>
               <button
                 type="button"
-                className={`btn btn--sm ${width === 160 && height === 40 ? 'btn--primary' : 'btn--secondary'}`}
+                className={`btn btn--sm ${width === 160 && height === 40 ? 'btn--primary' : 'btn--ghost'}`}
                 onClick={() => applyPreset(160, 40)}
               >
                 Barra 160×40 (4 mod)
               </button>
               <button
                 type="button"
-                className={`btn btn--sm ${width === 40 && height === 160 ? 'btn--primary' : 'btn--secondary'}`}
+                className={`btn btn--sm ${width === 40 && height === 160 ? 'btn--primary' : 'btn--ghost'}`}
                 onClick={() => applyPreset(40, 160)}
               >
                 Barra 40×160 (4 mod)
               </button>
               <button
                 type="button"
-                className={`btn btn--sm ${width === 40 && height === 40 ? 'btn--primary' : 'btn--secondary'}`}
+                className={`btn btn--sm ${width === 40 && height === 40 ? 'btn--primary' : 'btn--ghost'}`}
                 onClick={() => applyPreset(40, 40, 'square')}
               >
                 Módulo 40×40
@@ -198,28 +219,28 @@ export function TableForm({ table, areaId, onDone }: Props) {
             <>
               <button
                 type="button"
-                className={`btn btn--sm ${width === 80 && height === 80 && shape === 'square' ? 'btn--primary' : 'btn--secondary'}`}
+                className={`btn btn--sm ${width === 80 && height === 80 && shape === 'square' ? 'btn--primary' : 'btn--ghost'}`}
                 onClick={() => applyPreset(80, 80, 'square')}
               >
                 Cuadrada 80×80 (2×2)
               </button>
               <button
                 type="button"
-                className={`btn btn--sm ${width === 120 && height === 80 && shape === 'rect' ? 'btn--primary' : 'btn--secondary'}`}
+                className={`btn btn--sm ${width === 120 && height === 80 && shape === 'rect' ? 'btn--primary' : 'btn--ghost'}`}
                 onClick={() => applyPreset(120, 80, 'rect')}
               >
                 Rectangular 120×80 (3×2)
               </button>
               <button
                 type="button"
-                className={`btn btn--sm ${width === 80 && height === 120 && shape === 'rect' ? 'btn--primary' : 'btn--secondary'}`}
+                className={`btn btn--sm ${width === 80 && height === 120 && shape === 'rect' ? 'btn--primary' : 'btn--ghost'}`}
                 onClick={() => applyPreset(80, 120, 'rect')}
               >
                 Rectangular 80×120 (2×3)
               </button>
               <button
                 type="button"
-                className={`btn btn--sm ${shape === 'round' ? 'btn--primary' : 'btn--secondary'}`}
+                className={`btn btn--sm ${shape === 'round' ? 'btn--primary' : 'btn--ghost'}`}
                 onClick={() => applyPreset(80, 80, 'round')}
               >
                 Redonda Ø 80

@@ -5,6 +5,7 @@ export interface RoundItemInput {
   product_id: number;
   variant_id?: number;
   unit_price?: number;
+  discount_pct?: number;
   qty: number;
   note?: string;
 }
@@ -78,5 +79,16 @@ export function tablesApi(client: ApiClient) {
     ) => client.post<{ sale_ids: number[] }>(`/table-sessions/${sessionId}/close`, body),
     cancel: (sessionId: number) =>
       client.post<{ cancelled: boolean }>(`/table-sessions/${sessionId}/cancel`),
+    cancelItem: (sessionId: number, itemId: number) =>
+      client.delete<{ session: TableSession }>(`/table-sessions/${sessionId}/items/${itemId}`),
+    discountItem: (
+      sessionId: number,
+      itemId: number,
+      body: { discount_pct?: number; discount_amount?: number },
+    ) =>
+      client.put<{ session: TableSession }>(
+        `/table-sessions/${sessionId}/items/${itemId}/discount`,
+        body,
+      ),
   };
 }

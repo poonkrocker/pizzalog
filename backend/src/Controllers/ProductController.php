@@ -184,6 +184,128 @@ class ProductController
     }
 
     /**
+     * PUT /products/{id}/quick
+     * Body: { name?, price?, category_id? }
+     * Edición rápida en línea desde el listado de productos (doble clic).
+     */
+    public function quickUpdate(Request $req): void
+    {
+        $bid = (int) $req->auth['business_id'];
+        $id  = (int) $req->param('id');
+        $current = $this->findOwned($req, $id);
+
+        $name = $req->input('name');
+        $name = $name !== null ? trim((string) $name) : (string) $current['name'];
+        if ($name === '') {
+            Response::error('El nombre no puede estar vacío', 422);
+        }
+
+        $price = $req->input('price');
+        if ($price !== null) {
+            if (!is_numeric($price) || (float) $price < 0) {
+                Response::error('El precio debe ser un número válido', 422);
+            }
+            $price = (float) $price;
+        } else {
+            $price = (float) $current['price'];
+        }
+
+        $hasCategoryKey = is_array($req->body) && array_key_exists('category_id', $req->body);
+        if ($hasCategoryKey) {
+            $catRaw = $req->input('category_id');
+            $categoryId = ($catRaw === null || $catRaw === '' || $catRaw === 'none') ? null : (int) $catRaw;
+            if ($categoryId !== null && !$this->categoryBelongs($bid, $categoryId)) {
+                Response::error('La categoría indicada no existe', 422);
+            }
+        } else {
+            $categoryId = $current['category_id'] !== null ? (int) $current['category_id'] : null;
+        }
+
+        Database::pdo()
+            ->prepare('UPDATE products SET name = ?, price = ?, category_id = ? WHERE id = ? AND business_id = ?')
+            ->execute([$name, $price, $categoryId, $id, $bid]);
+
+        Response::ok(['product' => $this->hydrate($bid, $this->findOwned($req, $id))]);
+    }
+
+    /**
+     * POST /products/bulk-price
+     * Body: { category_id: int|string|null, delta: number }
+     * Suma o resta un monto fijo ($1000 / -$1000) a todos los productos activos
+     * de una categoría (y sus variantes si las tienen).
+     */
+    public function bulkPriceUpdate(Request $req): void
+    {
+        $bid   = (int) $req->auth['business_id'];
+        $delta = $req->input('delta');
+        if (!is_numeric($delta) || (float) $delta == 0) {
+            Response::error('Indicá un monto válido para ajustar precios', 422);
+        }
+        $delta = (float) $delta;
+
+        $catRaw = $req->input('category_id');
+        $pdo    = Database::pdo();
+
+        $pdo->beginTransaction();
+        try {
+            if ($catRaw === 'all') {
+                $stmt = $pdo->prepare(
+                    'UPDATE products SET price = GREATEST(0, price + ?) WHERE business_id = ? AND is_active = 1'
+                );
+                $stmt->execute([$delta, $bid]);
+                $updated = $stmt->rowCount();
+
+                $pdo->prepare(
+                    'UPDATE product_variants pv
+                       JOIN products p ON p.id = pv.product_id
+                        SET pv.price = GREATEST(0, pv.price + ?)
+                      WHERE p.business_id = ? AND p.is_active = 1'
+                )->execute([$delta, $bid]);
+            } elseif ($catRaw === null || $catRaw === '' || $catRaw === 'none') {
+                $stmt = $pdo->prepare(
+                    'UPDATE products SET price = GREATEST(0, price + ?) WHERE business_id = ? AND is_active = 1 AND category_id IS NULL'
+                );
+                $stmt->execute([$delta, $bid]);
+                $updated = $stmt->rowCount();
+
+                $pdo->prepare(
+                    'UPDATE product_variants pv
+                       JOIN products p ON p.id = pv.product_id
+                        SET pv.price = GREATEST(0, pv.price + ?)
+                      WHERE p.business_id = ? AND p.is_active = 1 AND p.category_id IS NULL'
+                )->execute([$delta, $bid]);
+            } else {
+                $categoryId = (int) $catRaw;
+                if (!$this->categoryBelongs($bid, $categoryId)) {
+                    $pdo->rollBack();
+                    Response::error('La categoría indicada no existe', 422);
+                }
+                $stmt = $pdo->prepare(
+                    'UPDATE products SET price = GREATEST(0, price + ?) WHERE business_id = ? AND is_active = 1 AND category_id = ?'
+                );
+                $stmt->execute([$delta, $bid, $categoryId]);
+                $updated = $stmt->rowCount();
+
+                $pdo->prepare(
+                    'UPDATE product_variants pv
+                       JOIN products p ON p.id = pv.product_id
+                        SET pv.price = GREATEST(0, pv.price + ?)
+                      WHERE p.business_id = ? AND p.is_active = 1 AND p.category_id = ?'
+                )->execute([$delta, $bid, $categoryId]);
+            }
+
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        Response::ok(['updated' => $updated, 'delta' => $delta]);
+    }
+
+    /**
      * PUT /products/reorder
      * Body: { category_id: number|null, product_ids: number[] }
      * El array completo de esa categoría, en el orden final. Todo o nada:

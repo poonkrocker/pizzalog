@@ -92,3 +92,24 @@ export function useCancelSession() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['floor'] }),
   });
 }
+
+export function useDiscountSessionItem() {
+  const api = useApi();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      sessionId: number;
+      itemId: number;
+      discount_pct?: number;
+      discount_amount?: number;
+    }) =>
+      api.tables.discountItem(input.sessionId, input.itemId, {
+        discount_pct: input.discount_pct,
+        discount_amount: input.discount_amount,
+      }),
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ['session', vars.sessionId] });
+      qc.invalidateQueries({ queryKey: ['open-sessions'] });
+    },
+  });
+}

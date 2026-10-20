@@ -1,15 +1,27 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Navigate } from 'react-router-dom';
 import { ApiError } from '@pizzalog/shared';
 import { useAuth } from '@/lib/auth';
+import { clearSavedCredentials, getSavedCredentials, saveCredentials } from '@/lib/storage';
 
 export function Login() {
   const { user, login } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [remember, setRemember] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    void getSavedCredentials().then((creds) => {
+      if (creds) {
+        setEmail(creds.email);
+        setPassword(creds.password);
+        setRemember(true);
+      }
+    });
+  }, []);
 
   if (user) return <Navigate to="/" replace />;
 
@@ -18,7 +30,13 @@ export function Login() {
     setError(null);
     setBusy(true);
     try {
-      await login(email.trim(), password);
+      const cleanEmail = email.trim();
+      await login(cleanEmail, password);
+      if (remember) {
+        await saveCredentials(cleanEmail, password);
+      } else {
+        await clearSavedCredentials();
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'No se pudo iniciar sesión');
     } finally {
@@ -57,6 +75,25 @@ export function Login() {
               onChange={(e) => setPassword(e.target.value)}
               required
             />
+          </label>
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              marginBottom: '16px',
+              fontSize: '14px',
+              color: 'var(--text)',
+              cursor: 'pointer',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+              style={{ width: '20px', height: '20px', accentColor: 'var(--red)' }}
+            />
+            <span>Guardar usuario y contraseña</span>
           </label>
           {error && (
             <p className="t-error" role="alert">

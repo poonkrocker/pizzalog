@@ -1,0 +1,21 @@
+{
+  "name": "Pizzalog",
+  "short_name": "Pizzalog",
+  "description": "Software gastronómico para pizzerías",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F0E6D0",
+  "theme_color": "#D73828",
+  "icons": [
+    {
+      "src": "/pizzalog-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/pizzalog-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

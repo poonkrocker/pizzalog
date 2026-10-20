@@ -70,11 +70,13 @@ $router->get('/business/social-links', [BusinessController::class, 'socialLinks'
 $router->put('/business/social-links', [BusinessController::class, 'updateSocialLinks'], [$auth, $manage]);
 
 $router->get('/products', [ProductController::class, 'index'], [$auth]);
-// 'reorder' va antes de '{id}' para que no lo capture como id.
+// 'reorder' y 'bulk-price' van antes de '{id}' para que no los capture como id.
 $router->put('/products/reorder', [ProductController::class, 'reorder'], [$auth, $manage]);
+$router->post('/products/bulk-price', [ProductController::class, 'bulkPriceUpdate'], [$auth, $manage]);
 $router->get('/products/{id}', [ProductController::class, 'show'], [$auth]);
 $router->post('/products', [ProductController::class, 'store'], [$auth, $manage]);
 $router->put('/products/{id}', [ProductController::class, 'update'], [$auth, $manage]);
+$router->put('/products/{id}/quick', [ProductController::class, 'quickUpdate'], [$auth, $manage]);
 $router->put('/products/{id}/availability', [ProductController::class, 'setAvailability'], [$auth, $manage]);
 $router->delete('/products/{id}', [ProductController::class, 'destroy'], [$auth, $manage]);
 $router->get('/products/{id}/variants', [VariantController::class, 'show'], [$auth]);
@@ -209,6 +211,7 @@ $router->put('/table-sessions/{id}/tables', [TableSessionController::class, 'set
 $router->post('/table-sessions/{id}/merge', [TableSessionController::class, 'merge'], [$auth]);
 $router->post('/table-sessions/{id}/close', [TableSessionController::class, 'close'], [$auth]);
 $router->post('/table-sessions/{id}/cancel', [TableSessionController::class, 'cancel'], [$auth, $manage]);
+$router->put('/table-sessions/{id}/items/{itemId}/discount', [TableSessionController::class, 'discountItem'], [$auth]);
 $router->delete('/table-sessions/{id}/items/{itemId}', [TableSessionController::class, 'cancelItem'], [$auth]);
 
 // --- Cocina (KDS) -----------------------------------------------------

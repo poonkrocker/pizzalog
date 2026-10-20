@@ -15,6 +15,17 @@ export function productsApi(client: ApiClient) {
       client.put<{ product: Product }>(`/products/${id}/availability`, {
         is_available: isAvailable ? 1 : 0,
       }),
+    /** Edición rápida en línea (nombre, precio, categoría). */
+    quickUpdate: (
+      id: number,
+      data: { name?: string; price?: number; category_id?: number | null },
+    ) => client.put<{ product: Product }>(`/products/${id}/quick`, data),
+    /** Ajuste masivo de precios por categoría (+$1000 / -$1000). */
+    bulkPrice: (categoryId: number | 'all' | 'none' | null, delta: number) =>
+      client.post<{ updated: number; delta: number }>('/products/bulk-price', {
+        category_id: categoryId,
+        delta,
+      }),
     /**
      * Reordena una categoría entera. Mandá TODOS los product_ids de esa
      * categoría en el orden final: el server valida todo o nada.

@@ -1377,9 +1377,31 @@ h1, h2, h3 {
   }
   .shell__username { display: none; }
   .shell__nav .btn { min-height: 34px; padding: 6px 10px; font-size: 12px; }
+  .user-dropdown {
+    top: calc(100% + 8px) !important;
+    bottom: auto !important;
+    right: 0 !important;
+    left: auto !important;
+  }
   .shell__main { padding: 20px 14px 28px; overflow: visible; }
   .pagehead { align-items: flex-start; }
   .pagehead__actions { justify-content: flex-start; }
   .filters__summary { margin-left: 0; text-align: left; }
   .table-wrap { overflow-x: auto; }
+}
+
+.btn--sm {
+  min-height: 32px;
+  padding: 5px 12px;
+  font-size: 13px;
+  border-radius: 7px;
+}
+.btn--secondary {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  color: var(--text);
+}
+.btn--secondary:hover {
+  background: var(--surface-2);
+  border-color: #cbbda5;
 }

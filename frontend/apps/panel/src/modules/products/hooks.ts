@@ -16,6 +16,34 @@ export function useSaveProduct() {
   return useMutation({
     mutationFn: (input: { id?: number; data: Partial<Product> }) =>
       input.id ? api.products.update(input.id, input.data) : api.products.create(input.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['products'] });
+      qc.invalidateQueries({ queryKey: ['categories'] });
+    },
+  });
+}
+
+export function useQuickUpdateProduct() {
+  const api = useApi();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      id: number;
+      data: { name?: string; price?: number; category_id?: number | null };
+    }) => api.products.quickUpdate(input.id, input.data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['products'] });
+      qc.invalidateQueries({ queryKey: ['categories'] });
+    },
+  });
+}
+
+export function useBulkPriceUpdate() {
+  const api = useApi();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { categoryId: number | 'all' | 'none' | null; delta: number }) =>
+      api.products.bulkPrice(input.categoryId, input.delta),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['products'] }),
   });
 }
@@ -25,7 +53,10 @@ export function useDeleteProduct() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => api.products.remove(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['products'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['products'] });
+      qc.invalidateQueries({ queryKey: ['categories'] });
+    },
   });
 }
 

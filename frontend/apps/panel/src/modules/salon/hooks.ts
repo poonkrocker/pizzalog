@@ -66,7 +66,7 @@ export function useDeleteTable() {
   });
 }
 
-export function useSaveLayout() {
+export function useSaveLayout(areaId?: number | null) {
   const api = useApi();
   const qc = useQueryClient();
   return useMutation({
@@ -81,6 +81,12 @@ export function useSaveLayout() {
           rotation: t.rotation,
         })),
       ),
+    onMutate: async (tables) => {
+      if (areaId != null) {
+        await qc.cancelQueries({ queryKey: ['tables', areaId] });
+        qc.setQueryData(['tables', areaId], tables);
+      }
+    },
     onSuccess: () => qc.invalidateQueries({ queryKey: ['tables'] }),
   });
 }

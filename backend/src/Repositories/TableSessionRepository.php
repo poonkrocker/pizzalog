@@ -11,6 +11,32 @@ class TableSessionRepository
 {
     private const OPEN_STATES = ['open', 'bill_requested'];
 
+    private static bool $ensuredColumns = false;
+
+    public function __construct()
+    {
+        self::ensureColumns();
+    }
+
+    private static function ensureColumns(): void
+    {
+        if (self::$ensuredColumns) return;
+        try {
+            $pdo = Database::pdo();
+            $col1 = $pdo->query("SHOW COLUMNS FROM table_round_items LIKE 'original_unit_price'")->fetch();
+            if (!$col1) {
+                $pdo->exec("ALTER TABLE table_round_items ADD COLUMN original_unit_price DECIMAL(10,2) NULL DEFAULT NULL AFTER unit_price");
+            }
+            $col2 = $pdo->query("SHOW COLUMNS FROM table_round_items LIKE 'discount_pct'")->fetch();
+            if (!$col2) {
+                $pdo->exec("ALTER TABLE table_round_items ADD COLUMN discount_pct DECIMAL(5,2) NOT NULL DEFAULT 0 AFTER original_unit_price");
+            }
+            self::$ensuredColumns = true;
+        } catch (\Throwable $e) {
+            // Ignorar si no hay permisos de alter table
+        }
+    }
+
     // --- Apertura -----------------------------------------------------
 
     /** @return array{ok:bool, error?:string, busy?:string} */
@@ -160,7 +186,7 @@ class TableSessionRepository
         }
 
         $stmt = $pdo->prepare(
-            'SELECT id, round_id, product_id, name, qty, unit_price, note, status
+            'SELECT id, round_id, product_id, name, qty, unit_price, original_unit_price, discount_pct, note, status
                FROM table_round_items WHERE session_id = ? ORDER BY id'
         );
         $stmt->execute([$id]);
@@ -173,6 +199,8 @@ class TableSessionRepository
             $it['product_id'] = $it['product_id'] !== null ? (int) $it['product_id'] : null;
             $it['qty']        = (int) $it['qty'];
             $it['unit_price'] = (float) $it['unit_price'];
+            $it['original_unit_price'] = isset($it['original_unit_price']) && $it['original_unit_price'] !== null ? (float) $it['original_unit_price'] : null;
+            $it['discount_pct'] = isset($it['discount_pct']) ? (float) $it['discount_pct'] : 0.0;
             $it['line_total'] = round($it['qty'] * $it['unit_price'], 2);
 
             if ($it['status'] === 'ordered') {
@@ -248,8 +276,8 @@ class TableSessionRepository
 
             $stmt = $pdo->prepare(
                 'INSERT INTO table_round_items
-                    (business_id, session_id, round_id, product_id, variant_id, name, qty, unit_price, note)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                    (business_id, session_id, round_id, product_id, variant_id, name, qty, unit_price, original_unit_price, discount_pct, note)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             foreach ($items as $it) {
                 $pid = (int) $it['product_id'];
@@ -278,9 +306,27 @@ class TableSessionRepository
                     $price = (float) $up;
                 }
 
+                $origPrice   = null;
+                $discountPct = 0.0;
+
+                if (isset($it['unit_price']) && is_numeric($it['unit_price']) && (int) $product['is_open_price'] !== 1) {
+                    $sentPrice = max(0.0, (float) $it['unit_price']);
+                    if ($sentPrice < $price) {
+                        $origPrice   = $price;
+                        $price       = $sentPrice;
+                        $discountPct = isset($it['discount_pct']) && is_numeric($it['discount_pct'])
+                            ? (float) $it['discount_pct']
+                            : ($origPrice > 0 ? round((1.0 - $price / $origPrice) * 100, 1) : 0.0);
+                        if ($discountPct > 0 && !preg_match('/ \(-?\d+(?:\.\d+)?%\)$/', $name)) {
+                            $pctTxt = rtrim(rtrim(number_format($discountPct, 1, '.', ''), '0'), '.');
+                            $name .= " (-{$pctTxt}%)";
+                        }
+                    }
+                }
+
                 $stmt->execute([
                     $bid, $sessionId, $roundId, $pid, $variantId,
-                    $name, $qty, $price,
+                    $name, $qty, $price, $origPrice, $discountPct,
                     isset($it['note']) ? trim((string) $it['note']) : null,
                 ]);
             }
@@ -307,7 +353,7 @@ class TableSessionRepository
         }
 
         $stmt = $pdo->prepare(
-            'SELECT id, product_id, name, qty, unit_price, note, status
+            'SELECT id, product_id, name, qty, unit_price, original_unit_price, discount_pct, note, status
                FROM table_round_items WHERE round_id = ? ORDER BY id'
         );
         $stmt->execute([$roundId]);
@@ -316,6 +362,8 @@ class TableSessionRepository
             $it['product_id'] = $it['product_id'] !== null ? (int) $it['product_id'] : null;
             $it['qty']        = (int) $it['qty'];
             $it['unit_price'] = (float) $it['unit_price'];
+            $it['original_unit_price'] = isset($it['original_unit_price']) && $it['original_unit_price'] !== null ? (float) $it['original_unit_price'] : null;
+            $it['discount_pct'] = isset($it['discount_pct']) ? (float) $it['discount_pct'] : 0.0;
             $it['line_total'] = round($it['qty'] * $it['unit_price'], 2);
             return $it;
         }, $stmt->fetchAll());
@@ -347,6 +395,59 @@ class TableSessionRepository
         );
         $stmt->execute([$itemId, $sessionId, $bid]);
         return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * Aplica o quita un descuento a un ítem específico de la cuenta abierta.
+     */
+    public function discountItem(int $bid, int $sessionId, int $itemId, ?float $discountPct, ?float $discountAmount): bool
+    {
+        $pdo  = Database::pdo();
+        $stmt = $pdo->prepare(
+            'SELECT id, name, unit_price, original_unit_price, discount_pct
+               FROM table_round_items
+              WHERE id = ? AND session_id = ? AND business_id = ? AND status = "ordered"
+              LIMIT 1'
+        );
+        $stmt->execute([$itemId, $sessionId, $bid]);
+        $item = $stmt->fetch();
+        if (!$item) {
+            return false;
+        }
+
+        $origPrice = ($item['original_unit_price'] !== null && (float) $item['original_unit_price'] > 0)
+            ? (float) $item['original_unit_price']
+            : (float) $item['unit_price'];
+
+        // Limpiar sufijos de descuento previos del nombre.
+        $baseName = preg_replace('/ \(-(?:\d+(?:\.\d+)?%|\$[\d.,]+)\)$/', '', (string) $item['name']) ?? (string) $item['name'];
+
+        if ($discountAmount !== null && $discountAmount > 0) {
+            $amt     = min($origPrice, max(0.0, $discountAmount));
+            $newUnit = max(0.0, round($origPrice - $amt, 2));
+            $pct     = $origPrice > 0 ? round(($amt / $origPrice) * 100.0, 1) : 0.0;
+            $newName = $amt > 0 ? $baseName . ' (-$' . number_format($amt, 0, ',', '.') . ')' : $baseName;
+            $saveOrig = $amt > 0 ? $origPrice : null;
+        } elseif ($discountPct !== null && $discountPct > 0) {
+            $pct     = min(100.0, max(0.0, $discountPct));
+            $newUnit = max(0.0, round($origPrice * (1.0 - $pct / 100.0), 2));
+            $pctTxt  = rtrim(rtrim(number_format($pct, 1, '.', ''), '0'), '.');
+            $newName = $baseName . " (-{$pctTxt}%)";
+            $saveOrig = $origPrice;
+        } else {
+            $newUnit  = $origPrice;
+            $pct      = 0.0;
+            $newName  = $baseName;
+            $saveOrig = null;
+        }
+
+        $upd = $pdo->prepare(
+            'UPDATE table_round_items
+                SET unit_price = ?, original_unit_price = ?, discount_pct = ?, name = ?
+              WHERE id = ? AND session_id = ? AND business_id = ?'
+        );
+        $upd->execute([$newUnit, $saveOrig, $pct, $newName, $itemId, $sessionId, $bid]);
+        return true;
     }
 
     public function isOpen(array $session): bool

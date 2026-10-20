@@ -1,8 +1,14 @@
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { formatARS } from '@pizzalog/shared';
+import { formatARS, type RoundItem } from '@pizzalog/shared';
 import { AddRoundSheet } from './AddRoundSheet';
-import { useCancelSession, useCloseSession, useRequestBill, useSession } from './hooks';
+import {
+  useCancelSession,
+  useCloseSession,
+  useDiscountSessionItem,
+  useRequestBill,
+  useSession,
+} from './hooks';
 
 const METHODS: { value: string; label: string }[] = [
   { value: 'cash', label: 'Efectivo' },
@@ -18,11 +24,15 @@ export function SessionPage() {
   const requestBill = useRequestBill();
   const closeSession = useCloseSession();
   const cancelSession = useCancelSession();
+  const discountItemMut = useDiscountSessionItem();
   const navigate = useNavigate();
+
   const [addOpen, setAddOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
   const [discountPct, setDiscountPct] = useState<number>(0);
   const [customDiscount, setCustomDiscount] = useState<string>('');
+  const [itemForDiscount, setItemForDiscount] = useState<RoundItem | null>(null);
+  const [customItemDiscount, setCustomItemDiscount] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
 
   if (sessionId === null) return <div className="boot">Mesa inválida.</div>;
@@ -31,17 +41,51 @@ export function SessionPage() {
 
   const s = session.data;
   const tablesLabel = s.tables?.map((t) => t.label).join(' + ') ?? '';
+  const accountTitle = s.label ? `${tablesLabel} · ${s.label}` : `Mesa ${tablesLabel}`;
   const total = s.totals?.subtotal ?? 0;
   const rounds = s.rounds ?? [];
-  const sid = sessionId; // ya validado != null arriba
+  const sid = sessionId;
 
-  const discountAmount = customDiscount.trim() !== ''
-    ? Math.min(total, parseFloat(customDiscount) || 0)
-    : discountPct > 0
-      ? Math.round((total * discountPct) / 100)
-      : 0;
+  const discountAmount =
+    customDiscount.trim() !== ''
+      ? Math.min(total, parseFloat(customDiscount) || 0)
+      : discountPct > 0
+        ? Math.round((total * discountPct) / 100)
+        : 0;
 
   const finalTotal = Math.max(0, total - discountAmount);
+
+  async function applyItemDiscountPct(pct: number) {
+    if (!itemForDiscount) return;
+    try {
+      await discountItemMut.mutateAsync({
+        sessionId: sid,
+        itemId: itemForDiscount.id,
+        discount_pct: pct,
+      });
+      setItemForDiscount(null);
+      setCustomItemDiscount('');
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'No se pudo aplicar el descuento al producto');
+    }
+  }
+
+  async function applyItemDiscountCustom() {
+    if (!itemForDiscount) return;
+    const val = parseFloat(customItemDiscount);
+    if (isNaN(val) || val < 0) return;
+    try {
+      await discountItemMut.mutateAsync({
+        sessionId: sid,
+        itemId: itemForDiscount.id,
+        discount_amount: val,
+      });
+      setItemForDiscount(null);
+      setCustomItemDiscount('');
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'No se pudo aplicar el descuento al producto');
+    }
+  }
 
   async function pay(method: string) {
     setError(null);
@@ -63,6 +107,10 @@ export function SessionPage() {
     navigate('/salon');
   }
 
+  const allActiveItems = rounds.flatMap((r) =>
+    r.items.filter((it) => it.status === 'ordered'),
+  );
+
   return (
     <div className="session">
       <div className="session__head">
@@ -70,7 +118,7 @@ export function SessionPage() {
           ‹ Salón
         </button>
         <div className="session__title-wrap">
-          <h1 className="session__table">Mesa {tablesLabel}</h1>
+          <h1 className="session__table">{accountTitle}</h1>
           <span className={`session__status session__status--${s.status}`}>
             {s.status === 'bill_requested'
               ? 'Cuenta pedida'
@@ -88,17 +136,64 @@ export function SessionPage() {
           rounds.map((r) => (
             <div key={r.id} className="round-card">
               <div className="round-card__head">Comanda {r.number}</div>
-              {r.items.map((it) => (
-                <div
-                  key={it.id}
-                  className={`round-item${it.status === 'cancelled' ? ' is-cancelled' : ''}`}
-                >
-                  <span>
-                    {it.qty}× {it.name}
-                  </span>
-                  <span>{formatARS(it.line_total ?? it.unit_price * it.qty)}</span>
-                </div>
-              ))}
+              {r.items.map((it) => {
+                const hasDisc = Boolean(it.discount_pct && it.discount_pct > 0);
+                const origTotal =
+                  it.original_unit_price && it.original_unit_price > it.unit_price
+                    ? it.original_unit_price * it.qty
+                    : null;
+                return (
+                  <div
+                    key={it.id}
+                    className={`round-item${it.status === 'cancelled' ? ' is-cancelled' : ''}`}
+                    style={{ alignItems: 'center', gap: '8px' }}
+                  >
+                    <span style={{ flex: 1 }}>
+                      {it.qty}× {it.name}
+                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      {it.status === 'ordered' && (
+                        <button
+                          type="button"
+                          style={{
+                            background: hasDisc ? 'rgba(253, 183, 64, 0.2)' : 'var(--surface-2)',
+                            border: hasDisc ? '1px solid var(--ocre)' : '1px solid var(--line)',
+                            borderRadius: '5px',
+                            color: 'var(--ocre)',
+                            fontSize: '12px',
+                            fontWeight: 700,
+                            padding: '3px 8px',
+                            cursor: 'pointer',
+                          }}
+                          onClick={() => {
+                            setCustomItemDiscount('');
+                            setItemForDiscount(it);
+                          }}
+                          title="Aplicar descuento a este producto"
+                        >
+                          {hasDisc ? `-${it.discount_pct}%` : '% Desc.'}
+                        </button>
+                      )}
+                      <span style={{ whiteSpace: 'nowrap' }}>
+                        {origTotal ? (
+                          <>
+                            <s style={{ opacity: 0.55, marginRight: '5px', fontSize: '13px' }}>
+                              {formatARS(origTotal)}
+                            </s>
+                            <b style={{ color: 'var(--ocre)' }}>
+                              {formatARS(it.line_total ?? it.unit_price * it.qty)}
+                            </b>
+                          </>
+                        ) : (
+                          <b style={{ color: 'var(--ocre)' }}>
+                            {formatARS(it.line_total ?? it.unit_price * it.qty)}
+                          </b>
+                        )}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           ))
         )}
@@ -107,7 +202,7 @@ export function SessionPage() {
       <div className="session__foot">
         <div className="cart__total">
           <span>Total</span>
-          <strong>{formatARS(total)}</strong>
+          <strong style={{ color: 'var(--ocre)' }}>{formatARS(total)}</strong>
         </div>
         {error && <p className="t-error">{error}</p>}
         <div className="session__actions">
@@ -145,72 +240,263 @@ export function SessionPage() {
         />
       )}
 
-      {payOpen && (
-        <div className="overlay" onClick={() => !closeSession.isPending && setPayOpen(false)}>
+      {/* Modal Descuento en producto específico de la cuenta */}
+      {itemForDiscount && (
+        <div
+          className="overlay"
+          style={{ zIndex: 70 }}
+          onClick={() => !discountItemMut.isPending && setItemForDiscount(null)}
+        >
           <div className="sheet" onClick={(e) => e.stopPropagation()}>
-            <h2 className="sheet__title">Cobrar mesa {tablesLabel}</h2>
-            <div style={{ marginBottom: '16px', background: 'rgba(0,0,0,0.04)', padding: '12px', borderRadius: '8px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                <span>Subtotal consumos:</span>
-                <span>{formatARS(total)}</span>
-              </div>
-              {discountAmount > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', color: '#d73828', marginBottom: '4px', fontWeight: 600 }}>
-                  <span>Descuento aplicado:</span>
-                  <span>−{formatARS(discountAmount)}</span>
-                </div>
-              )}
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '18px', fontWeight: 700, borderTop: '1px solid rgba(0,0,0,0.1)', paddingTop: '6px' }}>
-                <span>Total a cobrar:</span>
-                <strong style={{ color: 'var(--ocre, #d73828)' }}>{formatARS(finalTotal)}</strong>
-              </div>
-            </div>
-
-            <div style={{ marginBottom: '16px' }}>
-              <span style={{ fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '6px' }}>
-                Descuento a la mesa:
-              </span>
-              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '8px' }}>
-                {[0, 10, 15, 20, 30, 50].map((pct) => (
+            <h3 className="sheet__title">Descuento en producto</h3>
+            <p style={{ margin: '0 0 12px', fontSize: '15px', color: 'var(--cream)' }}>
+              {itemForDiscount.qty}× {itemForDiscount.name} (
+              <b style={{ color: 'var(--ocre)' }}>
+                {formatARS(itemForDiscount.original_unit_price ?? itemForDiscount.unit_price)} c/u
+              </b>
+              )
+            </p>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: '8px',
+                marginBottom: '14px',
+              }}
+            >
+              {[0, 10, 15, 20, 30, 50].map((pct) => {
+                const active = Math.round(itemForDiscount.discount_pct ?? 0) === pct;
+                return (
                   <button
                     key={pct}
                     type="button"
                     className="t-btn"
+                    disabled={discountItemMut.isPending}
                     style={{
-                      padding: '4px 10px',
-                      fontSize: '12px',
-                      background: discountPct === pct && customDiscount === '' ? 'var(--ocre, #d73828)' : 'rgba(0,0,0,0.08)',
-                      color: discountPct === pct && customDiscount === '' ? '#fff' : 'inherit',
+                      background: active ? 'rgba(253, 183, 64, 0.22)' : 'var(--surface-2)',
+                      border: active ? '2px solid var(--ocre)' : '1px solid var(--line)',
+                      color: 'var(--ocre)',
+                      fontSize: '15px',
+                      fontWeight: 700,
                     }}
-                    onClick={() => {
-                      setDiscountPct(pct);
-                      setCustomDiscount('');
-                    }}
+                    onClick={() => void applyItemDiscountPct(pct)}
                   >
                     {pct === 0 ? 'Sin desc.' : `${pct}%`}
                   </button>
-                ))}
+                );
+              })}
+            </div>
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+              <input
+                type="number"
+                min="0"
+                max={itemForDiscount.original_unit_price ?? itemForDiscount.unit_price}
+                placeholder="Descontar monto $ por unidad"
+                className="t-input"
+                value={customItemDiscount}
+                onChange={(e) => setCustomItemDiscount(e.target.value)}
+              />
+              <button
+                type="button"
+                className="t-btn"
+                style={{
+                  background: 'var(--surface-2)',
+                  border: '1px solid var(--ocre)',
+                  color: 'var(--ocre)',
+                  fontWeight: 700,
+                  whiteSpace: 'nowrap',
+                }}
+                disabled={
+                  discountItemMut.isPending ||
+                  !customItemDiscount ||
+                  parseFloat(customItemDiscount) <= 0
+                }
+                onClick={() => void applyItemDiscountCustom()}
+              >
+                Aplicar $
+              </button>
+            </div>
+            <button
+              className="sheet__cancel"
+              disabled={discountItemMut.isPending}
+              onClick={() => setItemForDiscount(null)}
+            >
+              Cerrar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {payOpen && (
+        <div className="overlay" onClick={() => !closeSession.isPending && setPayOpen(false)}>
+          <div className="sheet sheet--tall" onClick={(e) => e.stopPropagation()}>
+            <h2 className="sheet__title">Cobrar {accountTitle}</h2>
+
+            {/* Ítems de la cuenta con opción de descuento individual */}
+            {allActiveItems.length > 0 && (
+              <div
+                style={{
+                  marginBottom: '12px',
+                  maxHeight: '24vh',
+                  overflowY: 'auto',
+                  background: 'var(--bg)',
+                  border: '1px solid var(--line)',
+                  borderRadius: '10px',
+                  padding: '8px 12px',
+                }}
+              >
+                <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '6px', fontWeight: 600 }}>
+                  Productos en la cuenta (tocá % Desc. para descontar uno en particular):
+                </div>
+                {allActiveItems.map((it) => {
+                  const hasDisc = Boolean(it.discount_pct && it.discount_pct > 0);
+                  return (
+                    <div
+                      key={it.id}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '5px 0',
+                        borderBottom: '1px solid var(--line)',
+                        gap: '8px',
+                        fontSize: '14px',
+                      }}
+                    >
+                      <span style={{ flex: 1 }}>
+                        {it.qty}× {it.name}
+                      </span>
+                      <button
+                        type="button"
+                        style={{
+                          background: hasDisc ? 'rgba(253, 183, 64, 0.2)' : 'var(--surface-2)',
+                          border: hasDisc ? '1px solid var(--ocre)' : '1px solid var(--line)',
+                          borderRadius: '5px',
+                          color: 'var(--ocre)',
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          padding: '2px 7px',
+                          cursor: 'pointer',
+                        }}
+                        onClick={() => {
+                          setCustomItemDiscount('');
+                          setItemForDiscount(it);
+                        }}
+                      >
+                        {hasDisc ? `-${it.discount_pct}%` : '% Desc.'}
+                      </button>
+                      <b style={{ color: 'var(--ocre)' }}>
+                        {formatARS(it.line_total ?? it.unit_price * it.qty)}
+                      </b>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div
+              style={{
+                marginBottom: '14px',
+                background: 'var(--surface-2)',
+                border: '1px solid var(--line)',
+                padding: '12px',
+                borderRadius: '10px',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                <span>Subtotal consumos:</span>
+                <span style={{ color: 'var(--ocre)', fontWeight: 600 }}>{formatARS(total)}</span>
+              </div>
+              {discountAmount > 0 && (
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    color: 'var(--ocre)',
+                    marginBottom: '4px',
+                    fontWeight: 600,
+                  }}
+                >
+                  <span>Descuento general cuenta:</span>
+                  <span>−{formatARS(discountAmount)}</span>
+                </div>
+              )}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  fontSize: '18px',
+                  fontWeight: 700,
+                  borderTop: '1px solid var(--line)',
+                  paddingTop: '6px',
+                }}
+              >
+                <span>Total a cobrar:</span>
+                <strong style={{ color: 'var(--ocre)' }}>{formatARS(finalTotal)}</strong>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '14px' }}>
+              <span
+                style={{
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  display: 'block',
+                  marginBottom: '8px',
+                  color: 'var(--muted)',
+                }}
+              >
+                Descuento sobre toda la cuenta:
+              </span>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(3, 1fr)',
+                  gap: '8px',
+                  marginBottom: '10px',
+                }}
+              >
+                {[0, 10, 15, 20, 30, 50].map((pct) => {
+                  const active = discountPct === pct && customDiscount === '';
+                  return (
+                    <button
+                      key={pct}
+                      type="button"
+                      className="t-btn"
+                      style={{
+                        minHeight: '42px',
+                        padding: '6px 10px',
+                        fontSize: '14px',
+                        fontWeight: 700,
+                        background: active ? 'rgba(253, 183, 64, 0.22)' : 'var(--surface-2)',
+                        border: active ? '2px solid var(--ocre)' : '1px solid var(--line)',
+                        color: 'var(--ocre)',
+                      }}
+                      onClick={() => {
+                        setDiscountPct(pct);
+                        setCustomDiscount('');
+                      }}
+                    >
+                      {pct === 0 ? 'Sin desc.' : `${pct}%`}
+                    </button>
+                  );
+                })}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '12px' }}>O monto $:</span>
+                <span style={{ fontSize: '13px', color: 'var(--muted)', whiteSpace: 'nowrap' }}>
+                  O monto $:
+                </span>
                 <input
                   type="number"
                   min="0"
                   max={total}
-                  placeholder="$ Monto"
+                  placeholder="$ Monto a descontar"
+                  className="t-input"
+                  style={{ minHeight: '42px', fontSize: '15px' }}
                   value={customDiscount}
                   onChange={(e) => {
                     setCustomDiscount(e.target.value);
                     setDiscountPct(0);
-                  }}
-                  style={{
-                    padding: '6px 10px',
-                    borderRadius: '6px',
-                    border: '1px solid rgba(0,0,0,0.2)',
-                    width: '120px',
-                    fontSize: '14px',
-                    background: 'var(--c-surface, #fff)',
-                    color: 'inherit',
                   }}
                 />
               </div>

@@ -29,7 +29,7 @@ export function SalonPage() {
   }, [areas.data, activeArea]);
 
   const tables = useTables(activeArea);
-  const saveLayout = useSaveLayout();
+  const saveLayout = useSaveLayout(activeArea);
   const saveTable = useSaveTable();
   const delTable = useDeleteTable();
 
@@ -39,7 +39,7 @@ export function SalonPage() {
   const [editTable, setEditTable] = useState<Table | null>(null);
   const [creating, setCreating] = useState(false);
 
-  // Sincronizar las mesas locales (editables) con las del servidor.
+  // Sincronizar las mesas locales con las del servidor conservando cambios en curso si los hubiera.
   useEffect(() => {
     if (tables.data) {
       setLocal(tables.data);
@@ -48,16 +48,21 @@ export function SalonPage() {
   }, [tables.data]);
 
   function onMove(id: number, x: number, y: number) {
-    setLocal((prev) => prev.map((t) => (t.id === id ? { ...t, pos_x: x, pos_y: y } : t)));
-    setDirty(true);
+    setLocal((prev) => {
+      const next = prev.map((t) => (t.id === id ? { ...t, pos_x: x, pos_y: y } : t));
+      // Guardamos automáticamente la disposición para que nunca se pierda al editar otra mesa
+      saveLayout.mutate(next);
+      return next;
+    });
+    setDirty(false);
   }
 
   const selectedTable = local.find((t) => t.id === selected) ?? null;
 
   function rotateSelected() {
     if (!selectedTable) return;
-    setLocal((prev) =>
-      prev.map((t) =>
+    setLocal((prev) => {
+      const next = prev.map((t) =>
         t.id === selectedTable.id
           ? {
               ...t,
@@ -66,13 +71,19 @@ export function SalonPage() {
               rotation: ((t.rotation ?? 0) + 90) % 360,
             }
           : t,
-      ),
-    );
-    setDirty(true);
+      );
+      saveLayout.mutate(next);
+      return next;
+    });
+    setDirty(false);
   }
 
   async function duplicateSelected() {
     if (!selectedTable || activeArea === null) return;
+    if (dirty) {
+      await saveLayout.mutateAsync(local);
+      setDirty(false);
+    }
     const isHorizontal = selectedTable.width >= selectedTable.height;
     const nextNum = local.length + 1;
     const newLabel = `${selectedTable.label} (${nextNum})`;
@@ -141,26 +152,60 @@ export function SalonPage() {
             ))}
           </div>
 
-          <div className="floor-toolbar">
-            <Button onClick={() => setCreating(true)}>Agregar mesa</Button>
-            {selectedTable && (
+          <div
+            className="floor-toolbar"
+            style={{ minHeight: '44px', alignItems: 'center' }}
+          >
+            <Button
+              onClick={async () => {
+                if (dirty) {
+                  await saveLayout.mutateAsync(local);
+                  setDirty(false);
+                }
+                setCreating(true);
+              }}
+            >
+              + Agregar mesa / barra
+            </Button>
+            {selectedTable ? (
               <>
-                <Button variant="ghost" onClick={() => setEditTable(selectedTable)}>
-                  Editar «{selectedTable.label}»
+                <Button
+                  variant="ghost"
+                  onClick={async () => {
+                    if (dirty) {
+                      await saveLayout.mutateAsync(local);
+                      setDirty(false);
+                    }
+                    setEditTable(selectedTable);
+                  }}
+                >
+                  ✏️ Editar «{selectedTable.label}»
                 </Button>
-                <Button variant="secondary" onClick={rotateSelected} title="Girar 90 grados (intercambia ancho y alto)">
+                <Button
+                  variant="secondary"
+                  onClick={rotateSelected}
+                  title="Girar 90 grados (intercambia ancho y alto)"
+                >
                   ↻ Rotar 90°
                 </Button>
-                <Button variant="secondary" onClick={() => void duplicateSelected()} title="Duplica este módulo en la grilla">
+                <Button
+                  variant="secondary"
+                  onClick={() => void duplicateSelected()}
+                  title="Duplica este módulo en la grilla"
+                >
                   ⧉ Duplicar
                 </Button>
                 <Button variant="secondary" onClick={() => setQrTable(selectedTable)}>
-                  📱 Ver QR Auto-Pedido
+                  📱 QR
                 </Button>
                 <Button
                   variant="danger"
-                  onClick={() => {
-                    if (confirm(`¿Eliminar la mesa "${selectedTable.label}"?`)) {
+                  onClick={async () => {
+                    if (confirm(`¿Eliminar "${selectedTable.label}"?`)) {
+                      if (dirty) {
+                        await saveLayout.mutateAsync(local);
+                        setDirty(false);
+                      }
                       delTable.mutate(selectedTable.id);
                       setSelected(null);
                     }
@@ -169,10 +214,11 @@ export function SalonPage() {
                   Eliminar
                 </Button>
               </>
+            ) : (
+              <span className="floor-hint">
+                Arrastrá las mesas o barras para ubicarlas (se guardan automáticamente). Tocá una para editarla o rotarla.
+              </span>
             )}
-            <span className="floor-hint">
-              Arrastrá las mesas para ubicarlas. Tocá una para seleccionarla.
-            </span>
           </div>
 
           {tables.isLoading ? (
@@ -257,10 +303,12 @@ export function SalonPage() {
             setCreating(false);
             setEditTable(null);
           }}
-          title={editTable ? 'Editar mesa' : 'Nueva mesa'}
+          title={editTable ? 'Editar mesa / barra' : 'Nueva mesa / barra'}
         >
           <TableForm
-            table={editTable}
+            key={editTable ? `edit-${editTable.id}` : 'create-new'}
+            table={editTable ? (local.find((t) => t.id === editTable.id) ?? editTable) : null}
+            existingTables={local}
             areaId={activeArea}
             onDone={() => {
               setCreating(false);
