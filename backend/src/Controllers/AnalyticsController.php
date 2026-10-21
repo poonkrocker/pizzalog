@@ -106,6 +106,7 @@ class AnalyticsController
                JOIN sales s ON s.id = si.sale_id
           LEFT JOIN products p ON p.id = si.product_id
               WHERE s.business_id = ? AND s.status = "completed"
+                AND si.product_name NOT LIKE "Cobro compartido%"
                 AND s.created_at BETWEEN ? AND ?
               GROUP BY si.product_id
               ORDER BY units DESC
@@ -202,6 +203,7 @@ class AnalyticsController
                JOIN product_ingredients pi ON pi.product_id = si.product_id
                JOIN ingredients i ON i.id = pi.ingredient_id
               WHERE s.business_id = ? AND s.status = "completed"
+                AND si.product_name NOT LIKE "Cobro compartido%"
                 AND s.created_at BETWEEN ? AND ?'
               . $excludeSql .
             ' GROUP BY i.id, i.name, i.category
@@ -224,6 +226,7 @@ class AnalyticsController
                JOIN product_ingredients pi ON pi.product_id = si.product_id
                JOIN ingredients i ON i.id = pi.ingredient_id
               WHERE s.business_id = ? AND s.status = "completed"
+                AND si.product_name NOT LIKE "Cobro compartido%"
                 AND s.created_at BETWEEN ? AND ?'
               . $excludeSql .
             ' GROUP BY i.category

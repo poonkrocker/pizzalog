@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ApiError, formatARS, uuid, type Product, type ProductVariant, type SaleInput } from '@pizzalog/shared';
+import { ApiError, formatARS, uuid, type PaymentSlice, type Product, type ProductVariant, type SaleInput } from '@pizzalog/shared';
 import { useOnline } from '@/lib/network';
 import { useCurrentCashSession } from '@/modules/cash/hooks';
 import { Cart } from './Cart';
@@ -75,8 +75,11 @@ export function SalePage() {
   const [keypadFor, setKeypadFor] = useState<Product | null>(null);
   const [showHalfHalf, setShowHalfHalf] = useState(false);
   const [showExtraModal, setShowExtraModal] = useState(false);
+  const [extraTargetKey, setExtraTargetKey] = useState<string | null>(null);
   const [globalDiscount, setGlobalDiscount] = useState<number>(0);
   const [paying, setPaying] = useState(false);
+  const [payMode, setPayMode] = useState<'single' | 'split'>('single');
+  const [paymentRows, setPaymentRows] = useState<Array<{ amount: string; payment_method: string; label: string }>>([]);
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<{ kind: 'online' | 'queued' | 'round'; detail?: string; withoutCash?: boolean } | null>(null);
   const [lastPrint, setLastPrint] = useState<string | null>(null);
@@ -172,15 +175,15 @@ export function SalePage() {
       key: `p${product.id}`,
       product,
       quantity: 1,
-      unitPrice: product.price,
+      unitPrice: Number(product.price) || 0,
       label: product.name,
     });
   }
 
   function pickVariant(product: Product, variant: ProductVariant | undefined, selectedExtras: Product[]) {
-    const extrasSum = selectedExtras.reduce((s, e) => s + e.price, 0);
+    const extrasSum = selectedExtras.reduce((s, e) => s + (Number(e.price) || 0), 0);
     const extrasKey = selectedExtras.map((e) => e.id).sort((a, b) => a - b).join(',');
-    const basePrice = variant ? variant.price : product.price;
+    const basePrice = Number(variant ? variant.price : product.price) || 0;
     const baseLabel = variant ? `${product.name} — ${variant.label}` : product.name;
     const label =
       selectedExtras.length > 0
@@ -205,12 +208,13 @@ export function SalePage() {
         return {
           ...l,
           key: `${l.key}-ex${extra.id}-${uuid().slice(0, 4)}`,
-          unitPrice: l.unitPrice + extra.price,
+          unitPrice: (Number(l.unitPrice) || 0) + (Number(extra.price) || 0),
           label: `${l.label} (+ ${extra.name})`,
         };
       }),
     );
     setShowExtraModal(false);
+    setExtraTargetKey(null);
   }
 
   function confirmOpenPrice(product: Product, amount: number) {
@@ -237,7 +241,20 @@ export function SalePage() {
     setGlobalDiscount(0);
   }
 
-  async function doCheckout(method: string) {
+  function initEqualSplit(n: number, targetTotal: number) {
+    const count = Math.max(2, n);
+    const baseShare = Math.floor(targetTotal / count);
+    const remainder = Math.round(targetTotal - baseShare * (count - 1));
+    setPaymentRows(
+      Array.from({ length: count }, (_, idx) => ({
+        amount: String(idx === count - 1 ? remainder : baseShare),
+        payment_method: idx === 0 ? 'cash' : 'transfer',
+        label: `Persona ${idx + 1}`,
+      })),
+    );
+  }
+
+  async function doCheckout(method: string, payments?: PaymentSlice[]) {
     setSaving(true);
     setError(null);
     const input: SaleInput = {
@@ -250,6 +267,7 @@ export function SalePage() {
         quantity: l.quantity,
       })),
       payment_method: method,
+      ...(payments && payments.length > 1 ? { payments } : {}),
       discount: globalDiscount > 0 ? globalDiscount : undefined,
       channel: channel === 'delivery' ? 'delivery' : channel === 'here' ? 'salon' : 'takeaway',
     };
@@ -325,7 +343,10 @@ export function SalePage() {
                 fontWeight: 700,
                 opacity: cart.length === 0 ? 0.5 : 1,
               }}
-              onClick={() => setShowExtraModal(true)}
+              onClick={() => {
+                setExtraTargetKey(cart[cart.length - 1]?.key ?? null);
+                setShowExtraModal(true);
+              }}
               title="Agregar un extra a una pizza del pedido"
             >
               🧀 + Extra a pizza
@@ -363,9 +384,20 @@ export function SalePage() {
         onDec={dec}
         onSetLineDiscount={setLineDiscount}
         onSetGlobalDiscount={setGlobalDiscount}
+        onAddExtra={
+          extraProducts.length > 0
+            ? (lineKey) => {
+                setExtraTargetKey(lineKey);
+                setShowExtraModal(true);
+              }
+            : undefined
+        }
         onClear={clearCart}
         checkoutLabel="Cobrar"
-        onCheckout={() => setPaying(true)}
+        onCheckout={() => {
+          setPayMode('single');
+          setPaying(true);
+        }}
         deferLabel="A la cuenta"
         onDefer={online ? () => setToAccount(true) : undefined}
         primaryAction={channel === 'here' ? 'defer' : 'checkout'}
@@ -384,21 +416,40 @@ export function SalePage() {
         <div className="overlay" onClick={() => setShowExtraModal(false)}>
           <div className="sheet sheet--tall" onClick={(e) => e.stopPropagation()}>
             <h2 className="sheet__title">🧀 Agregar Extra a Pizza</h2>
-            <p className="muted-text" style={{ marginTop: 0 }}>
-              Se sumará a: <strong>{cart[cart.length - 1]?.label ?? ''}</strong>
-            </p>
+            {cart.length > 1 ? (
+              <div style={{ marginBottom: 10 }}>
+                <label className="muted-text" style={{ display: 'block', marginBottom: 4 }}>
+                  Elegí a qué pizza sumarle el extra:
+                </label>
+                <select
+                  className="t-input"
+                  value={extraTargetKey ?? cart[cart.length - 1]?.key ?? ''}
+                  onChange={(e) => setExtraTargetKey(e.target.value)}
+                >
+                  {cart.map((l) => (
+                    <option key={l.key} value={l.key}>
+                      {l.label} ({formatARS(l.unitPrice)})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <p className="muted-text" style={{ marginTop: 0 }}>
+                Se sumará a: <strong>{cart[cart.length - 1]?.label ?? ''}</strong>
+              </p>
+            )}
             <div className="variant-pick-grid">
               {extraProducts.map((ex) => (
                 <button
                   key={ex.id}
                   className="variant-pick"
                   onClick={() => {
-                    const last = cart[cart.length - 1];
-                    if (last) attachExtraToLine(last.key, ex);
+                    const target = extraTargetKey ?? cart[cart.length - 1]?.key;
+                    if (target) attachExtraToLine(target, ex);
                   }}
                 >
                   <span className="variant-pick__label">+ {ex.name}</span>
-                  <span className="variant-pick__price">+{formatARS(ex.price)}</span>
+                  <span className="variant-pick__price">+{formatARS(Number(ex.price) || 0)}</span>
                 </button>
               ))}
             </div>
@@ -487,18 +538,225 @@ export function SalePage() {
               <p className="sheet__offline">Sin conexión: la venta se guardará y se enviará al volver.</p>
             )}
             {error && <p className="t-error">{error}</p>}
-            <div className="method-grid">
-              {METHODS.map((m) => (
-                <button
-                  key={m.value}
-                  className="t-btn method-btn"
-                  disabled={saving}
-                  onClick={() => void doCheckout(m.value)}
-                >
-                  {m.label}
-                </button>
-              ))}
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginBottom: '12px' }}>
+              <button
+                type="button"
+                className="t-btn"
+                style={{
+                  minHeight: '36px',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  background: payMode === 'single' ? 'var(--ocre)' : 'var(--surface-2)',
+                  color: payMode === 'single' ? '#111' : 'var(--cream)',
+                  border: '1px solid var(--line)',
+                }}
+                onClick={() => setPayMode('single')}
+              >
+                💳 Pago único
+              </button>
+              <button
+                type="button"
+                className="t-btn"
+                style={{
+                  minHeight: '36px',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  background: payMode === 'split' ? 'var(--ocre)' : 'var(--surface-2)',
+                  color: payMode === 'split' ? '#111' : 'var(--cream)',
+                  border: '1px solid var(--line)',
+                }}
+                onClick={() => {
+                  setPayMode('split');
+                  if (paymentRows.length === 0) {
+                    initEqualSplit(2, total);
+                  }
+                }}
+              >
+                👥 Dividir / Varios pagos
+              </button>
             </div>
+
+            {payMode === 'single' ? (
+              <div className="method-grid">
+                {METHODS.map((m) => (
+                  <button
+                    key={m.value}
+                    className="t-btn method-btn"
+                    disabled={saving}
+                    onClick={() => void doCheckout(m.value)}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div style={{ marginBottom: '12px' }}>
+                <div style={{ display: 'flex', gap: '6px', marginBottom: '10px', flexWrap: 'wrap' }}>
+                  {[2, 3, 4].map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      className="t-btn"
+                      style={{
+                        flex: 1,
+                        minHeight: '34px',
+                        fontSize: '12px',
+                        background: 'var(--surface-2)',
+                        border: '1px solid var(--line)',
+                        color: 'var(--ocre)',
+                        fontWeight: 700,
+                      }}
+                      onClick={() => initEqualSplit(n, total)}
+                    >
+                      ÷ {n} ({formatARS(Math.round(total / n))})
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    className="t-btn"
+                    style={{
+                      minHeight: '34px',
+                      fontSize: '12px',
+                      background: 'var(--surface-2)',
+                      border: '1px solid var(--line)',
+                      color: 'var(--cream)',
+                      padding: '0 10px',
+                    }}
+                    onClick={() => {
+                      const currentSum = paymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+                      const rem = Math.max(0, Math.round(total - currentSum));
+                      setPaymentRows((prev) => [
+                        ...prev,
+                        { amount: String(rem), payment_method: 'cash', label: `Persona ${prev.length + 1}` },
+                      ]);
+                    }}
+                  >
+                    + Pago
+                  </button>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '28vh', overflowY: 'auto', marginBottom: '10px' }}>
+                  {paymentRows.map((row, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '90px 1fr 125px auto',
+                        gap: '6px',
+                        alignItems: 'center',
+                        background: 'var(--surface-2)',
+                        padding: '6px 8px',
+                        borderRadius: '8px',
+                        border: '1px solid var(--line)',
+                      }}
+                    >
+                      <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--cream)' }}>{row.label}</span>
+                      <input
+                        type="number"
+                        min="0"
+                        className="t-input"
+                        style={{ minHeight: '34px', fontSize: '14px', padding: '4px 8px' }}
+                        value={row.amount}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setPaymentRows((prev) => {
+                            const next = prev.map((r, i) => (i === idx ? { ...r, amount: val } : r));
+                            if (next.length === 2 && idx === 0) {
+                              const num = parseFloat(val) || 0;
+                              next[1] = { ...next[1]!, amount: String(Math.max(0, Math.round(total - num))) };
+                            }
+                            return next;
+                          });
+                        }}
+                      />
+                      <select
+                        className="t-input"
+                        style={{ minHeight: '34px', fontSize: '12px', padding: '4px 6px' }}
+                        value={row.payment_method}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setPaymentRows((prev) =>
+                            prev.map((r, i) => (i === idx ? { ...r, payment_method: val } : r)),
+                          );
+                        }}
+                      >
+                        {METHODS.map((m) => (
+                          <option key={m.value} value={m.value}>
+                            {m.label}
+                          </option>
+                        ))}
+                      </select>
+                      {paymentRows.length > 2 && (
+                        <button
+                          type="button"
+                          style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: '15px' }}
+                          onClick={() => setPaymentRows((prev) => prev.filter((_, i) => i !== idx))}
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {(() => {
+                  const sumAssigned = Math.round(paymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0));
+                  const diff = Math.round(total) - sumAssigned;
+                  return (
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        fontSize: '13px',
+                        padding: '6px 8px',
+                        borderRadius: '6px',
+                        marginBottom: '10px',
+                        background: Math.abs(diff) <= 5 ? 'rgba(46, 204, 113, 0.14)' : 'rgba(253, 183, 64, 0.14)',
+                        color: Math.abs(diff) <= 5 ? '#2ecc71' : 'var(--ocre)',
+                        fontWeight: 600,
+                      }}
+                    >
+                      <span>Asignado: {formatARS(sumAssigned)}</span>
+                      <span>
+                        {Math.abs(diff) <= 5
+                          ? '✓ Total cubierto'
+                          : diff > 0
+                            ? `Faltan ${formatARS(diff)}`
+                            : `Sobran ${formatARS(Math.abs(diff))}`}
+                      </span>
+                    </div>
+                  );
+                })()}
+
+                <button
+                  type="button"
+                  className="t-btn t-btn--primary t-btn--block"
+                  disabled={saving}
+                  onClick={() => {
+                    const slices: PaymentSlice[] = paymentRows
+                      .map((r) => ({
+                        amount: parseFloat(r.amount) || 0,
+                        payment_method: r.payment_method,
+                        label: r.label,
+                      }))
+                      .filter((r) => r.amount > 0);
+                    if (slices.length === 0) {
+                      setError('Ingresá al menos un monto mayor a 0');
+                      return;
+                    }
+                    const sumSlices = Math.round(slices.reduce((acc, s) => acc + s.amount, 0));
+                    if (Math.abs(sumSlices - Math.round(total)) > 5) {
+                      setError(`La suma de los pagos (${formatARS(sumSlices)}) debe coincidir con el total (${formatARS(total)})`);
+                      return;
+                    }
+                    void doCheckout(slices[0]!.payment_method, slices);
+                  }}
+                >
+                  {saving ? 'Registrando…' : `Confirmar cobro dividido (${formatARS(total)})`}
+                </button>
+              </div>
+            )}
             <button className="sheet__cancel" disabled={saving} onClick={() => setPaying(false)}>
               Cancelar
             </button>

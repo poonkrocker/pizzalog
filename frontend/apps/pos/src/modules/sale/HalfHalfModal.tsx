@@ -17,7 +17,7 @@ export function HalfHalfModal({ products, onAdd, onClose }: Props) {
   const p1 = combinable.find((p) => p.id === p1Id);
   const p2 = combinable.find((p) => p.id === p2Id);
 
-  const finalPrice = p1 && p2 ? Math.max(p1.price, p2.price) : 0;
+  const finalPrice = p1 && p2 ? Math.max(Number(p1.price) || 0, Number(p2.price) || 0) : 0;
 
   const handleConfirm = () => {
     if (!p1 || !p2) return;

@@ -1,0 +1,1362 @@
+<?php
+session_start();
+require_once dirname(__DIR__) . '/db_connect.php';
+require_once dirname(__DIR__) . '/_visibility.php';   // helper compartido (soporta franjas nuevas y legado)
+
+// Configurar zona horaria y obtener día/hora actual
+date_default_timezone_set('America/Argentina/Cordoba');
+$current_time = date('H:i:s');
+$current_day  = date('l');
+$day_map = array(
+    'Monday'    => 'Lunes',
+    'Tuesday'   => 'Martes',
+    'Wednesday' => 'Miércoles',
+    'Thursday'  => 'Jueves',
+    'Friday'    => 'Viernes',
+    'Saturday'  => 'Sábado',
+    'Sunday'    => 'Domingo'
+);
+$current_day_es = isset($day_map[$current_day]) ? $day_map[$current_day] : 'Lunes';
+
+
+/**
+ * La visibilidad ya NO se filtra en SQL.
+ * El filtro viejo usaba JSON_CONTAINS(visible_days, '"Viernes"'), que solo
+ * funciona con el formato legado ["Viernes",...]. Con el formato nuevo
+ * [{"days":["Viernes"],"start":"20:00","end":"23:59"}] devolvía siempre 0 y
+ * escondía los ítems (ej.: la pizza de la semana). Ahora se filtra en PHP con
+ * isItemVisibleNow(), igual que en el home.
+ */
+$visibilityWhere = "";
+$visParams = [];
+
+function filtrarVisibles(array $rows, string $dia, string $hora): array {
+    return array_values(array_filter($rows, function ($it) use ($dia, $hora) {
+        return isItemVisibleNow($it, $dia, $hora);
+    }));
+}
+
+/**
+ * Agrupa por **segmento** (cada "HH:MM - HH:MM") y además
+ * **fusiona los cruces de medianoche**:
+ *   ... 20:30 - 23:59:59 (Viernes) + 00:00:00 - 00:30:00 (Sábado)
+ *   => muestra solo: "Viernes: 20:30 - 00:30" y oculta el residual del Sábado.
+ *
+ * - Convierte 23:59 / 23:59:59 -> 00:00 (cierre).
+ * - Quita residuales 00:00 - 00:xx.
+ * - Omite tramos vacíos (start == end).
+ */
+function formatGroupedHours($rows) {
+    $order = array('Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo');
+    $dayIndex = array(
+        'Lunes'=>0,'Martes'=>1,'Miércoles'=>2,'Jueves'=>3,'Viernes'=>4,'Sábado'=>5,'Domingo'=>6
+    );
+
+    // --- 1) Cargar crudo por día (con segundos) ---
+    $rawByDay = array();
+    foreach ($order as $d) $rawByDay[$d] = array();
+
+    foreach ($rows as $r) {
+        $day = isset($r['day_of_week']) ? $r['day_of_week'] : '';
+        if (!isset($rawByDay[$day])) continue;
+
+        $s = isset($r['start_time']) ? $r['start_time'] : '';
+        $e = isset($r['end_time'])   ? $r['end_time']   : '';
+
+        $rawByDay[$day][] = array('s'=>$s, 'e'=>$e);
+    }
+
+    // --- 2) Fusionar cruce de medianoche ---
+    for ($i = 0; $i < 7; $i++) {
+        $d = $order[$i];
+        $next = $order[($i + 1) % 7];
+
+        if (!empty($rawByDay[$d]) && !empty($rawByDay[$next])) {
+            // último tramo del día d
+            $lastIdx = count($rawByDay[$d]) - 1;
+            $last = $rawByDay[$d][$lastIdx];
+
+            // primer tramo del día siguiente
+            $firstNext = $rawByDay[$next][0];
+
+            $endsAt2359 = preg_match('/^23:59(?::\d{2})?$/', $last['e']);
+            $startsAt0000 = preg_match('/^00:00(?::\d{2})?$/', $firstNext['s']);
+
+            if ($endsAt2359 && $startsAt0000) {
+                // Extiende el final del día actual al final del primer tramo del siguiente
+                $rawByDay[$d][$lastIdx]['e'] = $firstNext['e'];
+                // Marca el primer tramo del siguiente día para omitirlo (residual)
+                $rawByDay[$next][0]['_skip'] = true;
+            }
+        }
+    }
+
+    // --- 3) Convertir a segmentos por día (HH:MM), omitiendo residuales/skip ---
+    $segmentsByDay = array();
+    foreach ($order as $d) $segmentsByDay[$d] = array();
+
+    foreach ($order as $d) {
+        foreach ($rawByDay[$d] as $seg) {
+            if (!empty($seg['_skip'])) continue;
+
+            $start = date('H:i', strtotime($seg['s']));
+            $endRaw = $seg['e'];
+            $end = date('H:i', strtotime($endRaw));
+
+            // 23:59 / 23:59:59 -> 00:00 (cierre)
+            if ($end === '23:59' || preg_match('/23:59:59$/', (string)$endRaw)) {
+                $end = '00:00';
+            }
+
+            // residuales 00:00 - 00:xx (resto de la noche anterior) => omitir
+            if ($start === '00:00' && preg_match('/^00:\d{2}$/', $end)) continue;
+
+            // tramos vacíos
+            if ($start === $end) continue;
+
+            $segmentsByDay[$d][] = $start . ' - ' . $end;
+        }
+    }
+
+    // --- 4) Conjunto de segmentos únicos ---
+    $unique = array();
+    foreach ($order as $d) {
+        foreach ($segmentsByDay[$d] as $seg) {
+            $unique[$seg] = true;
+        }
+    }
+    $uniqueSegments = array_keys($unique);
+    if (empty($uniqueSegments)) {
+        return 'Horarios no configurados, contacta al administrador.';
+    }
+
+    // --- 5) Para cada segmento, agrupar días consecutivos donde aparece ---
+    $lines = array();
+    foreach ($uniqueSegments as $seg) {
+        $daysWithSeg = array();
+        foreach ($order as $d) {
+            if (in_array($seg, $segmentsByDay[$d], true)) {
+                $daysWithSeg[] = $dayIndex[$d];
+            }
+        }
+        if (empty($daysWithSeg)) continue;
+        sort($daysWithSeg);
+
+        $k = 0; $m = count($daysWithSeg);
+        while ($k < $m) {
+            $startIdx = $daysWithSeg[$k];
+            $endIdx = $startIdx;
+            while ($k+1 < $m && $daysWithSeg[$k+1] === $endIdx + 1) {
+                $k++;
+                $endIdx = $daysWithSeg[$k];
+            }
+
+            $startDay = $order[$startIdx];
+            $endDay   = $order[$endIdx];
+            $rango = ($startIdx === $endIdx) ? $startDay : "De $startDay a $endDay";
+
+            $lines[] = array(
+                'key' => $seg,
+                'startIdx' => $startIdx,
+                'label' => $rango . ': ' . $seg
+            );
+
+            $k++;
+        }
+    }
+
+    // --- 6) Ordenar líneas por hora de inicio (almuerzo antes que noche) ---
+    usort($lines, function($a, $b){
+        list($sa,) = array_map('trim', explode('-', $a['key'], 2));
+        list($sb,) = array_map('trim', explode('-', $b['key'], 2));
+        list($ah, $am) = array_map('intval', explode(':', $sa));
+        list($bh, $bm) = array_map('intval', explode(':', $sb));
+        $ma = $ah*60 + $am;
+        $mb = $bh*60 + $bm;
+        if ($ma === $mb) {
+            return $a['startIdx'] <=> $b['startIdx'];
+        }
+        return $ma <=> $mb;
+    });
+
+    // --- 7) Salida ---
+    $out = array();
+    foreach ($lines as $ln) $out[] = $ln['label'];
+    return implode('<br>', $out);
+}
+
+// Verificar si el negocio está abierto y obtener horarios
+$is_open = false;
+$closed_message = "Estamos cerrados ahora. Horarios de atención:<br>";
+
+try {
+    // Horarios del día actual (para saber si está abierto)
+    $stmt = $pdo->prepare("SELECT start_time, end_time FROM business_hours WHERE day_of_week = ?");
+    $stmt->execute([$current_day_es]);
+    $hours = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // Todos los horarios (para mostrar en el aviso)
+    $all_hours_stmt = $pdo->query("
+        SELECT day_of_week, start_time, end_time
+        FROM business_hours
+        ORDER BY FIELD(day_of_week,'Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'),
+                 start_time, end_time
+    ");
+    $all_hours = $all_hours_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    if (count($all_hours) === 0) {
+        $closed_message = "Estamos cerrados ahora. Horarios no configurados, contacta al administrador.";
+    } else {
+        // mensaje agrupado por segmento + fusión de medianoche
+        $closed_message = "Estamos cerrados ahora, pero podés dejar tu pedido programado para cuando abramos. Horarios de atención:<br>" . formatGroupedHours($all_hours);
+    }
+
+    // ¿Está abierto ahora? (maneja cruces de medianoche y derrame del día anterior)
+    $daysOrder = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
+    $idxDay = array_search($current_day_es, $daysOrder, true);
+    $yesterday = $daysOrder[($idxDay + 6) % 7];
+
+    $stmtOpen = $pdo->prepare("
+        SELECT 1
+        FROM business_hours bh
+        WHERE
+            (
+                bh.day_of_week = ?
+                AND bh.start_time <= bh.end_time
+                AND ? BETWEEN bh.start_time AND bh.end_time
+            )
+            OR
+            (
+                bh.day_of_week = ?
+                AND bh.start_time > bh.end_time
+                AND ( ? >= bh.start_time OR ? <= bh.end_time )
+            )
+            OR
+            (
+                bh.day_of_week = ?
+                AND bh.start_time > bh.end_time
+                AND ? <= bh.end_time
+            )
+        LIMIT 1
+    ");
+    $stmtOpen->execute([
+        $current_day_es, $current_time,
+        $current_day_es, $current_time, $current_time,
+        $yesterday,      $current_time
+    ]);
+    $is_open = (bool)$stmtOpen->fetchColumn();
+    } catch (PDOException $e) {
+    error_log("Error en consulta de horarios: " . $e->getMessage());
+    $closed_message = "Estamos cerrados ahora. Error al verificar horarios, contacta al administrador.";
+}
+
+
+// ============================================================
+//  Turno activo → ventana de horarios para el selector de pedido
+//  Calcula inicio y fin del turno EN CURSO (maneja cruce de
+//  medianoche y el derrame del turno de ayer) para poder ofrecer
+//  franjas de 15' desde "ahora + preparación" hasta el cierre.
+// ============================================================
+$shift_start_iso = null;
+$shift_end_iso   = null;
+if ($is_open) {
+    try {
+        $tz    = new DateTimeZone('America/Argentina/Cordoba');
+        $nowDt = new DateTime('now', $tz);
+
+        $daysOrderShift  = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
+        $idxShift        = array_search($current_day_es, $daysOrderShift, true);
+        $yesterdayShift  = $daysOrderShift[($idxShift + 6) % 7];
+
+        $shiftStmt = $pdo->prepare("
+            SELECT day_of_week, start_time, end_time
+            FROM business_hours
+            WHERE day_of_week IN (?, ?)
+        ");
+        $shiftStmt->execute([$current_day_es, $yesterdayShift]);
+        $shiftRows = $shiftStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $todayStr     = $nowDt->format('Y-m-d');
+        $yesterdayStr = (clone $nowDt)->modify('-1 day')->format('Y-m-d');
+
+        foreach ($shiftRows as $row) {
+            $isToday   = ($row['day_of_week'] === $current_day_es);
+            $start     = $row['start_time'];
+            $end       = $row['end_time'];
+            $overnight = ($start > $end); // ej. 20:00 - 00:00
+
+            $s = null; $e = null;
+            if ($isToday && !$overnight) {
+                // Turno normal del día (ej. mediodía 12:00 - 15:00)
+                $s = new DateTime("$todayStr $start", $tz);
+                $e = new DateTime("$todayStr $end",   $tz);
+                if (!($nowDt >= $s && $nowDt <= $e)) { $s = null; }
+            } elseif ($isToday && $overnight) {
+                // Empieza hoy y termina mañana (ej. 20:00 - 00:00)
+                $s = new DateTime("$todayStr $start", $tz);
+                $e = (new DateTime("$todayStr $end", $tz))->modify('+1 day');
+                if (!($nowDt >= $s)) { $s = null; }
+            } elseif (!$isToday && $overnight) {
+                // Turno de ayer que se derrama en la madrugada de hoy
+                $s = new DateTime("$yesterdayStr $start", $tz);
+                $e = new DateTime("$todayStr $end", $tz);
+                if (!($nowDt <= $e)) { $s = null; }
+            }
+
+            if ($s !== null && $e !== null) {
+                $shift_start_iso = $s->format('c'); // ISO 8601 con offset (-03:00)
+                $shift_end_iso   = $e->format('c');
+                break;
+            }
+        }
+    } catch (Exception $e) {
+        error_log("Error calculando turno activo: " . $e->getMessage());
+        $shift_start_iso = null;
+        $shift_end_iso   = null;
+    }
+}
+
+// ============================================================
+//  Local cerrado → buscamos el PRÓXIMO turno de apertura (hoy más
+//  tarde, o en los próximos días) para poder ofrecer franjas de
+//  "pedido programado" aunque estemos cerrados ahora mismo.
+// ============================================================
+if (!$is_open) {
+    try {
+        $tz    = new DateTimeZone('America/Argentina/Cordoba');
+        $nowDt = new DateTime('now', $tz);
+
+        $daysOrderNext = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
+        $idxToday = array_search($current_day_es, $daysOrderNext, true);
+
+        $allShiftsStmt = $pdo->query("SELECT day_of_week, start_time, end_time FROM business_hours");
+        $allShifts = $allShiftsStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $best = null; // ['s' => DateTime, 'e' => DateTime]
+        for ($offset = 0; $offset < 8 && $best === null; $offset++) {
+            $dayIdx  = ($idxToday + $offset) % 7;
+            $dayName = $daysOrderNext[$dayIdx];
+            $dateStr = (clone $nowDt)->modify("+{$offset} day")->format('Y-m-d');
+
+            foreach ($allShifts as $row) {
+                if ($row['day_of_week'] !== $dayName) continue;
+
+                $start = $row['start_time'];
+                $end   = $row['end_time'];
+                $overnight = ($start > $end); // ej. 20:00 - 00:00
+
+                $s = new DateTime("$dateStr $start", $tz);
+                $e = $overnight
+                    ? (new DateTime("$dateStr $end", $tz))->modify('+1 day')
+                    : new DateTime("$dateStr $end", $tz);
+
+                if ($s > $nowDt && ($best === null || $s < $best['s'])) {
+                    $best = ['s' => $s, 'e' => $e];
+                }
+            }
+        }
+
+        if ($best !== null) {
+            $shift_start_iso = $best['s']->format('c');
+            $shift_end_iso   = $best['e']->format('c');
+            // Para el mensaje del selector: ¿el próximo turno es hoy o más adelante?
+            $next_shift_is_today = ($best['s']->format('Y-m-d') === $nowDt->format('Y-m-d'));
+        }
+    } catch (Exception $e) {
+        error_log("Error calculando próximo turno: " . $e->getMessage());
+    }
+}
+
+
+// Fetch categories
+try {
+    $categories_stmt = $pdo->query("SELECT * FROM categories ORDER BY display_order");
+    $categories = $categories_stmt->fetchAll();
+} catch (PDOException $e) {
+    $categories = [];
+}
+
+// Pre-fetch de ítems por categoría aplicando filtros de día/hora en PHP.
+// Misma fuente para el submenú y para la sección, así una categoría sin
+// ítems disponibles ahora se oculta consistentemente en ambos lugares.
+$items_by_category = [];
+try {
+    $items_stmt = $pdo->prepare("
+        SELECT mi.*
+        FROM menu_items mi
+        WHERE mi.category_id = ?
+          AND mi.is_visible = 1
+        ORDER BY mi.display_order
+    ");
+    foreach ($categories as $category) {
+        $items_stmt->execute([$category['id']]);
+        $all_items = $items_stmt->fetchAll(PDO::FETCH_ASSOC);
+        $items_by_category[$category['id']] = array_values(array_filter(
+            $all_items,
+            fn($it) => isItemVisibleNow($it, $current_day_es, $current_time)
+        ));
+    }
+} catch (PDOException $e) {
+    error_log("Error pre-fetching items por categoría: " . $e->getMessage());
+    $items_by_category = [];
+}
+
+
+
+// Fetch sub-products
+$sub_products = [];
+try {
+    $stmt = $pdo->query("
+        SELECT ms.parent_item_id, mi.id, mi.name, ms.quantity, ms.is_required 
+        FROM menu_item_subproducts ms 
+        JOIN menu_items mi ON ms.sub_item_id = mi.id
+    ");
+    $sub_results = $stmt->fetchAll();
+    foreach ($sub_results as $sub) {
+        $sub_products[$sub['parent_item_id']][] = [
+            'id' => $sub['id'], 
+            'name' => $sub['name'], 
+            'quantity' => $sub['quantity'],
+            'is_required' => $sub['is_required']
+        ];
+    }
+} catch (PDOException $e) {
+    $sub_products = [];
+}
+
+// Variantes con precio propio (Muzza / Fugazzeta / Arrabbiata, etc.).
+// Vive en la carpeta padre (raíz del home), igual que db_connect/_visibility.
+require_once dirname(__DIR__) . '/_variants_data.php';
+
+// Fetch eligible items (visible pizzas)
+$eligible_items = [];
+try {
+    $stmt = $pdo->query("
+        SELECT mi.*
+        FROM menu_items mi
+        WHERE mi.is_visible = 1
+        AND mi.category_id = (SELECT id FROM categories WHERE name = 'Pizzas' LIMIT 1)
+        ORDER BY mi.name
+    ");
+    $eligible_items = filtrarVisibles($stmt->fetchAll(), $current_day_es, $current_time);
+} catch (PDOException $e) {
+    $eligible_items = [];
+}
+
+// Datos de transferencia (editables desde el editor → tabla site_settings).
+// Si la tabla no existe todavía, quedan los valores por defecto de siempre.
+$transfer_alias  = 'RRBBPIZZA';
+$transfer_holder = 'Ezequiel Urquidi';
+try {
+    $ts = $pdo->query("SELECT setting_key, setting_value FROM site_settings WHERE setting_key IN ('transfer_alias','transfer_holder')");
+    foreach ($ts->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        if ($row['setting_key'] === 'transfer_alias'  && $row['setting_value'] !== '') $transfer_alias  = $row['setting_value'];
+        if ($row['setting_key'] === 'transfer_holder' && $row['setting_value'] !== '') $transfer_holder = $row['setting_value'];
+    }
+} catch (Throwable $e) {
+    // tabla inexistente o error → valores por defecto
+}
+?>
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nuestra Carta - Pizzería Arrabbiata</title>
+    <link rel="icon" type="image/png" href="favicon.png"/>
+    <link rel="stylesheet" href="https://arrabbiata.com.ar/arrabbiata.css">
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "LocalBusiness",
+        "name": "Arrabbiata",
+        "image": "https://arrabbiata.com.ar/wp-content/uploads/2025/01/Identidad-Arrabbiata-19_page-0001-1-scaled-e1746087327655.png",
+        "address": {
+            "@type": "PostalAddress",
+            "streetAddress": "27 de abril 798",
+            "addressLocality": "Córdoba",
+            "addressRegion": "Córdoba",
+            "postalCode": "X5000",
+            "addressCountry": "AR"
+        },
+        "geo": {
+            "@type": "GeoCoordinates",
+            "latitude": -31.415915,
+            "longitude": -64.188624
+        },
+        "url": "https://arrabbiata.com.ar",
+        "telephone": "+5493517548030",
+        "openingHoursSpecification": [
+            {
+                "@type": "OpeningHoursSpecification",
+                "dayOfWeek": [
+                    "Monday",
+                    "Tuesday",
+                    "Wednesday",
+                    "Thursday",
+                    "Friday"
+                ],
+                "opens": "12:00",
+                "closes": "15:00"
+            },
+            {
+                "@type": "OpeningHoursSpecification",
+                "dayOfWeek": [
+                    "Thursday",
+                    "Friday",
+                    "Saturday"
+                ],
+                "opens": "20:00",
+                "closes": "00:00"
+            }
+        ],
+        "sameAs": [
+            "https://www.instagram.com/arrabbiata.pizza"
+        ],
+        "description": "Pizzería Arrabbiata, la mejor pizza de Córdoba, ofreciendo auténticas pizzas italianas..."
+    }
+    </script>
+   
+<style>
+
+/* Fuentes locales */
+@font-face {
+  font-family: 'Alberdini';
+  src: url('rrbb.woff2') format('woff2'),
+       url('rrbb.woff') format('woff');
+  font-weight: normal;
+  font-style: normal;
+}
+
+/* Sin nav fijo encima: reducir padding-top de .section */
+.section {
+  padding-top: 30px !important;
+}
+
+/* Secret image visibility control */
+.secret-image {
+  position: fixed;
+  right: 15px;
+  bottom: 60px;
+  width: 88px;
+  height: auto;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .35s ease;
+  z-index: 1200;
+}
+.secret-image.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Encabezado con logo y datos de contacto */
+.menu-header {
+  text-align: center;
+  padding: 12px 16px 14px;
+  border-bottom: 2px solid var(--color-rojo, #c0392b);
+  margin-bottom: 5px;
+}
+
+.menu-header img.menu-logo {
+  width: clamp(200px, 75vw, 340px);
+  height: auto;
+  display: block;
+  margin: 0 auto 1%;
+  /* Compensa el espacio transparente interno del PNG */
+}
+
+.menu-header-info {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.75rem;
+  color: var(--color-texto, #222);
+}
+
+.menu-header-info a {
+  color: inherit;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.menu-header-info a:hover {
+  text-decoration: underline;
+}
+
+.menu-header-info .sep {
+  color: var(--color-rojo, #c0392b);
+  font-weight: bold;
+  user-select: none;
+}
+
+/* ===== MODAL HORARIO DEL PEDIDO ===== */
+.pickup-time-modal {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  background: var(--blanco, #fff);
+  border: 4px solid var(--rojo, #c0392b); border-radius: 0;
+  padding: 22px;
+  box-shadow: 8px 8px 0 var(--rojo-d, #7d1c14);
+  max-width: 440px; width: 90%; display: none; z-index: 10002;
+}
+.pickup-time-modal.active { display: block; }
+.pickup-time-modal h3 {
+  font-family: var(--font-display);
+  margin: 0 0 8px; font-size: 1.4rem; color: var(--rojo, #c0392b);
+}
+.pickup-time-sub {
+  font-family: var(--font-body);
+  margin: 0 0 14px; font-size: .9rem; color: var(--marron, #4a2f28);
+}
+.pickup-time-slots {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+  max-height: 300px; overflow-y: auto; margin-bottom: 16px;
+}
+.pickup-slot {
+  border: 2px solid var(--azul-elec, #2b50c8); background: #fff;
+  color: var(--marron, #4a2f28);
+  padding: 10px 0; border-radius: 2px; cursor: pointer;
+  font-family: var(--font-display); font-size: .95rem;
+  transition: all .12s ease;
+}
+.pickup-slot:hover { background: #eef1ff; }
+.pickup-slot.selected {
+  background: var(--rojo, #c0392b); color: #fff;
+  border-color: var(--rojo, #c0392b);
+  box-shadow: 2px 2px 0 var(--rojo-d, #7d1c14);
+}
+.pickup-slot-asap { grid-column: 1 / -1; }
+.pickup-time-actions { display: flex; gap: 8px; }
+.pickup-time-cancel, .pickup-time-confirm {
+  border: none; padding: 11px 18px; border-radius: 2px;
+  cursor: pointer; flex: 1; font-size: 15px;
+  font-family: var(--font-display); letter-spacing: .05em;
+  transition: all .15s ease;
+}
+.pickup-time-cancel { background: #eee; color: var(--marron, #4a2f28); border: 2px solid #ccc; }
+.pickup-time-cancel:hover { background: #ddd; }
+.pickup-time-confirm {
+  background: var(--verde-wa, #25d366); color: #fff;
+  box-shadow: 3px 3px 0 var(--verde-wa-d, #128c50);
+}
+.pickup-time-confirm:hover:not(:disabled) {
+  background: var(--verde-wa-d, #128c50);
+  box-shadow: 1px 1px 0 #0a6b50; transform: translate(1px,1px);
+}
+.pickup-time-confirm:disabled { opacity: .5; cursor: not-allowed; }
+
+</style>
+</head>
+<body>
+    <section class="section">
+        <div class="menu-container">
+
+            <!-- Encabezado: logo + datos de contacto -->
+            <header class="menu-header">
+                <a href="https://www.arrabbiata.com.ar" ><img class="menu-logo" src="https://arrabbiata.com.ar/Uploads/logoborde.png" alt="Pizzería Arrabbiata"></a>
+                <div class="menu-header-info">
+                    <a href="https://maps.app.goo.gl/weS5JgVfJapUXhRj9" target="_blank" rel="noopener">27 de Abril 798</a>
+                    <span class="sep">·</span>
+                    <a href="https://wa.me/5493517548030" target="_blank" rel="noopener">3517548030</a>
+                    <span class="sep">·</span>
+                    <a href="https://instagram.com/arrabbiata.pizza" target="_blank" rel="noopener">@arrabbiata.pizza</a>
+                </div>
+            </header>
+
+            <?php if (!$is_open): ?>
+                <div class="closed-notice active"><?php echo $closed_message; ?></div>
+            <?php endif; ?>
+            <h2>Nuestra Carta</h2>
+
+            <nav class="category-submenu">
+                <ul>
+                    <?php foreach ($categories as $category): ?>
+                        <?php
+                        $item_count = count($items_by_category[$category['id']] ?? []);
+                        if ($item_count > 0):
+                        ?>
+                            <li class="<?php if ($category['name'] == 'Carta Secreta') echo 'secret-link'; ?>">
+                                <a href="#category-<?php echo $category['id']; ?>"
+                                   onclick="scrollToCategory('category-<?php echo $category['id']; ?>', event)"
+                                   aria-label="Navegar a la categoría <?php echo htmlspecialchars($category['name']); ?>">
+                                   <?php echo htmlspecialchars($category['name']); ?>
+                                </a>
+                            </li>
+                        <?php endif; ?>
+                    <?php endforeach; ?>
+                </ul>
+            </nav>
+
+            <?php foreach ($categories as $category): ?>
+                <?php
+                // Reutilizamos el array pre-calculado: misma fuente que el submenú,
+                // así una categoría sin ítems disponibles ahora se oculta acá también.
+                $items = $items_by_category[$category['id']] ?? [];
+                if (count($items) > 0):
+                ?>
+                    <div id="category-<?php echo $category['id']; ?>" class="category-section <?php if ($category['name'] == 'Carta Secreta') echo 'secret-category'; ?>">
+                        <h3 class="menu-category"><?php echo htmlspecialchars($category['name']); ?></h3>
+                        <div class="pizza-list">
+                            <?php foreach ($items as $item): ?>
+                                <?php include dirname(__DIR__) . '/_item_card.php'; ?>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+                <?php endif; ?>
+            <?php endforeach; ?>
+        </div>
+    </section>
+
+<a href="#category-7">
+    <img id="secret-image" class="secret-image" src="https://arrabbiata.com.ar/Uploads/csgif.gif" alt="Carta Secreta" onclick="toggleSecretMode()">
+</a>
+
+    <?php include dirname(__DIR__) . '/cart_modal.php'; ?>
+
+    <?php include dirname(__DIR__) . '/_variant_modal.php'; ?>
+
+    <footer>
+        <div class="footer-content">
+            <p>Arrabbiata - La mejor pizza de Alberdi
+            <div class="footer-social-icons">
+                <a href="https://www.instagram.com/arrabbiata.pizza" target="_blank">
+                    <img src="https://arrabbiata.com.ar/ig50.png" alt="Instagram">
+                </a>
+                <a href="https://maps.app.goo.gl/8QyHubKUr5CT2bC68" target="_blank">
+                    <img src="https://arrabbiata.com.ar/gmaps50.png" alt="Google Maps">            
+                </a> 
+                <a href="https://wa.me/5493517548030?text=Hola%20Arrabbiata%2C%20me%20comunico%20desde%20su%20web%20para%20" target="_blank">
+                    <img src="https://arrabbiata.com.ar/wp50.png" alt="Whatsapp">            
+                </a>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        const isOpen = <?php echo json_encode($is_open); ?>;
+        // true = el carrito está armando un pedido PROGRAMADO porque el local está cerrado ahora
+        const isPreorder = !isOpen;
+
+        // Ventana del turno activo (o del PRÓXIMO turno, si está cerrado) para el selector de horario
+        const SHIFT_START = <?php echo $shift_start_iso ? json_encode($shift_start_iso) : 'null'; ?>;
+        const SHIFT_END   = <?php echo $shift_end_iso   ? json_encode($shift_end_iso)   : 'null'; ?>;
+        const PREP_BUFFER_MIN = 15; // min de anticipación antes del 1er horario (poné 0 para ofrecer desde ya)
+        const SLOT_MIN = 15;        // tamaño de cada franja (en minutos)
+        let selectedPickupTime = null;
+
+        // Datos de transferencia (vienen del editor)
+        const TRANSFER_ALIAS  = <?php echo json_encode($transfer_alias); ?>;
+        const TRANSFER_HOLDER = <?php echo json_encode($transfer_holder); ?>;
+
+        // Métricas de uso (beacon liviano, no bloquea la navegación)
+        function trackEvent(payload) {
+            try {
+                const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+                if (navigator.sendBeacon) {
+                    navigator.sendBeacon('track.php', blob);
+                } else {
+                    fetch('track.php', { method: 'POST', body: blob, keepalive: true }).catch(() => {});
+                }
+            } catch (e) { /* tracking no crítico */ }
+        }
+
+        let showImageInterval = null;
+
+        document.addEventListener('DOMContentLoaded', function() {
+            updateCartUI();
+            trackEvent({ type: 'view', source: 'carta', path: location.pathname, ref: document.referrer });
+            const paymentMethodSelect = document.getElementById('paymentMethod');
+            paymentMethodSelect.addEventListener('change', updateCartUI);
+
+            // Ajusta el "top" del submenú si está visible la franja de cerrado
+            (function adjustStickyTop() {
+                const submenu = document.querySelector('.category-submenu');
+                const notice = document.querySelector('.closed-notice.active');
+                function applyTop() {
+                    const extra = notice ? (notice.offsetHeight || 0) : 0;
+                    submenu.style.top = extra + 'px';
+                }
+                applyTop();
+                window.addEventListener('resize', applyTop);
+            })();
+
+            // Imagen carta secreta: aparece 5s cada 10s
+            const secretImage = document.getElementById('secret-image');
+            if (secretImage) {
+                showImageInterval = setInterval(function() {
+                    secretImage.classList.add('visible');
+                    setTimeout(function() { secretImage.classList.remove('visible'); }, 5000);
+                }, 10000);
+            }
+        });
+
+        function toggleSecretMode() {
+            document.body.classList.toggle('secret-mode');
+            const secretImage = document.getElementById('secret-image');
+
+            if (document.body.classList.contains('secret-mode')) {
+                // parar el intervalo y ocultar la imagen
+                if (showImageInterval) {
+                    clearInterval(showImageInterval);
+                    showImageInterval = null;
+                }
+                secretImage.style.display = 'none';
+            }
+        }
+
+        // IMPORTANTE: nueva firma con 'event' para compensar sticky
+        function scrollToCategory(categoryId, ev) {
+            if (ev) ev.preventDefault();
+            const element = document.getElementById(categoryId);
+            if (element) {
+                const submenu = document.querySelector('.category-submenu');
+                const offset = (submenu?.offsetHeight || 0) + 8; 
+                const y = element.getBoundingClientRect().top + window.pageYOffset - offset;
+                window.scrollTo({ top: y, behavior: 'smooth' });
+            }
+        }
+
+        let currentSubproductItem = null;
+        let currentDependentItem = null;
+
+        function addItemToCart(name, itemId, price, isVegan, hasSubproducts, requiredSelections, requiresPizza = false) {
+            let displayName = isVegan ? `${name} (Vegana)` : name;
+            
+            if (requiresPizza) {
+                openDependentProductModal(itemId, displayName, price, isVegan);
+            } else if (hasSubproducts) {
+                openSubproductModal(itemId, displayName, price, isVegan, requiredSelections);
+            } else {
+                addToCart(displayName, price, itemId, isVegan);
+            }
+        }
+
+        function addToCart(name, price, itemId, isVegan, selectedSubproducts = [], dependentPizza = null) {
+            const cart = JSON.parse(localStorage.getItem('cart')) || [];
+            const item = {
+                id: itemId,
+                name: name,
+                price: price,
+                quantity: 1,
+                isVegan: isVegan,
+                subproducts: selectedSubproducts,
+                dependentPizza: dependentPizza
+            };
+            
+            const existingItem = cart.find(cartItem => 
+                cartItem.id === itemId && 
+                cartItem.isVegan === isVegan && 
+                JSON.stringify(cartItem.subproducts) === JSON.stringify(selectedSubproducts) &&
+                JSON.stringify(cartItem.dependentPizza) === JSON.stringify(dependentPizza)
+            );
+            if (existingItem) {
+                existingItem.quantity += 1;
+            } else {
+                cart.push(item);
+            }
+            
+            localStorage.setItem('cart', JSON.stringify(cart));
+            updateCartUI();
+            showCartButton();
+        }
+
+        function updateCartUI() {
+            const cart = JSON.parse(localStorage.getItem('cart')) || [];
+            const cartCount = document.getElementById('cartCount');
+            const cartTotal = document.getElementById('cartTotal');
+            const cartItems = document.getElementById('cartItems');
+            const cartContainer = document.getElementById('cartContainer');
+            const paymentMethod = document.getElementById('paymentMethod').value;
+            const creditWarning = document.getElementById('creditWarning');
+            const transferWarning = document.getElementById('transferWarning');
+            
+            let total = 0;
+            let itemCount = 0;
+            
+            cartItems.innerHTML = '';
+            cart.forEach(item => {
+                let itemTotal = item.price * item.quantity;
+                itemCount += item.quantity;
+                
+                const cartItem = document.createElement('div');
+                cartItem.className = 'cart-item';
+                let displayName = item.name;
+                if (item.subproducts.length > 0) {
+                    displayName += ` (${item.subproducts.map(s => s.name).join(', ')})`;
+                }
+                if (item.dependentPizza) {
+                    displayName += ` + ${item.dependentPizza.name}`;
+                    itemTotal += item.dependentPizza.price * item.quantity;
+                }
+                cartItem.innerHTML = `
+                    <span>${displayName} x${item.quantity}</span>
+                    <span>$${itemTotal.toFixed(2)}</span>
+                `;
+                cartItems.appendChild(cartItem);
+                total += itemTotal;
+            });
+            
+            creditWarning.classList.remove('active');
+            transferWarning.classList.remove('active');
+            if (paymentMethod === 'Crédito') {
+                creditWarning.classList.add('active');
+                total *= 1.10;
+            } else if (paymentMethod === 'Transferencia') {
+                transferWarning.classList.add('active');
+            }
+            
+            cartCount.textContent = itemCount;
+            cartTotal.textContent = total.toFixed(2);
+            cartContainer.style.display = itemCount > 0 ? 'block' : 'none';
+        }
+
+        function showCartButton() {
+            const cartContainer = document.getElementById('cartContainer');
+            cartContainer.style.display = 'block';
+            cartContainer.classList.add('active');
+        }
+
+        function toggleCart() {
+            const modal = document.getElementById('cartModal');
+            const overlay = document.getElementById('overlay');
+            const isVisible = modal.style.display === 'block';
+            
+            modal.style.display = isVisible ? 'none' : 'block';
+            overlay.style.display = isVisible ? 'none' : 'block';
+            modal.classList.toggle('active', !isVisible);
+            overlay.classList.toggle('active', !isVisible);
+            updateCartUI();
+        }
+
+        function closeCart() {
+            const modal = document.getElementById('cartModal');
+            const overlay = document.getElementById('overlay');
+            modal.style.display = 'none';
+            overlay.style.display = 'none';
+            modal.classList.remove('active');
+            overlay.classList.remove('active');
+        }
+
+        function clearCart() {
+            localStorage.removeItem('cart');
+            updateCartUI();
+            closeCart();
+        }
+
+        // ---- Tipo de entrega ----
+        let deliveryType = 'retiro';
+
+        function setDelivery(type) {
+            deliveryType = type;
+            document.getElementById('btnRetiro').classList.toggle('active', type === 'retiro');
+            document.getElementById('btnEnvio').classList.toggle('active', type === 'envio');
+            document.getElementById('addressGroup').style.display = type === 'envio' ? 'block' : 'none';
+            if (type === 'retiro') document.getElementById('deliveryAddress').value = '';
+        }
+
+        // ===== Selector de horario del pedido (franjas de 15') =====
+        function ceilToSlot(date, minutes) {
+            const d = new Date(date);
+            d.setSeconds(0, 0);
+            const rem = d.getMinutes() % minutes;
+            if (rem !== 0) d.setMinutes(d.getMinutes() + (minutes - rem));
+            return d;
+        }
+
+        function fmtHM(date, includeDay = false) {
+            const hh = String(date.getHours()).padStart(2, '0');
+            const mm = String(date.getMinutes()).padStart(2, '0');
+            if (!includeDay) return `${hh}:${mm}`;
+            const dias = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+            const isToday = date.toDateString() === new Date().toDateString();
+            const dayLabel = isToday ? 'hoy' : dias[date.getDay()];
+            return `${dayLabel} ${hh}:${mm}`;
+        }
+
+        function appendAsapSlot(slotsWrap, sub, msg) {
+            sub.textContent = msg;
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'pickup-slot pickup-slot-asap';
+            btn.textContent = 'Lo antes posible';
+            btn.dataset.time = 'Lo antes posible';
+            btn.onclick = () => selectPickupSlot(btn);
+            slotsWrap.appendChild(btn);
+        }
+
+        function buildTimeSlots() {
+            const slotsWrap = document.getElementById('pickupTimeSlots');
+            const sub = document.getElementById('pickupTimeSub');
+            const confirmBtn = document.getElementById('pickupConfirmBtn');
+            slotsWrap.innerHTML = '';
+            selectedPickupTime = null;
+            if (confirmBtn) confirmBtn.disabled = true;
+
+            // Si no se pudo calcular ningún turno (ni actual ni próximo), ofrecemos "lo antes posible"
+            if (!SHIFT_END) {
+                appendAsapSlot(slotsWrap, sub, isPreorder
+                    ? 'Estamos cerrados. Dejanos tu pedido y coordinamos el horario:'
+                    : 'Elegí cuándo querés tu pedido:');
+                return;
+            }
+
+            const now = new Date();
+            const shiftStart = SHIFT_START ? new Date(SHIFT_START) : now;
+            const shiftEnd = new Date(SHIFT_END);
+
+            // Primer horario ofrecido = ahora + preparación, nunca antes de la apertura del turno
+            // (si estamos cerrados, SHIFT_START/END son los del PRÓXIMO turno de apertura)
+            let earliest = new Date(now.getTime() + PREP_BUFFER_MIN * 60000);
+            if (earliest < shiftStart) earliest = new Date(shiftStart.getTime());
+            earliest = ceilToSlot(earliest, SLOT_MIN); // alinear a :00 / :15 / :30 / :45
+
+            const slots = [];
+            for (let t = new Date(earliest); t <= shiftEnd; t = new Date(t.getTime() + SLOT_MIN * 60000)) {
+                slots.push(new Date(t));
+            }
+
+            // Turno terminando: si no quedan franjas, dejamos "lo antes posible"
+            if (slots.length === 0) {
+                appendAsapSlot(slotsWrap, sub, isPreorder
+                    ? 'Estamos cerrados. Dejanos tu pedido y coordinamos el horario:'
+                    : 'Estamos por cerrar el turno, pero podemos tomarlo:');
+                return;
+            }
+
+            // Si el turno ofrecido no es el de hoy, mostramos el día junto al horario
+            const showDay = isPreorder && earliest.toDateString() !== now.toDateString();
+
+            sub.textContent = isPreorder
+                ? 'Estamos cerrados ahora. Elegí para cuándo querés tu pedido:'
+                : 'Elegí a qué hora querés tu pedido:';
+            slots.forEach(slot => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'pickup-slot';
+                btn.textContent = fmtHM(slot, showDay);
+                btn.dataset.time = fmtHM(slot, showDay);
+                btn.onclick = () => selectPickupSlot(btn);
+                slotsWrap.appendChild(btn);
+            });
+        }
+
+        function selectPickupSlot(btn) {
+            document.querySelectorAll('#pickupTimeSlots .pickup-slot')
+                .forEach(b => b.classList.remove('selected'));
+            btn.classList.add('selected');
+            selectedPickupTime = btn.dataset.time;
+            const confirmBtn = document.getElementById('pickupConfirmBtn');
+            if (confirmBtn) confirmBtn.disabled = false;
+        }
+
+        function openPickupTimeModal() {
+            buildTimeSlots();
+            const cartModal = document.getElementById('cartModal');
+            const modal = document.getElementById('pickupTimeModal');
+            const overlay = document.getElementById('overlay');
+            // Ocultamos el carrito y mostramos el selector de horario encima
+            cartModal.style.display = 'none';
+            cartModal.classList.remove('active');
+            modal.style.display = 'block';
+            modal.classList.add('active');
+            overlay.style.display = 'block';
+            overlay.classList.add('active');
+        }
+
+        function closePickupTimeModal(returnToCart = true) {
+            const modal = document.getElementById('pickupTimeModal');
+            modal.style.display = 'none';
+            modal.classList.remove('active');
+            if (returnToCart) {
+                // Volvemos al carrito para no perder el pedido cargado
+                const cartModal = document.getElementById('cartModal');
+                cartModal.style.display = 'block';
+                cartModal.classList.add('active');
+            } else {
+                const overlay = document.getElementById('overlay');
+                overlay.style.display = 'none';
+                overlay.classList.remove('active');
+            }
+        }
+
+        function onOverlayClick() {
+            const pickup = document.getElementById('pickupTimeModal');
+            if (pickup && pickup.classList.contains('active')) {
+                closePickupTimeModal(true);
+                return;
+            }
+            closeCart();
+        }
+
+        function confirmPickupAndSend() {
+            if (!selectedPickupTime) { alert('Elegí un horario para tu pedido'); return; }
+            closePickupTimeModal(false);
+            submitOrder(selectedPickupTime);
+        }
+
+        // Inyectar campo de teléfono en el modal del carrito si cart_modal.php no lo tiene aún, y recordar datos del cliente
+        document.addEventListener('DOMContentLoaded', function() {
+            const nameInput = document.getElementById('customerName');
+            if (nameInput && !document.getElementById('customerPhone')) {
+                const phoneGroup = document.createElement('div');
+                phoneGroup.className = 'input-group';
+                phoneGroup.innerHTML = '<input type="tel" id="customerPhone" placeholder="Tu teléfono / WhatsApp">';
+                const parentGroup = nameInput.closest('.input-group');
+                if (parentGroup && parentGroup.parentNode) {
+                    parentGroup.parentNode.insertBefore(phoneGroup, parentGroup.nextSibling);
+                }
+            }
+            try {
+                const savedName = localStorage.getItem('rrbb_customer_name');
+                const savedPhone = localStorage.getItem('rrbb_customer_phone');
+                const savedAddr = localStorage.getItem('rrbb_customer_address');
+                if (savedName && document.getElementById('customerName') && !document.getElementById('customerName').value) {
+                    document.getElementById('customerName').value = savedName;
+                }
+                if (savedPhone && document.getElementById('customerPhone') && !document.getElementById('customerPhone').value) {
+                    document.getElementById('customerPhone').value = savedPhone;
+                }
+                if (savedAddr && document.getElementById('deliveryAddress') && !document.getElementById('deliveryAddress').value) {
+                    document.getElementById('deliveryAddress').value = savedAddr;
+                }
+            } catch (e) {}
+        });
+
+        // Paso 1: validar el pedido y abrir el selector de horario
+        function sendOrder() {
+            const cart = JSON.parse(localStorage.getItem('cart')) || [];
+            const customerName = document.getElementById('customerName').value.trim();
+            const customerPhone = document.getElementById('customerPhone')?.value.trim() || '';
+            const paymentMethod = document.getElementById('paymentMethod').value;
+            const address = document.getElementById('deliveryAddress')?.value.trim() || '';
+
+            if (!customerName) { alert('Por favor ingresa tu nombre para el pedido'); return; }
+            if (deliveryType === 'envio' && !address) { alert('Por favor ingresá la dirección de entrega'); return; }
+            if (!paymentMethod) { alert('Por favor selecciona una forma de pago'); return; }
+            if (cart.length === 0) { alert('El carrito está vacío'); return; }
+
+            try {
+                localStorage.setItem('rrbb_customer_name', customerName);
+                if (customerPhone) localStorage.setItem('rrbb_customer_phone', customerPhone);
+                if (address) localStorage.setItem('rrbb_customer_address', address);
+            } catch (e) {}
+
+            openPickupTimeModal();
+        }
+
+        // Paso 2: con el horario elegido, armar el mensaje y mandar a WhatsApp + Pizzalog
+        function submitOrder(pickupTime) {
+            const cart = JSON.parse(localStorage.getItem('cart')) || [];
+            const customerName = document.getElementById('customerName').value.trim();
+            const customerPhone = document.getElementById('customerPhone')?.value.trim() || '';
+            const extraComments = document.getElementById('extraComments').value.trim();
+            const paymentMethod = document.getElementById('paymentMethod').value;
+            const address = document.getElementById('deliveryAddress')?.value.trim() || '';
+
+            if (!customerName || !paymentMethod || cart.length === 0) { return; }
+
+            const entrega = deliveryType === 'envio'
+                ? `🛵 *Envío a domicilio*\nDirección: ${address}`
+                : `🏪 *Retiro en local* (27 de abril 798)`;
+
+            let message = `Hola, soy *${customerName}*${customerPhone ? ` (${customerPhone})` : ''} y quisiera hacer el siguiente pedido:\n\n`;
+            let total = 0;
+            const pizzalogItems = [];
+
+            cart.forEach(item => {
+                const qty = Number(item.quantity) || 1;
+                let unitPrice = Number(item.price) || 0;
+                let displayName = item.name;
+                if (Array.isArray(item.subproducts) && item.subproducts.length > 0) {
+                    displayName += ` (${item.subproducts.map(s => s.name).join(', ')})`;
+                }
+                if (item.dependentPizza) {
+                    displayName += ` + ${item.dependentPizza.name}`;
+                    unitPrice += Number(item.dependentPizza.price) || 0;
+                }
+                const itemTotal = unitPrice * qty;
+                message += `- ${displayName} x${qty}: $${itemTotal.toFixed(2)}\n`;
+                total += itemTotal;
+                pizzalogItems.push({
+                    name: displayName,
+                    qty: qty,
+                    price: unitPrice
+                });
+            });
+
+            if (paymentMethod === 'Crédito') {
+                const surcharge = total * 0.10;
+                total += surcharge;
+                message += `- Recargo TC x1: $${surcharge.toFixed(2)}\n`;
+                pizzalogItems.push({
+                    name: 'Recargo Tarjeta Crédito (10%)',
+                    qty: 1,
+                    price: Number(surcharge.toFixed(2))
+                });
+            } else if (paymentMethod === 'Transferencia') {
+                message += `\nDatos para la transferencia: Alias: ${TRANSFER_ALIAS}, Nombre: ${TRANSFER_HOLDER}`;
+            }
+
+            if (extraComments) {
+                message += `\n\n*Comentarios:* ${extraComments}`;
+            }
+
+            const horarioLabel = deliveryType === 'envio' ? 'Horario de entrega' : 'Horario de retiro';
+            const preorderTag = isPreorder ? '\n📅 *Pedido programado (local cerrado al momento de pedir)*' : '';
+            message += `\n\n${entrega}\n🕒 *${horarioLabel}:* ${pickupTime}${preorderTag}\nTotal: $${total.toFixed(2)}\nForma de pago: ${paymentMethod}`;
+
+            // Registramos el pedido en track.php (que además lo sincroniza automáticamente con Pizzalog)
+            trackEvent({
+                type: 'order',
+                source: 'carta',
+                customer_name: customerName,
+                customer_phone: customerPhone,
+                address: deliveryType === 'envio' ? address : '',
+                notes: extraComments,
+                delivery_type: deliveryType,
+                payment_method: paymentMethod,
+                total: Number(total.toFixed(2)),
+                pickup_time: pickupTime,
+                item_count: cart.reduce((n, it) => n + (Number(it.quantity) || 1), 0),
+                items: pizzalogItems
+            });
+
+            window.location.href = `https://wa.me/5493517548030?text=${encodeURIComponent(message)}`;
+            clearCart();
+        }
+
+        function openSubproductModal(itemId, itemName, itemPrice, isVegan, requiredSelections) {
+            currentSubproductItem = { id: itemId, name: itemName, price: itemPrice, isVegan: isVegan, requiredSelections: requiredSelections };
+            const modal = document.getElementById('subproductModal');
+            const selectionsDiv = document.getElementById('subproductSelections');
+            const subproducts = <?php echo json_encode($sub_products); ?>[itemId] || [];
+
+            const eligibleItems = <?php echo json_encode($eligible_items); ?>;
+            if (eligibleItems.length === 0) {
+                selectionsDiv.innerHTML = '<p>No hay pizzas disponibles para seleccionar.</p>';
+                modal.style.display = 'block';
+                modal.classList.add('active');
+                document.getElementById('overlay').style.display = 'block';
+                document.getElementById('overlay').classList.add('active');
+                return;
+            }
+
+            selectionsDiv.innerHTML = '';
+            for (let i = 0; i < requiredSelections; i++) {
+                const select = document.createElement('select');
+                select.id = `subproduct-select-${i}`;
+                select.innerHTML = '<option value="">Selecciona una pizza</option>' +
+                    eligibleItems.map(item => 
+                        `<option value="${item.id}">${item.name}</option>`
+                    ).join('');
+                selectionsDiv.appendChild(select);
+            }
+
+            modal.style.display = 'block';
+            modal.classList.add('active');
+            document.getElementById('overlay').style.display = 'block';
+            document.getElementById('overlay').classList.add('active');
+        }
+
+        function closeSubproductModal() {
+            const modal = document.getElementById('subproductModal');
+            modal.style.display = 'none';
+            modal.classList.remove('active');
+            document.getElementById('overlay').style.display = 'none';
+            document.getElementById('overlay').classList.remove('active');
+            currentSubproductItem = null;
+        }
+
+        function confirmSubproducts() {
+            if (!currentSubproductItem) return;
+
+            const selections = [];
+            const selectionsDiv = document.getElementById('subproductSelections');
+            const selects = selectionsDiv.querySelectorAll('select');
+            
+            for (let select of selects) {
+                if (select.value) {
+                    const item = <?php echo json_encode($eligible_items); ?>.find(i => i.id == select.value);
+                    if (item) {
+                        selections.push({ id: item.id, name: item.name });
+                    }
+                }
+            }
+
+            if (selections.length !== currentSubproductItem.requiredSelections) {
+                alert(`Por favor selecciona exactamente ${currentSubproductItem.requiredSelections} pizzas.`);
+                return;
+            }
+
+            addToCart(
+                currentSubproductItem.name,
+                currentSubproductItem.price,
+                currentSubproductItem.id,
+                currentSubproductItem.isVegan,
+                selections
+            );
+            closeSubproductModal();
+        }
+
+        function openDependentProductModal(itemId, itemName, itemPrice, isVegan) {
+            currentDependentItem = { id: itemId, name: itemName, price: itemPrice, isVegan: isVegan };
+            const modal = document.getElementById('dependentProductModal');
+            const select = document.getElementById('dependentPizzaSelect');
+            const titleSpan = document.getElementById('dependentProductTitle');
+            if (titleSpan) titleSpan.textContent = itemName;
+
+            if (select.options.length <= 1) {
+                alert('No hay pizzas disponibles para seleccionar.');
+                return;
+            }
+
+            modal.style.display = 'block';
+            modal.classList.add('active');
+            document.getElementById('overlay').style.display = 'block';
+            document.getElementById('overlay').classList.add('active');
+        }
+
+        function closeDependentProductModal() {
+            const modal = document.getElementById('dependentProductModal');
+            modal.style.display = 'none';
+            modal.classList.remove('active');
+            document.getElementById('overlay').style.display = 'none';
+            document.getElementById('overlay').classList.remove('active');
+            currentDependentItem = null;
+        }
+
+        function confirmDependentProduct() {
+            if (!currentDependentItem) return;
+
+            const select = document.getElementById('dependentPizzaSelect');
+            if (!select.value) {
+                alert('Por favor selecciona una pizza.');
+                return;
+            }
+
+            const selectedOption = select.options[select.selectedIndex];
+            const pizzaId = selectedOption.value;
+            const pizzaName = selectedOption.dataset.name;
+            const pizzaPrice = parseFloat(selectedOption.dataset.price);
+
+            const totalPrice = currentDependentItem.price;
+            const combinedName = `${currentDependentItem.name} + ${pizzaName}`;
+
+            addToCart(
+                combinedName,
+                totalPrice,
+                currentDependentItem.id,
+                currentDependentItem.isVegan,
+                [],
+                { id: pizzaId, name: pizzaName, price: pizzaPrice }
+            );
+            closeDependentProductModal();
+        }
+    </script>
+
+</body>
+</html>

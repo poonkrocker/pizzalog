@@ -203,13 +203,63 @@ class SaleController
 
         $useDigitalKds = $this->usesDigitalKds($bid);
 
+        $paymentsRaw   = $req->input('payments', []);
+        $validPayments = [];
+        if (is_array($paymentsRaw)) {
+            foreach ($paymentsRaw as $p) {
+                if (is_array($p) && isset($p['amount']) && is_numeric($p['amount']) && (float) $p['amount'] > 0) {
+                    $m = self::normalizePaymentMethod((string) ($p['payment_method'] ?? $paymentMethod));
+                    if (in_array($m, self::PAYMENT_METHODS, true)) {
+                        $validPayments[] = [
+                            'amount'         => round((float) $p['amount'], 2),
+                            'payment_method' => $m,
+                            'label'          => trim((string) ($p['label'] ?? '')),
+                        ];
+                    }
+                }
+            }
+        }
+
         $pdo = Database::pdo();
         $pdo->beginTransaction();
         try {
-            $saleId = $this->sales->create(
-                $bid, $userId, $lines, $paymentMethod, $discount,
-                $channel, $cashSessionId, $clientUuid, $note, null, $useDigitalKds
-            );
+            if (count($validPayments) > 1) {
+                $saleId = 0;
+                $n = count($validPayments);
+                foreach ($validPayments as $idx => $pay) {
+                    $amt = $pay['amount'];
+                    $lbl = $pay['label'];
+                    $payNote = 'Pago ' . ($idx + 1) . '/' . $n
+                        . ($lbl !== '' ? " ($lbl)" : '')
+                        . ($note ? ' · ' . $note : '');
+                    if ($idx === 0) {
+                        $saleId = $this->sales->create(
+                            $bid, $userId, $lines, $pay['payment_method'], $discount,
+                            $channel, $cashSessionId, $clientUuid, $payNote, null, $useDigitalKds, $amt
+                        );
+                    } else {
+                        $partLines = [[
+                            'product_id'   => null,
+                            'variant_id'   => null,
+                            'product_name' => 'Cobro compartido ' . ($idx + 1) . '/' . $n . ($lbl !== '' ? " ($lbl)" : ''),
+                            'unit_price'   => $amt,
+                            'quantity'     => 1.0,
+                            'line_total'   => $amt,
+                            'track_stock'  => false,
+                        ]];
+                        $this->sales->create(
+                            $bid, $userId, $partLines, $pay['payment_method'], 0.0,
+                            $channel, $cashSessionId, null, $payNote, null, false, $amt
+                        );
+                    }
+                }
+            } else {
+                $finalMethod = count($validPayments) === 1 ? $validPayments[0]['payment_method'] : $paymentMethod;
+                $saleId = $this->sales->create(
+                    $bid, $userId, $lines, $finalMethod, $discount,
+                    $channel, $cashSessionId, $clientUuid, $note, null, $useDigitalKds
+                );
+            }
             $pdo->commit();
         } catch (\PDOException $e) {
             $pdo->rollBack();

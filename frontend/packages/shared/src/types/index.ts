@@ -131,10 +131,17 @@ export interface SaleItemInput {
   quantity: number;
 }
 
+export interface PaymentSlice {
+  amount: number;
+  payment_method: string;
+  label?: string;
+}
+
 export interface SaleInput {
   client_uuid: string; // idempotencia: clave para el reenvío offline
   items: SaleItemInput[];
   payment_method: string;
+  payments?: PaymentSlice[];
   discount?: number;
   channel?: SaleChannel;
   cash_session_id?: number | null;

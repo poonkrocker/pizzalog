@@ -142,15 +142,15 @@ export function App() {
     if (p.is_combo === 1) return false;
     if (p.is_combinable === 1) return true;
     if (p.category_id !== null && pizzaCatIds.has(p.category_id)) return true;
-    // Si ninguna categoría tiene la palabra "pizza" en su nombre, permitir en productos principales (salvo bebidas/postres)
-    if (pizzaCatIds.size === 0) {
-      const catName =
-        (menu?.categories ?? []).find((c) => c.id === p.category_id)?.name ?? '';
-      if (!/bebida|cerveza|vino|trago|gaseosa|agua|postre|helado/i.test(catName)) {
-        return true;
-      }
+    const catName =
+      (menu?.categories ?? []).find((c) => c.id === p.category_id)?.name ?? '';
+    if (/bebida|cerveza|vino|trago|gaseosa|agua|postre|helado|fain[aá]|empanada/i.test(catName)) {
+      return false;
     }
-    return false;
+    if (/bebida|cerveza|vino|trago|gaseosa|agua|coca|sprite|fanta|pepsi|postre|helado|tiramis|flan|brownie|fain[aá]/i.test(p.name)) {
+      return false;
+    }
+    return true;
   }
 
   // El orden lo manda el panel: categorías ordenadas y luego productos por su sort_order.

@@ -1,5 +1,5 @@
 import type { ApiClient } from './client';
-import type { FloorArea, Round, Table, TableArea, TableSession } from '../types';
+import type { FloorArea, PaymentSlice, Round, Table, TableArea, TableSession } from '../types';
 
 export interface RoundItemInput {
   product_id: number;
@@ -73,6 +73,7 @@ export function tablesApi(client: ApiClient) {
       body: {
         payment_method?: string;
         splits?: CloseSplit[];
+        payments?: PaymentSlice[];
         cash_session_id?: number | null;
         note?: string;
         discount?: number;

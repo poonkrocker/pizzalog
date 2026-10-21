@@ -62,6 +62,7 @@ export function AddRoundSheet({
   const [variantFor, setVariantFor] = useState<Product | null>(null);
   const [keypadFor, setKeypadFor] = useState<Product | null>(null);
   const [showExtraModal, setShowExtraModal] = useState(false);
+  const [extraTargetKey, setExtraTargetKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -94,13 +95,13 @@ export function AddRoundSheet({
       setKeypadFor(product);
       return;
     }
-    addLine({ key: `p${product.id}`, product, quantity: 1, unitPrice: product.price, label: product.name });
+    addLine({ key: `p${product.id}`, product, quantity: 1, unitPrice: Number(product.price) || 0, label: product.name });
   }
 
   function pickVariant(product: Product, variant: ProductVariant | undefined, selectedExtras: Product[]) {
-    const extrasSum = selectedExtras.reduce((s, e) => s + e.price, 0);
+    const extrasSum = selectedExtras.reduce((s, e) => s + (Number(e.price) || 0), 0);
     const extrasKey = selectedExtras.map((e) => e.id).sort((a, b) => a - b).join(',');
-    const basePrice = variant ? variant.price : product.price;
+    const basePrice = Number(variant ? variant.price : product.price) || 0;
     const baseLabel = variant ? `${product.name} — ${variant.label}` : product.name;
     const label =
       selectedExtras.length > 0
@@ -125,12 +126,13 @@ export function AddRoundSheet({
         return {
           ...l,
           key: `${l.key}-ex${extra.id}-${uuid().slice(0, 4)}`,
-          unitPrice: l.unitPrice + extra.price,
+          unitPrice: (Number(l.unitPrice) || 0) + (Number(extra.price) || 0),
           label: `${l.label} (+ ${extra.name})`,
         };
       }),
     );
     setShowExtraModal(false);
+    setExtraTargetKey(null);
   }
 
   function confirmOpenPrice(product: Product, amount: number) {
@@ -197,7 +199,10 @@ export function AddRoundSheet({
                 fontWeight: 700,
                 opacity: lines.length === 0 ? 0.5 : 1,
               }}
-              onClick={() => setShowExtraModal(true)}
+              onClick={() => {
+                setExtraTargetKey(lines[lines.length - 1]?.key ?? null);
+                setShowExtraModal(true);
+              }}
             >
               🧀 + Extra a pizza
             </button>
@@ -229,7 +234,29 @@ export function AddRoundSheet({
           <div className="round-selected">
             {lines.map((l) => (
               <div key={l.key} className="round-line">
-                <span>{l.label}</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  {l.label}
+                  {extraProducts.length > 0 && (
+                    <button
+                      type="button"
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: 'var(--ocre, #fdb740)',
+                        fontSize: 11,
+                        fontWeight: 600,
+                        cursor: 'pointer',
+                        padding: '1px 4px',
+                      }}
+                      onClick={() => {
+                        setExtraTargetKey(l.key);
+                        setShowExtraModal(true);
+                      }}
+                    >
+                      +extra
+                    </button>
+                  )}
+                </span>
                 <div className="qty">
                   <button className="qty__btn" onClick={() => dec(l.key)} aria-label="Quitar uno">
                     −
@@ -273,21 +300,40 @@ export function AddRoundSheet({
         <div className="overlay" onClick={() => setShowExtraModal(false)}>
           <div className="sheet sheet--tall" onClick={(e) => e.stopPropagation()}>
             <h2 className="sheet__title">🧀 Agregar Extra a Pizza</h2>
-            <p className="muted-text" style={{ marginTop: 0 }}>
-              Se sumará a: <strong>{lines[lines.length - 1]?.label ?? ''}</strong>
-            </p>
+            {lines.length > 1 ? (
+              <div style={{ marginBottom: 10 }}>
+                <label className="muted-text" style={{ display: 'block', marginBottom: 4 }}>
+                  Elegí a qué producto sumarle el extra:
+                </label>
+                <select
+                  className="t-input"
+                  value={extraTargetKey ?? lines[lines.length - 1]?.key ?? ''}
+                  onChange={(e) => setExtraTargetKey(e.target.value)}
+                >
+                  {lines.map((l) => (
+                    <option key={l.key} value={l.key}>
+                      {l.label} ({formatARS(l.unitPrice)})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <p className="muted-text" style={{ marginTop: 0 }}>
+                Se sumará a: <strong>{lines[lines.length - 1]?.label ?? ''}</strong>
+              </p>
+            )}
             <div className="variant-pick-grid">
               {extraProducts.map((ex) => (
                 <button
                   key={ex.id}
                   className="variant-pick"
                   onClick={() => {
-                    const last = lines[lines.length - 1];
-                    if (last) attachExtraToLine(last.key, ex);
+                    const target = extraTargetKey ?? lines[lines.length - 1]?.key;
+                    if (target) attachExtraToLine(target, ex);
                   }}
                 >
                   <span className="variant-pick__label">+ {ex.name}</span>
-                  <span className="variant-pick__price">+{formatARS(ex.price)}</span>
+                  <span className="variant-pick__price">+{formatARS(Number(ex.price) || 0)}</span>
                 </button>
               ))}
             </div>

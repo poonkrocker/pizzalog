@@ -418,9 +418,17 @@ class ProductController
         $p['visible_from']  = $p['visible_from'] !== null ? substr((string) $p['visible_from'], 0, 5) : null;
         $p['visible_until'] = $p['visible_until'] !== null ? substr((string) $p['visible_until'], 0, 5) : null;
 
-        // Flags como int para que el front pueda comparar con === 1 sin dudas.
+        // Flags e ints/floats numéricos para evitar concatenación de strings en JS (e.g. "13000" + "0" + "5000")
+        $p['id']             = (int) $p['id'];
+        $p['category_id']    = $p['category_id'] !== null ? (int) $p['category_id'] : null;
+        $p['sort_order']     = (int) ($p['sort_order'] ?? 0);
+        $p['price']          = (float) ($p['price'] ?? 0);
+        $p['cost']           = (float) ($p['cost'] ?? 0);
+        $p['stock_quantity'] = (int) ($p['stock_quantity'] ?? 0);
+        $p['stock_min']      = (int) ($p['stock_min'] ?? 0);
+
         foreach (['is_active', 'has_variants', 'is_combo', 'is_open_price', 'is_combinable',
-                  'show_online', 'show_in_salon', 'is_available', 'is_secret', 'is_vegan_opt'] as $flag) {
+                  'track_stock', 'show_online', 'show_in_salon', 'is_available', 'is_secret', 'is_vegan_opt'] as $flag) {
             if (isset($p[$flag])) {
                 $p[$flag] = (int) $p[$flag];
             }

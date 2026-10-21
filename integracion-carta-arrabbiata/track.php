@@ -1,12 +1,16 @@
 <?php
 /**
- * track.php — endpoint de métricas de la carta + puente directo a Pizzalog.
+ * track.php — endpoint de métricas de la carta.
  *
  * Recibe beacons (navigator.sendBeacon → POST con JSON) desde el index de la
  * carta y registra dos tipos de evento:
  *   - 'view'  : una visita a la página.
- *   - 'order' : un pedido enviado a WhatsApp, que además se reenvía en el mismo
- *               instante a Pizzalog (/api/public/arrabbiata/external-order).
+ *   - 'order' : un pedido enviado a WhatsApp (INTENCIÓN de compra, no venta
+ *               confirmada ni cobro).
+ *
+ * Va en la MISMA carpeta que el index del subdominio (/carta), porque el index
+ * lo llama con URL relativa ('track.php'). Usa el mismo config/DB que la carta.
+ * No requiere login: lo invocan los visitantes.
  */
 
 require_once dirname(__DIR__) . '/db_connect.php';
@@ -14,8 +18,9 @@ date_default_timezone_set('America/Argentina/Cordoba');
 
 header('Content-Type: application/json; charset=utf-8');
 
+// Salt para hashear la IP (contamos únicos aprox. SIN guardar la IP real).
+// Cambialo por cualquier cadena tuya; si lo cambiás, los "únicos" arrancan de cero.
 const TRACK_IP_SALT = 'rrbb-track-2026-cambia-esto';
-const PIZZALOG_EXTERNAL_ORDER_URL = 'https://pizzalog.net/api/public/arrabbiata/external-order';
 
 function trackEnsureTables(PDO $pdo): void {
     $pdo->exec("
@@ -57,6 +62,7 @@ function clientIpHash(): string {
     return hash('sha256', TRACK_IP_SALT . '|' . $ip);
 }
 
+// Unifica la forma de pago (home y carta la mandan con distinto formato/acentos)
 function normPayment(string $p): string {
     $k = strtolower(trim($p));
     $k = strtr($k, ['á'=>'a','é'=>'e','í'=>'i','ó'=>'o','ú'=>'u']);
@@ -70,43 +76,9 @@ function normPayment(string $p): string {
     return $p !== '' ? $p : '(sin dato)';
 }
 
-function forwardOrderToPizzalog(array $data): void {
-    try {
-        $payload = json_encode($data, JSON_UNESCAPED_UNICODE);
-        if ($payload === false) return;
-
-        if (function_exists('curl_init')) {
-            $ch = curl_init(PIZZALOG_EXTERNAL_ORDER_URL);
-            curl_setopt_array($ch, [
-                CURLOPT_POST           => true,
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
-                CURLOPT_POSTFIELDS     => $payload,
-                CURLOPT_TIMEOUT        => 5,
-                CURLOPT_CONNECTTIMEOUT => 3,
-            ]);
-            curl_exec($ch);
-            curl_close($ch);
-            return;
-        }
-
-        $ctx = stream_context_create([
-            'http' => [
-                'method'  => 'POST',
-                'header'  => "Content-Type: application/json\r\n",
-                'content' => $payload,
-                'timeout' => 5,
-            ],
-        ]);
-        @file_get_contents(PIZZALOG_EXTERNAL_ORDER_URL, false, $ctx);
-    } catch (Throwable $e) {
-        error_log('track.php -> Pizzalog error: ' . $e->getMessage());
-    }
-}
-
 try {
     $raw = file_get_contents('php://input');
-    if ($raw === false || strlen($raw) > 30000) { http_response_code(400); echo '{"ok":false}'; exit; }
+    if ($raw === false || strlen($raw) > 100000) { http_response_code(400); echo '{"ok":false}'; exit; }
 
     $data = json_decode($raw, true);
     if (!is_array($data)) { http_response_code(400); echo '{"ok":false}'; exit; }
@@ -155,8 +127,47 @@ try {
             $iph,
         ]);
 
-        // Enviar pedido simultáneamente a Pizzalog
-        forwardOrderToPizzalog($data);
+        // Sincronizar pedido automáticamente con Pizzalog
+        try {
+            $pizzalogUrl = 'https://pizzalog.net/api/public/arrabbiata/external-order';
+            $payload = json_encode([
+                'customer_name'  => trim((string)($data['customer_name'] ?? 'Cliente Carta Web')),
+                'customer_phone' => trim((string)($data['customer_phone'] ?? '')),
+                'address'        => trim((string)($data['address'] ?? '')),
+                'notes'          => trim((string)($data['notes'] ?? '')),
+                'delivery_type'  => (string)($data['delivery_type'] ?? 'retiro'),
+                'payment_method' => (string)($data['payment_method'] ?? 'Efectivo'),
+                'pickup_time'    => (string)($data['pickup_time'] ?? ''),
+                'total'          => is_numeric($data['total'] ?? null) ? (float)$data['total'] : 0,
+                'items'          => $items,
+            ], JSON_UNESCAPED_UNICODE);
+
+            if (function_exists('curl_init')) {
+                $ch = curl_init($pizzalogUrl);
+                curl_setopt_array($ch, [
+                    CURLOPT_POST           => true,
+                    CURLOPT_POSTFIELDS     => $payload,
+                    CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_TIMEOUT        => 5,
+                    CURLOPT_CONNECTTIMEOUT => 3,
+                ]);
+                curl_exec($ch);
+                curl_close($ch);
+            } else {
+                $ctx = stream_context_create([
+                    'http' => [
+                        'method'  => 'POST',
+                        'header'  => "Content-Type: application/json\r\n",
+                        'content' => $payload,
+                        'timeout' => 5,
+                    ],
+                ]);
+                @file_get_contents($pizzalogUrl, false, $ctx);
+            }
+        } catch (Throwable $syncErr) {
+            error_log('track.php Pizzalog sync: ' . $syncErr->getMessage());
+        }
 
         echo '{"ok":true}';
         exit;

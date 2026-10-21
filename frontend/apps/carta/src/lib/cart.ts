@@ -29,7 +29,12 @@ function load(slug: string): CartLine[] {
   try {
     const raw = localStorage.getItem(storageKey(slug));
     const parsed: unknown = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? (parsed as CartLine[]) : [];
+    if (!Array.isArray(parsed)) return [];
+    return (parsed as CartLine[]).map((l) => ({
+      ...l,
+      unit_price: Number(l.unit_price) || 0,
+      quantity: Number(l.quantity) || 1,
+    }));
   } catch {
     return [];
   }
@@ -86,8 +91,8 @@ export function useCart(slug: string) {
 
   const clear = useCallback(() => setLines([]), []);
 
-  const count = lines.reduce((n, l) => n + l.quantity, 0);
-  const total = lines.reduce((n, l) => n + l.unit_price * l.quantity, 0);
+  const count = lines.reduce((n, l) => n + (Number(l.quantity) || 0), 0);
+  const total = lines.reduce((n, l) => n + (Number(l.unit_price) || 0) * (Number(l.quantity) || 0), 0);
 
   return { lines, add, setQty, remove, clear, count, total };
 }

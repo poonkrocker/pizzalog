@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { RoundItemInput } from '@pizzalog/shared';
+import type { CloseSplit, PaymentSlice, RoundItemInput } from '@pizzalog/shared';
 import { useApi } from '@/lib/auth';
 
 // Plano en vivo: se refresca solo para reflejar mesas que se ocupan o liberan.
@@ -75,9 +75,18 @@ export function useCloseSession() {
   const api = useApi();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: { sessionId: number; payment_method: string; discount?: number; note?: string }) =>
+    mutationFn: (input: {
+      sessionId: number;
+      payment_method: string;
+      splits?: CloseSplit[];
+      payments?: PaymentSlice[];
+      discount?: number;
+      note?: string;
+    }) =>
       api.tables.close(input.sessionId, {
         payment_method: input.payment_method,
+        splits: input.splits,
+        payments: input.payments,
         discount: input.discount,
         note: input.note,
       }),

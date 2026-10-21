@@ -70,14 +70,14 @@ export function ProductModal({
   }, [availableHalves, secondHalfId]);
 
   const unitPrice = useMemo(() => {
-    let base = product.price;
+    let base = Number(product.price) || 0;
     if (variantId !== undefined) {
-      base = variants.find((v) => v.id === variantId)?.price ?? product.price;
+      base = Number(variants.find((v) => v.id === variantId)?.price ?? product.price) || 0;
     }
     if (isHalfHalf && secondHalf) {
-      base = Math.max(base, secondHalf.price);
+      base = Math.max(base, Number(secondHalf.price) || 0);
     }
-    const extrasSum = selectedExtras.reduce((sum, e) => sum + e.price, 0);
+    const extrasSum = selectedExtras.reduce((sum, e) => sum + (Number(e.price) || 0), 0);
     return base + extrasSum;
   }, [variantId, variants, product.price, isHalfHalf, secondHalf, selectedExtras]);
 

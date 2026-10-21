@@ -36,12 +36,24 @@ class TableCheckoutService
         array $splits = [],
         ?int $cashSessionId = null,
         ?string $note = null,
-        float $discount = 0.0
+        float $discount = 0.0,
+        array $payments = []
     ): array {
         $items = $this->sessions->getOrderedItems($bid, $sessionId);
         if ($items === []) {
             $this->sessions->markClosed($bid, $sessionId);
             return [];
+        }
+
+        $validPayments = [];
+        foreach ($payments as $p) {
+            if (is_array($p) && isset($p['amount']) && is_numeric($p['amount']) && (float) $p['amount'] > 0) {
+                $validPayments[] = [
+                    'amount'         => round((float) $p['amount'], 2),
+                    'payment_method' => (string) ($p['payment_method'] ?? $paymentMethod),
+                    'label'          => trim((string) ($p['label'] ?? '')),
+                ];
+            }
         }
 
         $groups = $splits === []
@@ -71,30 +83,77 @@ class TableCheckoutService
         $pdo->beginTransaction();
         try {
             $saleIds = [];
-            $remainingDiscount = max(0.0, $discount);
-            foreach ($groups as $g) {
+            if ($splits === [] && count($validPayments) > 1) {
                 $lines = array_map(static function (array $it): array {
                     return [
                         'product_id'   => $it['product_id'],
                         'variant_id'   => $it['variant_id'] ?? null,
                         'product_name' => $it['name'],
-                        'unit_price'   => $it['unit_price'],
-                        'quantity'     => $it['qty'],
-                        'line_total'   => round($it['qty'] * $it['unit_price'], 2),
+                        'unit_price'   => (float) $it['unit_price'],
+                        'quantity'     => (float) $it['qty'],
+                        'line_total'   => round((float) $it['qty'] * (float) $it['unit_price'], 2),
                         'track_stock'  => $it['track_stock'],
                     ];
-                }, $g['items']);
+                }, $items);
 
-                $groupSubtotal = array_reduce($lines, static fn($acc, $l) => $acc + $l['line_total'], 0.0);
-                $groupDiscount = min($remainingDiscount, $groupSubtotal);
-                $remainingDiscount -= $groupDiscount;
+                $n = count($validPayments);
+                foreach ($validPayments as $idx => $pay) {
+                    $amt = $pay['amount'];
+                    $lbl = $pay['label'];
+                    $normalizedMethod = SaleController::normalizePaymentMethod($pay['payment_method']);
+                    $payNote = 'Pago ' . ($idx + 1) . '/' . $n
+                        . ($lbl !== '' ? " ($lbl)" : '')
+                        . ($note ? ' · ' . $note : '');
 
-                $normalizedMethod = SaleController::normalizePaymentMethod($g['payment_method']);
+                    if ($idx === 0) {
+                        $saleIds[] = $this->sales->create(
+                            $bid, $userId, $lines, $normalizedMethod,
+                            max(0.0, $discount), $saleChannel, $cashSessionId, null, $payNote, $sessionId, false, $amt
+                        );
+                    } else {
+                        $partLines = [[
+                            'product_id'   => null,
+                            'variant_id'   => null,
+                            'product_name' => 'Cobro compartido ' . ($idx + 1) . '/' . $n . ($lbl !== '' ? " ($lbl)" : ''),
+                            'unit_price'   => $amt,
+                            'quantity'     => 1.0,
+                            'line_total'   => $amt,
+                            'track_stock'  => false,
+                        ]];
+                        $saleIds[] = $this->sales->create(
+                            $bid, $userId, $partLines, $normalizedMethod,
+                            0.0, $saleChannel, $cashSessionId, null, $payNote, $sessionId, false, $amt
+                        );
+                    }
+                }
+            } else {
+                $remainingDiscount = max(0.0, $discount);
+                foreach ($groups as $g) {
+                    $lines = array_map(static function (array $it): array {
+                        return [
+                            'product_id'   => $it['product_id'],
+                            'variant_id'   => $it['variant_id'] ?? null,
+                            'product_name' => $it['name'],
+                            'unit_price'   => (float) $it['unit_price'],
+                            'quantity'     => (float) $it['qty'],
+                            'line_total'   => round((float) $it['qty'] * (float) $it['unit_price'], 2),
+                            'track_stock'  => $it['track_stock'],
+                        ];
+                    }, $g['items']);
 
-                $saleIds[] = $this->sales->create(
-                    $bid, $userId, $lines, $normalizedMethod,
-                    $groupDiscount, $saleChannel, $cashSessionId, null, $note, $sessionId
-                );
+                    $groupSubtotal = array_reduce($lines, static fn($acc, $l) => $acc + $l['line_total'], 0.0);
+                    $groupDiscount = min($remainingDiscount, $groupSubtotal);
+                    $remainingDiscount -= $groupDiscount;
+
+                    $normalizedMethod = SaleController::normalizePaymentMethod(
+                        count($validPayments) === 1 ? $validPayments[0]['payment_method'] : $g['payment_method']
+                    );
+
+                    $saleIds[] = $this->sales->create(
+                        $bid, $userId, $lines, $normalizedMethod,
+                        $groupDiscount, $saleChannel, $cashSessionId, null, $note, $sessionId
+                    );
+                }
             }
 
             $this->sessions->markClosed($bid, $sessionId);

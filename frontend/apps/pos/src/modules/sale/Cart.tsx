@@ -11,6 +11,7 @@ interface Props {
   onDec: (key: string) => void;
   onSetLineDiscount: (key: string, discountPct: number, fixedAmount?: number) => void;
   onSetGlobalDiscount: (discount: number) => void;
+  onAddExtra?: (key: string) => void;
   onClear: () => void;
   checkoutLabel?: string;
   onCheckout: () => void;
@@ -28,6 +29,7 @@ export function Cart({
   onDec,
   onSetLineDiscount,
   onSetGlobalDiscount,
+  onAddExtra,
   onClear,
   checkoutLabel = 'Cobrar',
   onCheckout,
@@ -120,6 +122,26 @@ export function Cart({
                   >
                     {l.discountPct ? `-${l.discountPct}%` : '%'}
                   </button>
+                  {onAddExtra && (
+                    <button
+                      type="button"
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        borderRadius: '4px',
+                        color: 'var(--ocre)',
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        padding: '1px 4px',
+                        opacity: 0.85,
+                        cursor: 'pointer',
+                      }}
+                      onClick={() => onAddExtra(l.key)}
+                      title="Agregar extra a esta pizza"
+                    >
+                      +extra
+                    </button>
+                  )}
                 </div>
               </div>
               <div className="qty">

@@ -249,6 +249,8 @@ class TableSessionController
 
         $splits        = $req->input('splits', []);
         $splits        = is_array($splits) ? $splits : [];
+        $payments      = $req->input('payments', []);
+        $payments      = is_array($payments) ? $payments : [];
         $paymentMethod = (string) $req->input('payment_method', 'cash');
         $cashSessionId = $req->input('cash_session_id');
         $cashSessionId = is_numeric($cashSessionId) ? (int) $cashSessionId : null;
@@ -257,7 +259,7 @@ class TableSessionController
 
         try {
             $saleIds = (new TableCheckoutService())
-                ->close($bid, (int) $req->auth['user_id'], $id, $paymentMethod, $splits, $cashSessionId, $note, $discount);
+                ->close($bid, (int) $req->auth['user_id'], $id, $paymentMethod, $splits, $cashSessionId, $note, $discount, $payments);
         } catch (\Throwable $e) {
             Response::error($e->getMessage(), 422);
         }

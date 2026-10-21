@@ -43,7 +43,8 @@ class SaleService
         ?string $clientUuid = null,
         ?string $note = null,
         ?int $tableSessionId = null,
-        bool $createKitchenRound = false
+        bool $createKitchenRound = false,
+        ?float $overrideTotal = null
     ): int {
         $pdo = Database::pdo();
 
@@ -56,7 +57,9 @@ class SaleService
             $subtotal += $l['line_total'];
         }
         $subtotal = round($subtotal, 2);
-        $total    = max(0.0, round($subtotal - $discount, 2));
+        $total    = $overrideTotal !== null
+            ? max(0.0, round($overrideTotal, 2))
+            : max(0.0, round($subtotal - $discount, 2));
 
         // Si es una venta directa (ej. Llevar / Delivery cobrada en el acto) y no viene de una
         // cuenta de mesa existente, generamos su comanda en cocina para que NO falte ni se borre de cocina.

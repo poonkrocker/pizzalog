@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { formatARS, type RoundItem } from '@pizzalog/shared';
+import { formatARS, type CloseSplit, type PaymentSlice, type RoundItem } from '@pizzalog/shared';
 import { useCurrentCashSession } from '@/modules/cash/hooks';
 import { AddRoundSheet } from './AddRoundSheet';
 import {
@@ -37,6 +37,11 @@ export function SessionPage() {
   const [customDiscount, setCustomDiscount] = useState<string>('');
   const [itemForDiscount, setItemForDiscount] = useState<RoundItem | null>(null);
   const [customItemDiscount, setCustomItemDiscount] = useState<string>('');
+  const [payMode, setPayMode] = useState<'single' | 'split_amount' | 'split_items'>('single');
+  const [paymentRows, setPaymentRows] = useState<Array<{ amount: string; payment_method: string; label: string }>>([]);
+  const [itemPeopleCount, setItemPeopleCount] = useState<number>(2);
+  const [itemAssignments, setItemAssignments] = useState<Record<number, number>>({});
+  const [personMethods, setPersonMethods] = useState<Record<number, string>>({ 0: 'cash', 1: 'transfer' });
   const [error, setError] = useState<string | null>(null);
 
   if (sessionId === null) return <div className="boot">Mesa inválida.</div>;
@@ -106,6 +111,84 @@ export function SessionPage() {
       navigate('/salon');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo cobrar la cuenta');
+    }
+  }
+
+  function initEqualSplit(n: number, targetTotal: number) {
+    const count = Math.max(2, n);
+    const baseShare = Math.floor(targetTotal / count);
+    const remainder = Math.round(targetTotal - baseShare * (count - 1));
+    const rows = Array.from({ length: count }, (_, idx) => ({
+      amount: String(idx === count - 1 ? remainder : baseShare),
+      payment_method: idx === 0 ? 'cash' : 'transfer',
+      label: `Persona ${idx + 1}`,
+    }));
+    setPaymentRows(rows);
+  }
+
+  async function payMultipleSlices() {
+    setError(null);
+    const slices: PaymentSlice[] = paymentRows
+      .map((r) => ({
+        amount: parseFloat(r.amount) || 0,
+        payment_method: r.payment_method,
+        label: r.label,
+      }))
+      .filter((r) => r.amount > 0);
+
+    if (slices.length === 0) {
+      setError('Ingresá al menos un monto mayor a 0');
+      return;
+    }
+    const sumSlices = Math.round(slices.reduce((acc, s) => acc + s.amount, 0));
+    if (Math.abs(sumSlices - Math.round(finalTotal)) > 5) {
+      setError(`La suma de los pagos (${formatARS(sumSlices)}) debe coincidir con el total (${formatARS(finalTotal)})`);
+      return;
+    }
+
+    try {
+      await closeSession.mutateAsync({
+        sessionId: sid,
+        payment_method: slices[0]!.payment_method,
+        payments: slices,
+        discount: discountAmount,
+      });
+      navigate('/salon');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo cobrar la cuenta dividida');
+    }
+  }
+
+  async function payByItems() {
+    setError(null);
+    const groups: Record<number, number[]> = {};
+    for (const it of allActiveItems) {
+      const pIdx = itemAssignments[it.id] ?? 0;
+      if (!groups[pIdx]) groups[pIdx] = [];
+      groups[pIdx]!.push(it.id);
+    }
+    const splits: CloseSplit[] = Object.entries(groups)
+      .filter(([, ids]) => ids.length > 0)
+      .map(([pIdxStr, item_ids]) => ({
+        item_ids,
+        payment_method: personMethods[Number(pIdxStr)] ?? 'cash',
+      }));
+
+    if (splits.length === 0) {
+      setError('Asigná los productos a cobrar');
+      return;
+    }
+
+    try {
+      await closeSession.mutateAsync({
+        sessionId: sid,
+        payment_method: splits[0]!.payment_method,
+        splits,
+        discount: discountAmount,
+      });
+      navigate('/salon');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo cobrar por productos');
     }
   }
 
@@ -530,18 +613,342 @@ export function SessionPage() {
             )}
 
             {error && <p className="t-error">{error}</p>}
-            <div className="method-grid">
-              {METHODS.map((m) => (
-                <button
-                  key={m.value}
-                  className="t-btn method-btn"
-                  disabled={closeSession.isPending}
-                  onClick={() => void pay(m.value)}
-                >
-                  {m.label}
-                </button>
-              ))}
+
+            {/* Selector de modalidad de cobro: Pago único / Dividir en personas o medios / Por productos */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', marginBottom: '12px' }}>
+              <button
+                type="button"
+                className="t-btn"
+                style={{
+                  minHeight: '36px',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  background: payMode === 'single' ? 'var(--ocre)' : 'var(--surface-2)',
+                  color: payMode === 'single' ? '#111' : 'var(--cream)',
+                  border: '1px solid var(--line)',
+                }}
+                onClick={() => setPayMode('single')}
+              >
+                💳 Pago único
+              </button>
+              <button
+                type="button"
+                className="t-btn"
+                style={{
+                  minHeight: '36px',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  background: payMode === 'split_amount' ? 'var(--ocre)' : 'var(--surface-2)',
+                  color: payMode === 'split_amount' ? '#111' : 'var(--cream)',
+                  border: '1px solid var(--line)',
+                }}
+                onClick={() => {
+                  setPayMode('split_amount');
+                  if (paymentRows.length === 0) {
+                    initEqualSplit(2, finalTotal);
+                  }
+                }}
+              >
+                👥 Dividir / Pagos
+              </button>
+              <button
+                type="button"
+                className="t-btn"
+                style={{
+                  minHeight: '36px',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  background: payMode === 'split_items' ? 'var(--ocre)' : 'var(--surface-2)',
+                  color: payMode === 'split_items' ? '#111' : 'var(--cream)',
+                  border: '1px solid var(--line)',
+                }}
+                onClick={() => setPayMode('split_items')}
+              >
+                🍕 Por ítems
+              </button>
             </div>
+
+            {payMode === 'single' && (
+              <div className="method-grid">
+                {METHODS.map((m) => (
+                  <button
+                    key={m.value}
+                    className="t-btn method-btn"
+                    disabled={closeSession.isPending}
+                    onClick={() => void pay(m.value)}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {payMode === 'split_amount' && (
+              <div style={{ marginBottom: '12px' }}>
+                <div style={{ display: 'flex', gap: '6px', marginBottom: '10px', flexWrap: 'wrap' }}>
+                  {[2, 3, 4].map((n) => (
+                    <button
+                      key={n}
+                      type="button"
+                      className="t-btn"
+                      style={{
+                        flex: 1,
+                        minHeight: '34px',
+                        fontSize: '12px',
+                        background: 'var(--surface-2)',
+                        border: '1px solid var(--line)',
+                        color: 'var(--ocre)',
+                        fontWeight: 700,
+                      }}
+                      onClick={() => initEqualSplit(n, finalTotal)}
+                    >
+                      ÷ {n} ({formatARS(Math.round(finalTotal / n))})
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    className="t-btn"
+                    style={{
+                      minHeight: '34px',
+                      fontSize: '12px',
+                      background: 'var(--surface-2)',
+                      border: '1px solid var(--line)',
+                      color: 'var(--cream)',
+                      padding: '0 10px',
+                    }}
+                    onClick={() => {
+                      const currentSum = paymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0);
+                      const rem = Math.max(0, Math.round(finalTotal - currentSum));
+                      setPaymentRows((prev) => [
+                        ...prev,
+                        { amount: String(rem), payment_method: 'cash', label: `Persona ${prev.length + 1}` },
+                      ]);
+                    }}
+                  >
+                    + Pago
+                  </button>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '28vh', overflowY: 'auto', marginBottom: '10px' }}>
+                  {paymentRows.map((row, idx) => (
+                    <div
+                      key={idx}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '90px 1fr 125px auto',
+                        gap: '6px',
+                        alignItems: 'center',
+                        background: 'var(--surface-2)',
+                        padding: '6px 8px',
+                        borderRadius: '8px',
+                        border: '1px solid var(--line)',
+                      }}
+                    >
+                      <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--cream)' }}>{row.label}</span>
+                      <input
+                        type="number"
+                        min="0"
+                        className="t-input"
+                        style={{ minHeight: '34px', fontSize: '14px', padding: '4px 8px' }}
+                        value={row.amount}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setPaymentRows((prev) => {
+                            const next = prev.map((r, i) => (i === idx ? { ...r, amount: val } : r));
+                            // Si son 2 pagos y edita el primero, autocompletar el segundo con el resto
+                            if (next.length === 2 && idx === 0) {
+                              const num = parseFloat(val) || 0;
+                              next[1] = { ...next[1]!, amount: String(Math.max(0, Math.round(finalTotal - num))) };
+                            }
+                            return next;
+                          });
+                        }}
+                      />
+                      <select
+                        className="t-input"
+                        style={{ minHeight: '34px', fontSize: '12px', padding: '4px 6px' }}
+                        value={row.payment_method}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setPaymentRows((prev) =>
+                            prev.map((r, i) => (i === idx ? { ...r, payment_method: val } : r)),
+                          );
+                        }}
+                      >
+                        {METHODS.map((m) => (
+                          <option key={m.value} value={m.value}>
+                            {m.label}
+                          </option>
+                        ))}
+                      </select>
+                      {paymentRows.length > 2 && (
+                        <button
+                          type="button"
+                          style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', fontSize: '15px' }}
+                          onClick={() => setPaymentRows((prev) => prev.filter((_, i) => i !== idx))}
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {(() => {
+                  const sumAssigned = Math.round(paymentRows.reduce((s, r) => s + (parseFloat(r.amount) || 0), 0));
+                  const diff = Math.round(finalTotal) - sumAssigned;
+                  return (
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        fontSize: '13px',
+                        padding: '6px 8px',
+                        borderRadius: '6px',
+                        marginBottom: '10px',
+                        background: Math.abs(diff) <= 5 ? 'rgba(46, 204, 113, 0.14)' : 'rgba(253, 183, 64, 0.14)',
+                        color: Math.abs(diff) <= 5 ? '#2ecc71' : 'var(--ocre)',
+                        fontWeight: 600,
+                      }}
+                    >
+                      <span>Asignado: {formatARS(sumAssigned)}</span>
+                      <span>
+                        {Math.abs(diff) <= 5
+                          ? '✓ Total cubierto'
+                          : diff > 0
+                            ? `Faltan ${formatARS(diff)}`
+                            : `Sobran ${formatARS(Math.abs(diff))}`}
+                      </span>
+                    </div>
+                  );
+                })()}
+
+                <button
+                  type="button"
+                  className="t-btn t-btn--primary t-btn--block"
+                  disabled={closeSession.isPending}
+                  onClick={() => void payMultipleSlices()}
+                >
+                  {closeSession.isPending ? 'Cobrando…' : `Confirmar cobro dividido (${formatARS(finalTotal)})`}
+                </button>
+              </div>
+            )}
+
+            {payMode === 'split_items' && (
+              <div style={{ marginBottom: '12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <span style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                    Tocá cada producto para asignarlo a una persona:
+                  </span>
+                  <button
+                    type="button"
+                    className="t-btn"
+                    style={{ minHeight: '28px', fontSize: '11px', padding: '2px 8px', background: 'var(--surface-2)', border: '1px solid var(--line)' }}
+                    onClick={() => {
+                      const nextIdx = itemPeopleCount;
+                      setItemPeopleCount((c) => c + 1);
+                      setPersonMethods((prev) => ({ ...prev, [nextIdx]: 'cash' }));
+                    }}
+                  >
+                    + Persona
+                  </button>
+                </div>
+
+                <div style={{ maxHeight: '22vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '10px' }}>
+                  {allActiveItems.map((it) => {
+                    const assigned = itemAssignments[it.id] ?? 0;
+                    return (
+                      <div
+                        key={it.id}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          background: 'var(--surface-2)',
+                          padding: '6px 8px',
+                          borderRadius: '6px',
+                          fontSize: '13px',
+                        }}
+                      >
+                        <span style={{ flex: 1 }}>
+                          {it.qty}× {it.name} ({formatARS(it.line_total ?? it.unit_price * it.qty)})
+                        </span>
+                        <div style={{ display: 'flex', gap: '4px' }}>
+                          {Array.from({ length: itemPeopleCount }, (_, pIdx) => (
+                            <button
+                              key={pIdx}
+                              type="button"
+                              onClick={() => setItemAssignments((prev) => ({ ...prev, [it.id]: pIdx }))}
+                              style={{
+                                padding: '3px 7px',
+                                borderRadius: '4px',
+                                border: assigned === pIdx ? '1px solid var(--ocre)' : '1px solid var(--line)',
+                                background: assigned === pIdx ? 'var(--ocre)' : 'transparent',
+                                color: assigned === pIdx ? '#111' : 'var(--cream)',
+                                fontSize: '11px',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              P{pIdx + 1}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '10px' }}>
+                  {Array.from({ length: itemPeopleCount }, (_, pIdx) => {
+                    const personSum = allActiveItems
+                      .filter((it) => (itemAssignments[it.id] ?? 0) === pIdx)
+                      .reduce((s, it) => s + (it.line_total ?? it.unit_price * it.qty), 0);
+                    if (personSum <= 0) return null;
+                    return (
+                      <div
+                        key={pIdx}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          fontSize: '13px',
+                          background: 'var(--bg)',
+                          padding: '6px 8px',
+                          borderRadius: '6px',
+                          border: '1px solid var(--line)',
+                        }}
+                      >
+                        <span>
+                          <b>Persona {pIdx + 1}:</b> <span style={{ color: 'var(--ocre)' }}>{formatARS(personSum)}</span>
+                        </span>
+                        <select
+                          className="t-input"
+                          style={{ width: '135px', minHeight: '30px', fontSize: '12px', padding: '2px 6px' }}
+                          value={personMethods[pIdx] ?? 'cash'}
+                          onChange={(e) => setPersonMethods((prev) => ({ ...prev, [pIdx]: e.target.value }))}
+                        >
+                          {METHODS.map((m) => (
+                            <option key={m.value} value={m.value}>
+                              {m.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <button
+                  type="button"
+                  className="t-btn t-btn--primary t-btn--block"
+                  disabled={closeSession.isPending}
+                  onClick={() => void payByItems()}
+                >
+                  {closeSession.isPending ? 'Cobrando…' : 'Confirmar cobro por productos'}
+                </button>
+              </div>
+            )}
             <button
               className="sheet__cancel"
               onClick={() => setPayOpen(false)}

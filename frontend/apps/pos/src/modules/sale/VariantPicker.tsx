@@ -13,7 +13,7 @@ export function VariantPicker({ product, extras = [], onPick, onClose }: Props) 
   const [selectedExtraIds, setSelectedExtraIds] = useState<number[]>([]);
 
   const selectedExtras = extras.filter((e) => selectedExtraIds.includes(e.id));
-  const extrasSum = selectedExtras.reduce((s, e) => s + e.price, 0);
+  const extrasSum = selectedExtras.reduce((s, e) => s + (Number(e.price) || 0), 0);
 
   function toggleExtra(id: number) {
     setSelectedExtraIds((prev) =>
@@ -72,7 +72,7 @@ export function VariantPicker({ product, extras = [], onPick, onClose }: Props) 
                   onClick={() => onPick(v, selectedExtras)}
                 >
                   <span className="variant-pick__label">{v.label}</span>
-                  <span className="variant-pick__price">{formatARS(v.price + extrasSum)}</span>
+                  <span className="variant-pick__price">{formatARS((Number(v.price) || 0) + extrasSum)}</span>
                 </button>
               ))}
             </div>
@@ -85,8 +85,8 @@ export function VariantPicker({ product, extras = [], onPick, onClose }: Props) 
             onClick={() => onPick(undefined, selectedExtras)}
           >
             {selectedExtras.length > 0
-              ? `Agregar con ${selectedExtras.length} extra(s) · ${formatARS(product.price + extrasSum)}`
-              : `Agregar sin extras · ${formatARS(product.price)}`}
+              ? `Agregar con ${selectedExtras.length} extra(s) · ${formatARS((Number(product.price) || 0) + extrasSum)}`
+              : `Agregar sin extras · ${formatARS(Number(product.price) || 0)}`}
           </button>
         )}
 
