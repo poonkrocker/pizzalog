@@ -5,18 +5,13 @@ import { formatARS } from '@pizzalog/shared';
 import {
   formatDateAR,
   HOUR_TYPE_LABELS,
+  PortalApiError,
   publicStaffPortalApi,
+  setPortalToken,
   type EmployeePortalData,
 } from './api';
 
-const QUICK_PROFILES = [
-  { code: 'ivan', label: 'Iván' },
-  { code: 'lulu', label: 'Lulú' },
-  { code: 'bruno', label: 'Bruno' },
-  { code: 'agus', label: 'Agus' },
-  { code: 'eze', label: 'Eze' },
-  { code: 'tavo', label: 'Tavo' },
-];
+const PORTAL_CRED_KEY = 'pizzalog_portal_saved_cred';
 
 export function EmployeePortalPage() {
   const { code = 'ivan' } = useParams<{ code: string }>();
@@ -24,8 +19,23 @@ export function EmployeePortalPage() {
 
   const [data, setData] = useState<EmployeePortalData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [needsLogin, setNeedsLogin] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<'resumen' | 'horas' | 'retiros' | 'liquidaciones'>('resumen');
+
+  // Login empleado
+  const [loginUser, setLoginUser] = useState(code);
+  const [loginPass, setLoginPass] = useState('');
+  const [rememberLogin, setRememberLogin] = useState(true);
+  const [loginBusy, setLoginBusy] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
+
+  // Cambiar contraseña
+  const [pwdOpen, setPwdOpen] = useState(false);
+  const [curPwd, setCurPwd] = useState('');
+  const [newPwd, setNewPwd] = useState('');
+  const [pwdBusy, setPwdBusy] = useState(false);
+  const [pwdMsg, setPwdMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   // Modal Retiro a Cuenta
   const [openWithdrawal, setOpenWithdrawal] = useState(false);
@@ -50,14 +60,39 @@ export function EmployeePortalPage() {
 
   const [toast, setToast] = useState<string | null>(null);
 
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(PORTAL_CRED_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed.user === 'string' && typeof parsed.pass === 'string') {
+          setLoginUser(parsed.user);
+          setLoginPass(parsed.pass);
+          return;
+        }
+      }
+    } catch {
+      // ignore
+    }
+    setLoginUser(code);
+  }, [code]);
+
   async function loadPortal(targetCode: string) {
     setLoading(true);
     setError(null);
+    setNeedsLogin(false);
     try {
       const res = await publicStaffPortalApi.getPortal(targetCode);
       setData(res);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudo cargar el perfil');
+      if (e instanceof PortalApiError && (e.status === 401 || e.status === 403)) {
+        setNeedsLogin(true);
+        if (e.status === 403) {
+          setLoginError(e.message);
+        }
+      } else {
+        setError(e instanceof Error ? e.message : 'No se pudo cargar el perfil');
+      }
     } finally {
       setLoading(false);
     }
@@ -66,6 +101,63 @@ export function EmployeePortalPage() {
   useEffect(() => {
     void loadPortal(code);
   }, [code]);
+
+  async function handleLogin(e: FormEvent) {
+    e.preventDefault();
+    setLoginBusy(true);
+    setLoginError(null);
+    try {
+      const cleanUser = loginUser.trim();
+      const res = await publicStaffPortalApi.login(cleanUser, loginPass);
+      try {
+        if (rememberLogin) {
+          localStorage.setItem(PORTAL_CRED_KEY, JSON.stringify({ user: cleanUser, pass: loginPass }));
+        } else {
+          localStorage.removeItem(PORTAL_CRED_KEY);
+        }
+      } catch {
+        // ignore
+      }
+      if (res.user.staff_person_code && res.user.staff_person_code !== code && res.user.role !== 'admin' && res.user.role !== 'manager') {
+        navigate(`/empleado/${res.user.staff_person_code}`, { replace: true });
+        return;
+      }
+      await loadPortal(code);
+    } catch (err) {
+      setLoginError(err instanceof Error ? err.message : 'Usuario o contraseña incorrectos');
+    } finally {
+      setLoginBusy(false);
+    }
+  }
+
+  async function handleChangePassword(e: FormEvent) {
+    e.preventDefault();
+    if (newPwd.trim().length < 4) {
+      setPwdMsg({ ok: false, text: 'La nueva contraseña debe tener al menos 4 caracteres.' });
+      return;
+    }
+    setPwdBusy(true);
+    setPwdMsg(null);
+    try {
+      await publicStaffPortalApi.changePassword(curPwd, newPwd.trim());
+      setPwdMsg({ ok: true, text: 'Contraseña actualizada correctamente.' });
+      setCurPwd('');
+      setNewPwd('');
+    } catch (err) {
+      setPwdMsg({
+        ok: false,
+        text: err instanceof Error ? err.message : 'No se pudo cambiar la contraseña.',
+      });
+    } finally {
+      setPwdBusy(false);
+    }
+  }
+
+  function handleLogout() {
+    setPortalToken(null);
+    setData(null);
+    setNeedsLogin(true);
+  }
 
   function handleSelectSupply(supplyName: string) {
     setWConcept(supplyName);
@@ -142,22 +234,114 @@ export function EmployeePortalPage() {
     );
   }
 
+  if (needsLogin) {
+    return (
+      <div
+        style={{
+          minHeight: '100vh',
+          background: '#161314',
+          color: '#f2ece1',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 16,
+          fontFamily: 'system-ui, -apple-system, sans-serif',
+        }}
+      >
+        <form
+          onSubmit={handleLogin}
+          style={{
+            background: '#221e1f',
+            border: '1px solid #383132',
+            borderRadius: 16,
+            padding: 26,
+            width: '100%',
+            maxWidth: 400,
+            boxShadow: '0 16px 40px rgba(0,0,0,0.45)',
+          }}
+        >
+          <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#fdb740', fontWeight: 700 }}>
+            🍕 Pizzalog · Portal de Personal
+          </div>
+          <h1 style={{ margin: '6px 0 6px', fontSize: 24, fontWeight: 800, color: '#fff' }}>
+            Iniciar sesión
+          </h1>
+          <p style={{ margin: '0 0 18px', fontSize: 13, color: '#a59f97' }}>
+            Ingresá con tu nombre de usuario y contraseña para ver tu perfil personal, horas, retiros y liquidaciones.
+          </p>
+
+          <label style={{ display: 'block', marginBottom: 12, fontSize: 13 }}>
+            <span style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>Usuario</span>
+            <input
+              type="text"
+              className="input"
+              value={loginUser}
+              onChange={(e) => setLoginUser(e.target.value)}
+              placeholder="Ej: ivan, lulu, bruno"
+              autoComplete="username"
+              required
+              style={{ width: '100%' }}
+            />
+          </label>
+
+          <label style={{ display: 'block', marginBottom: 12, fontSize: 13 }}>
+            <span style={{ display: 'block', marginBottom: 4, fontWeight: 600 }}>Contraseña</span>
+            <input
+              type="password"
+              className="input"
+              value={loginPass}
+              onChange={(e) => setLoginPass(e.target.value)}
+              autoComplete="current-password"
+              required
+              style={{ width: '100%' }}
+            />
+          </label>
+
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, fontSize: 13, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={rememberLogin}
+              onChange={(e) => setRememberLogin(e.target.checked)}
+            />
+            <span>Guardar usuario y contraseña</span>
+          </label>
+
+          {loginError && (
+            <p style={{ color: '#ffb4ab', fontSize: 13, margin: '0 0 12px', fontWeight: 600 }}>
+              {loginError}
+            </p>
+          )}
+
+          <button
+            type="submit"
+            disabled={loginBusy}
+            style={{
+              width: '100%',
+              background: '#d73828',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 10,
+              padding: '11px 16px',
+              fontWeight: 700,
+              fontSize: 15,
+              cursor: 'pointer',
+            }}
+          >
+            {loginBusy ? 'Ingresando…' : 'Entrar a mi perfil'}
+          </button>
+        </form>
+      </div>
+    );
+  }
+
   if (error || !data) {
     return (
       <div style={{ minHeight: '100vh', background: '#181516', color: '#f0e6d0', padding: '32px', maxWidth: 640, margin: '0 auto' }}>
         <h2 style={{ color: '#ffb4ab' }}>Perfil no encontrado</h2>
         <p>{error}</p>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 16 }}>
-          {QUICK_PROFILES.map((qp) => (
-            <button
-              key={qp.code}
-              className="btn btn--ghost"
-              onClick={() => navigate(`/empleado/${qp.code}`)}
-            >
-              Ver perfil de {qp.label}
-            </button>
-          ))}
-        </div>
+        <button className="btn btn--ghost" onClick={handleLogout}>
+          Iniciar sesión con otra cuenta
+        </button>
       </div>
     );
   }
@@ -212,7 +396,7 @@ export function EmployeePortalPage() {
             </div>
           </div>
 
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
             <button
               type="button"
               onClick={() => setOpenWithdrawal(true)}
@@ -221,9 +405,9 @@ export function EmployeePortalPage() {
                 color: '#fff',
                 border: 'none',
                 borderRadius: 10,
-                padding: '10px 16px',
+                padding: '10px 14px',
                 fontWeight: 700,
-                fontSize: 14,
+                fontSize: 13,
                 cursor: 'pointer',
               }}
             >
@@ -237,13 +421,52 @@ export function EmployeePortalPage() {
                 color: '#fdb740',
                 border: '1px solid #fdb740',
                 borderRadius: 10,
-                padding: '10px 16px',
+                padding: '10px 14px',
                 fontWeight: 700,
-                fontSize: 14,
+                fontSize: 13,
                 cursor: 'pointer',
               }}
             >
               ⏱ + Cargar Horas
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPwdMsg(null);
+                setCurPwd('');
+                setNewPwd('');
+                setPwdOpen(true);
+              }}
+              style={{
+                background: '#2f292a',
+                color: '#f2ece1',
+                border: '1px solid #443f40',
+                borderRadius: 10,
+                padding: '10px 12px',
+                fontWeight: 600,
+                fontSize: 13,
+                cursor: 'pointer',
+              }}
+              title="Cambiar mi contraseña"
+            >
+              🔑 Contraseña
+            </button>
+            <button
+              type="button"
+              onClick={handleLogout}
+              style={{
+                background: 'rgba(215, 56, 40, 0.16)',
+                color: '#ffb4ab',
+                border: '1px solid rgba(215, 56, 40, 0.4)',
+                borderRadius: 10,
+                padding: '10px 12px',
+                fontWeight: 600,
+                fontSize: 13,
+                cursor: 'pointer',
+              }}
+              title="Cerrar sesión"
+            >
+              🚪 Salir
             </button>
           </div>
         </header>
@@ -264,7 +487,7 @@ export function EmployeePortalPage() {
           </div>
         )}
 
-        {/* 3 Tarjetas Principales idénticas al Excel Individual (Semana en curso / Retiros pendientes / Última liquidación) */}
+        {/* 3 Tarjetas Principales idénticas al Excel Individual */}
         <div
           style={{
             display: 'grid',
@@ -418,7 +641,6 @@ export function EmployeePortalPage() {
         {/* Contenido de cada pestaña */}
         {tab === 'resumen' && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16 }}>
-            {/* Retiros pendientes detalle */}
             <div style={{ background: '#221e1f', border: '1px solid #383132', borderRadius: 14, padding: 18 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                 <h3 style={{ margin: 0, fontSize: 16 }}>📦 Retiros Pendientes de Descontar</h3>
@@ -460,7 +682,6 @@ export function EmployeePortalPage() {
               )}
             </div>
 
-            {/* Horarios Regulares */}
             <div style={{ background: '#221e1f', border: '1px solid #383132', borderRadius: 14, padding: 18 }}>
               <h3 style={{ margin: '0 0 12px', fontSize: 16 }}>🕒 Mis Turnos Regulares</h3>
               {data.schedules.length === 0 ? (
@@ -660,6 +881,88 @@ export function EmployeePortalPage() {
           </div>
         )}
       </div>
+
+      {/* Modal: Cambiar mi contraseña */}
+      {pwdOpen && (
+        <div
+          onClick={() => !pwdBusy && setPwdOpen(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.72)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+            zIndex: 200,
+          }}
+        >
+          <form
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={handleChangePassword}
+            style={{
+              background: '#221e1f',
+              border: '1px solid #3d3536',
+              borderRadius: 16,
+              padding: 22,
+              width: '100%',
+              maxWidth: 400,
+              color: '#f2ece1',
+            }}
+          >
+            <h3 style={{ margin: '0 0 14px', fontSize: 18, color: '#fdb740' }}>
+              🔑 Cambiar mi contraseña
+            </h3>
+            <label style={{ display: 'block', marginBottom: 12, fontSize: 13 }}>
+              <span>Contraseña actual</span>
+              <input
+                type="password"
+                className="input"
+                value={curPwd}
+                onChange={(e) => setCurPwd(e.target.value)}
+                required
+                style={{ width: '100%', marginTop: 4 }}
+              />
+            </label>
+            <label style={{ display: 'block', marginBottom: 12, fontSize: 13 }}>
+              <span>Nueva contraseña (mínimo 4 caracteres)</span>
+              <input
+                type="password"
+                className="input"
+                value={newPwd}
+                onChange={(e) => setNewPwd(e.target.value)}
+                required
+                style={{ width: '100%', marginTop: 4 }}
+              />
+            </label>
+            {pwdMsg && (
+              <p
+                style={{
+                  margin: '0 0 12px',
+                  fontSize: 13,
+                  color: pwdMsg.ok ? '#86efac' : '#fca5a5',
+                  fontWeight: 600,
+                }}
+              >
+                {pwdMsg.text}
+              </p>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => setPwdOpen(false)}
+                disabled={pwdBusy}
+              >
+                Cerrar
+              </button>
+              <button type="submit" className="btn btn--primary" disabled={pwdBusy}>
+                {pwdBusy ? 'Guardando…' : 'Guardar'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* Modal: Cargar Retiro a Cuenta */}
       {openWithdrawal && (

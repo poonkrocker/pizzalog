@@ -344,6 +344,172 @@ class PublicController
         ], 201);
     }
 
+    /**
+     * POST /public/{slug}/external-order
+     * Recibe pedidos enviados desde una carta externa (ej. carta.arrabbiatapizzas.com.ar o track.php)
+     * en simultáneo con el envío a WhatsApp. Acepta ítems con nombre y precio directos y los vincula
+     * automáticamente con el catálogo de Pizzalog si coinciden en nombre, además de guardar el cliente por teléfono.
+     */
+    public function externalOrder(Request $req): void
+    {
+        $business = $this->businessBySlug((string) $req->param('slug'));
+        $bid      = (int) $business['id'];
+        $pdo      = Database::pdo();
+
+        $customerName = trim((string) ($req->input('customer_name') ?? $req->input('name') ?? $req->input('nombre') ?? ''));
+        $customerPhone = trim((string) ($req->input('customer_phone') ?? $req->input('phone') ?? $req->input('telefono') ?? $req->input('whatsapp') ?? ''));
+        $address = trim((string) ($req->input('address') ?? $req->input('direccion') ?? $req->input('domicilio') ?? ''));
+        $deliveryType = strtolower(trim((string) ($req->input('delivery_type') ?? $req->input('fulfillment') ?? $req->input('modalidad') ?? '')));
+        $pickupTime = trim((string) ($req->input('pickup_time') ?? $req->input('horario') ?? ''));
+        $rawNotes = trim((string) ($req->input('notes') ?? $req->input('nota') ?? $req->input('comentarios') ?? ''));
+        $deliveryFee = max(0.0, (float) ($req->input('delivery_fee') ?? $req->input('envio_costo') ?? 0));
+
+        if ($customerName === '') {
+            $customerName = $customerPhone !== '' ? ('Cliente ' . $customerPhone) : 'Cliente Carta Web';
+        }
+
+        $noteParts = [];
+        if ($deliveryType !== '') {
+            $noteParts[] = 'Modalidad: ' . ($deliveryType === 'delivery' || $deliveryType === 'envio' ? 'Envío a domicilio' : 'Retiro en local');
+        }
+        if ($pickupTime !== '') {
+            $noteParts[] = 'Horario: ' . $pickupTime;
+        }
+        if ($rawNotes !== '') {
+            $noteParts[] = $rawNotes;
+        }
+        $notes = $noteParts !== [] ? implode(' | ', $noteParts) : 'Pedido desde Carta Web';
+
+        $rawPay = $req->input('payment_method') ?? $req->input('pago');
+        $paymentMethod = ($rawPay === null || trim((string) $rawPay) === '')
+            ? null
+            : SaleController::normalizePaymentMethod((string) $rawPay);
+
+        // Cargar productos del negocio para vincular por nombre si existe coincidencia
+        $prodStmt = $pdo->prepare('SELECT id, name, price FROM products WHERE business_id = ? AND is_active = 1');
+        $prodStmt->execute([$bid]);
+        $catalogByName = [];
+        foreach ($prodStmt->fetchAll() as $p) {
+            $catalogByName[mb_strtolower(trim((string) $p['name']))] = $p;
+        }
+
+        $rawItems = $req->input('items');
+        if (is_string($rawItems)) {
+            $decoded = json_decode($rawItems, true);
+            $rawItems = is_array($decoded) ? $decoded : [];
+        }
+        if (!is_array($rawItems)) {
+            $rawItems = [];
+        }
+
+        $lines = [];
+        foreach ($rawItems as $it) {
+            if (is_string($it)) {
+                $txt = trim($it);
+                if ($txt === '') continue;
+                $qty = 1.0;
+                $name = $txt;
+                if (preg_match('/^(\d+(?:[.,]\d+)?)\s*[xX×]\s*(.+)$/', $txt, $m)) {
+                    $qty = max(0.1, (float) str_replace(',', '.', $m[1]));
+                    $name = trim($m[2]);
+                }
+                $key = mb_strtolower($name);
+                $matched = $catalogByName[$key] ?? null;
+                $unitPrice = $matched ? (float) $matched['price'] : 0.0;
+                $lines[] = [
+                    'product_id'   => $matched ? (int) $matched['id'] : null,
+                    'product_name' => mb_substr($name, 0, 180),
+                    'unit_price'   => $unitPrice,
+                    'quantity'     => $qty,
+                    'line_total'   => round($unitPrice * $qty, 2),
+                    'notes'        => null,
+                ];
+                continue;
+            }
+            if (!is_array($it)) continue;
+            $name = trim((string) ($it['product_name'] ?? $it['name'] ?? $it['title'] ?? $it['pizza'] ?? $it['item'] ?? ''));
+            if ($name === '') continue;
+            $qty = max(0.1, (float) ($it['quantity'] ?? $it['qty'] ?? $it['cant'] ?? $it['count'] ?? 1));
+            $pid = isset($it['product_id']) && (int) $it['product_id'] > 0 ? (int) $it['product_id'] : null;
+
+            $key = mb_strtolower($name);
+            $matched = $catalogByName[$key] ?? null;
+            if ($pid === null && $matched) {
+                $pid = (int) $matched['id'];
+            }
+
+            $rawPrice = $it['unit_price'] ?? $it['price'] ?? $it['precio'] ?? null;
+            if ($rawPrice !== null && is_numeric($rawPrice)) {
+                $unitPrice = max(0.0, (float) $rawPrice);
+            } elseif (isset($it['line_total']) && is_numeric($it['line_total']) && $qty > 0) {
+                $unitPrice = round(max(0.0, (float) $it['line_total']) / $qty, 2);
+            } elseif ($matched) {
+                $unitPrice = (float) $matched['price'];
+            } else {
+                $unitPrice = 0.0;
+            }
+
+            $itemNotes = trim((string) ($it['notes'] ?? $it['note'] ?? $it['obs'] ?? '')) ?: null;
+            $lines[] = [
+                'product_id'   => $pid,
+                'product_name' => mb_substr($name, 0, 180),
+                'unit_price'   => $unitPrice,
+                'quantity'     => $qty,
+                'line_total'   => round($unitPrice * $qty, 2),
+                'notes'        => $itemNotes,
+            ];
+        }
+
+        $declaredTotal = $req->input('total');
+        if ($lines === [] && is_numeric($declaredTotal) && (float) $declaredTotal > 0) {
+            $lines[] = [
+                'product_id'   => null,
+                'product_name' => 'Pedido Carta Web',
+                'unit_price'   => (float) $declaredTotal,
+                'quantity'     => 1.0,
+                'line_total'   => (float) $declaredTotal,
+                'notes'        => $notes,
+            ];
+        }
+
+        if ($lines === []) {
+            Response::error('El pedido debe contener al menos un ítem', 422);
+        }
+
+        // Si el pedido trajo un total general y los ítems vinieron sin precio unitario, ajustar el primer ítem o distribuir
+        $sumLines = array_sum(array_column($lines, 'line_total'));
+        if ($sumLines <= 0 && is_numeric($declaredTotal) && (float) $declaredTotal > 0) {
+            $lines[0]['unit_price'] = round((float) $declaredTotal / $lines[0]['quantity'], 2);
+            $lines[0]['line_total'] = round((float) $declaredTotal, 2);
+        }
+
+        $pdo->beginTransaction();
+        try {
+            $orderId = $this->orders->create(
+                $bid,
+                'whatsapp',
+                $lines,
+                $deliveryFee,
+                $customerName,
+                $customerPhone !== '' ? $customerPhone : null,
+                $address !== '' ? $address : null,
+                $paymentMethod,
+                $notes,
+                null
+            );
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+
+        $order = $this->orderSummary($bid, $orderId);
+        Response::ok([
+            'ok'    => true,
+            'order' => $order,
+        ], 201);
+    }
+
     /** GET /public/{slug}/table/{id} */
     public function tableInfo(Request $req): void
     {

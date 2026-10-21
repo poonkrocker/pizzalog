@@ -6,8 +6,6 @@ import { CapacitorTokenStorage } from './storage';
 
 const storage = new CapacitorTokenStorage();
 
-// Cliente único de la app. El token se lee de forma asíncrona desde el
-// almacenamiento seguro; el ApiClient ya soporta getToken asíncrono.
 const api = createApi({
   baseUrl: config.getApiUrl,
   getToken: () => storage.get(),
@@ -29,7 +27,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Al montar: si hay token guardado, recupero la sesión.
   useEffect(() => {
     let active = true;
     void storage.get().then(async (token) => {
@@ -52,7 +49,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   async function login(email: string, password: string) {
-    const r = await api.auth.login(email, password);
+    const r = await api.auth.login(email, password, 'pos');
     await storage.set(r.token);
     setUser(r.user);
   }

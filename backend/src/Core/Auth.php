@@ -1,15 +1,6 @@
 <?php
 namespace Pizzalog\Core;
 
-/**
- * Middlewares de seguridad.
- *
- * authenticate(): exige un token válido y completa $req->auth con
- *   user_id, business_id y role. A partir de acá, TODA consulta debe
- *   filtrar por $req->auth['business_id'] para aislar al tenant.
- *
- * requireRole(): exige que el rol del token esté en la lista permitida.
- */
 class Auth
 {
     public static function authenticate(): callable
@@ -42,9 +33,27 @@ class Auth
     {
         return function (Request $req) use ($roles): void {
             $role = $req->auth['role'] ?? '';
-            if (!in_array($role, $roles, true)) {
-                Response::error('No tenés permiso para esta acción', 403);
+            if (in_array($role, $roles, true)) {
+                return;
             }
+            // Si el endpoint permite 'manager' y el empleado tiene módulos del panel asignados por el admin, permitir
+            if (in_array('manager', $roles, true) && !empty($req->auth['user_id'])) {
+                try {
+                    $stmt = Database::pdo()->prepare(
+                        'SELECT allowed_modules FROM users WHERE id = ? AND business_id = ? AND is_active = 1 LIMIT 1'
+                    );
+                    $stmt->execute([(int) $req->auth['user_id'], (int) $req->auth['business_id']]);
+                    $raw = $stmt->fetchColumn();
+                    if ($raw && is_string($raw)) {
+                        $mods = json_decode($raw, true);
+                        if (is_array($mods) && count($mods) > 0) {
+                            return;
+                        }
+                    }
+                } catch (\Throwable) {
+                }
+            }
+            Response::error('No tenés permiso para esta acción', 403);
         };
     }
 }

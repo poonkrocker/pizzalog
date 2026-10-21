@@ -10,7 +10,7 @@ const CRED_KEY = 'pizzalog_panel_saved_credentials';
 export function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [remember, setRemember] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -22,7 +22,7 @@ export function Login() {
       if (raw) {
         const parsed = JSON.parse(raw);
         if (parsed && typeof parsed.email === 'string' && typeof parsed.password === 'string') {
-          setEmail(parsed.email);
+          setIdentifier(parsed.email);
           setPassword(parsed.password);
           setRemember(true);
         }
@@ -37,11 +37,11 @@ export function Login() {
     setError(null);
     setBusy(true);
     try {
-      const cleanEmail = email.trim();
-      await login(cleanEmail, password);
+      const cleanId = identifier.trim();
+      await login(cleanId, password);
       try {
         if (remember) {
-          localStorage.setItem(CRED_KEY, JSON.stringify({ email: cleanEmail, password }));
+          localStorage.setItem(CRED_KEY, JSON.stringify({ email: cleanId, password }));
         } else {
           localStorage.removeItem(CRED_KEY);
         }
@@ -63,11 +63,12 @@ export function Login() {
         <div className="login__body">
           <p className="login__eyebrow">Panel de gestión</p>
           <h1 className="login__word">Pizzalog</h1>
-          <Field label="Email">
+          <Field label="Usuario o Email">
             <Input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              type="text"
+              placeholder="Ej: ivan, lulu o tu email"
+              value={identifier}
+              onChange={(e) => setIdentifier(e.target.value)}
               autoComplete="username"
               required
             />

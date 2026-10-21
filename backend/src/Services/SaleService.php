@@ -10,19 +10,11 @@ use Pizzalog\Repositories\StockRepository;
  * los pedidos de delivery (OrderController). Inserta la venta y sus líneas,
  * y descuenta stock de los productos que lo controlan.
  *
- * COMBOS: una línea puede traer `combo_selections`
- * ([{ group_id, product_ids: number[] }]). La línea del combo se inserta con
- * su precio completo y, por cada producto elegido, se inserta una línea HIJA
- * con unit_price = 0 y parent_sale_item_id apuntando al combo. Así:
- *   - la facturación no se infla (las hijas suman $0);
- *   - el ranking de popularidad sí ve cada sabor elegido;
- *   - el stock de los productos hijos se descuenta igual que cualquier otro.
- *
- * IMPORTANTE: debe ejecutarse DENTRO de una transacción abierta por el caller,
- * para que la operación sea atómica junto con lo que el caller haga alrededor.
+ * IMPORTANTE: debe ejecutarse DENTRO de una transacción abierta por el caller.
  */
 class SaleService
 {
+    private static ?bool $hasTableSessionCol = null;
     private StockRepository $stock;
     private ComboRepository $combos;
 
@@ -30,6 +22,7 @@ class SaleService
     {
         $this->stock  = new StockRepository();
         $this->combos = new ComboRepository();
+        self::ensureTableSessionSchema(Database::pdo());
     }
 
     /**
@@ -49,7 +42,8 @@ class SaleService
         ?int $cashSessionId = null,
         ?string $clientUuid = null,
         ?string $note = null,
-        ?int $tableSessionId = null
+        ?int $tableSessionId = null,
+        bool $createKitchenRound = false
     ): int {
         $pdo = Database::pdo();
 
@@ -62,11 +56,51 @@ class SaleService
             $subtotal += $l['line_total'];
         }
         $subtotal = round($subtotal, 2);
-        $total    = round($subtotal - $discount, 2);
+        $total    = max(0.0, round($subtotal - $discount, 2));
 
-        $hasTableSessionCol = $this->ensureTableSessionSchema($pdo);
+        // Si es una venta directa (ej. Llevar / Delivery cobrada en el acto) y no viene de una
+        // cuenta de mesa existente, generamos su comanda en cocina para que NO falte ni se borre de cocina.
+        if ($createKitchenRound && $tableSessionId === null && $lines !== []) {
+            $chLabel = match ($channel) {
+                'delivery' => "🛵 Delivery #$saleNumber",
+                'takeaway' => "🛍️ Llevar #$saleNumber",
+                default    => "Mostrador #$saleNumber",
+            };
+            if ($note) {
+                $chLabel .= ' (' . mb_substr($note, 0, 40) . ')';
+            }
+            $pdo->prepare(
+                'INSERT INTO table_sessions (business_id, status, party_size, label, opened_by, closed_at, note)
+                 VALUES (?, "closed", NULL, ?, ?, NOW(), ?)'
+            )->execute([$bid, $chLabel, $userId, $note]);
+            $tableSessionId = (int) $pdo->lastInsertId();
 
-        if ($hasTableSessionCol) {
+            $pdo->prepare(
+                'INSERT INTO table_rounds (business_id, session_id, number, status, note, created_by)
+                 VALUES (?, ?, 1, "pending", ?, ?)'
+            )->execute([$bid, $tableSessionId, $note, $userId]);
+            $roundId = (int) $pdo->lastInsertId();
+
+            $rItemStmt = $pdo->prepare(
+                'INSERT INTO table_round_items
+                    (business_id, session_id, round_id, product_id, variant_id, name, qty, unit_price, note, status)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, "ordered")'
+            );
+            foreach ($lines as $l) {
+                $rItemStmt->execute([
+                    $bid,
+                    $tableSessionId,
+                    $roundId,
+                    $l['product_id'],
+                    $l['variant_id'] ?? null,
+                    $l['product_name'],
+                    max(1, (int) round((float) $l['quantity'])),
+                    $l['unit_price'],
+                ]);
+            }
+        }
+
+        if (self::$hasTableSessionCol) {
             $stmt = $pdo->prepare(
                 'INSERT INTO sales
                     (business_id, sale_number, client_uuid, user_id, cash_session_id,
@@ -116,7 +150,6 @@ class SaleService
                 continue;
             }
 
-            // Nunca se confía en el front: cantidad exacta por grupo y pertenencia.
             $chosen   = $this->combos->validateSelections($bid, (int) $l['product_id'], $l['combo_selections']);
             $children = $this->combos->childProducts($bid, $chosen);
 
@@ -143,11 +176,10 @@ class SaleService
         return $saleId;
     }
 
-    private function ensureTableSessionSchema(\PDO $pdo): bool
+    public static function ensureTableSessionSchema(\PDO $pdo): bool
     {
-        static $hasCol = null;
-        if ($hasCol !== null) {
-            return $hasCol;
+        if (self::$hasTableSessionCol !== null) {
+            return self::$hasTableSessionCol;
         }
 
         try {
@@ -156,17 +188,17 @@ class SaleService
                 $pdo->exec("ALTER TABLE sales ADD COLUMN table_session_id BIGINT UNSIGNED NULL AFTER channel");
                 $col = $pdo->query("SHOW COLUMNS FROM sales LIKE 'table_session_id'")->fetch();
             }
-            $hasCol = (bool) $col;
+            self::$hasTableSessionCol = (bool) $col;
 
-            // Asegurar que channel soporte dine_in
+            // Asegurar que channel sea VARCHAR(32) para soportar takeaway, delivery, dine_in, loyverse, etc.
             $channelCol = $pdo->query("SHOW COLUMNS FROM sales LIKE 'channel'")->fetch();
-            if ($channelCol && isset($channelCol['Type']) && !str_contains($channelCol['Type'], 'dine_in')) {
-                $pdo->exec("ALTER TABLE sales MODIFY channel ENUM('counter','web','whatsapp','pedidosya','rappi','phone','dine_in') NOT NULL DEFAULT 'counter'");
+            if ($channelCol && isset($channelCol['Type']) && stripos((string) $channelCol['Type'], 'enum') !== false) {
+                $pdo->exec("ALTER TABLE sales MODIFY channel VARCHAR(32) NOT NULL DEFAULT 'counter'");
             }
         } catch (\Throwable) {
-            $hasCol = false;
+            self::$hasTableSessionCol = false;
         }
 
-        return $hasCol ?? false;
+        return self::$hasTableSessionCol ?? false;
     }
 }

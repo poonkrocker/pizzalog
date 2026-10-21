@@ -2,21 +2,13 @@ import { Capacitor } from '@capacitor/core';
 import { Preferences } from '@capacitor/preferences';
 import { BluetoothSerial } from '@e-is/capacitor-bluetooth-serial';
 
-/**
- * Impresión por Bluetooth clásico (SPP) a la comandera térmica.
- *
- * - Solo funciona en la app Android (en el navegador se avisa y no se imprime).
- * - La impresora se elige una vez en Ajustes y queda guardada.
- * - Imprimir nunca bloquea la operación: si falla, la venta/comanda ya está
- *   registrada y solo se informa el error.
- */
-
 export interface PrinterSettings {
   address: string | null;
   name: string | null;
   width: 32 | 48; // 32 = papel 58mm · 48 = papel 80mm
   autoTicket: boolean; // imprimir ticket al cobrar
   autoComanda: boolean; // imprimir comanda al enviar a cuenta
+  useDigitalKds: boolean; // mostrar/usar comandera digital en cocina (false = comandas en papel y pincho)
 }
 
 const KEY = 'printer_settings';
@@ -27,6 +19,7 @@ const DEFAULTS: PrinterSettings = {
   width: 32,
   autoTicket: false,
   autoComanda: false,
+  useDigitalKds: true,
 };
 
 export const isNative = () => Capacitor.isNativePlatform();
@@ -43,6 +36,9 @@ export async function getPrinterSettings(): Promise<PrinterSettings> {
 
 export async function savePrinterSettings(s: PrinterSettings): Promise<void> {
   await Preferences.set({ key: KEY, value: JSON.stringify(s) });
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('pizzalog:settings-changed', { detail: s }));
+  }
 }
 
 export interface BtDevice {
@@ -55,7 +51,7 @@ export async function listDevices(): Promise<BtDevice[]> {
   if (!isNative()) {
     throw new Error('La búsqueda de impresoras funciona solo en la app Android.');
   }
-  await BluetoothSerial.enable(); // pide permisos si hace falta
+  await BluetoothSerial.enable();
   const result = await BluetoothSerial.scan();
   return (result.devices ?? [])
     .filter((d) => d.address)
@@ -76,7 +72,6 @@ export async function printRaw(payload: string): Promise<void> {
   try {
     await BluetoothSerial.write({ address: s.address, value: payload });
   } finally {
-    // Best-effort: si la desconexión falla no queremos tapar el resultado real.
     try {
       await BluetoothSerial.disconnect({ address: s.address });
     } catch {
@@ -85,10 +80,6 @@ export async function printRaw(payload: string): Promise<void> {
   }
 }
 
-/**
- * Imprime sin bloquear el flujo: devuelve null si salió bien o el mensaje de
- * error para mostrar como aviso. Nunca lanza.
- */
 export async function tryPrint(payload: string): Promise<string | null> {
   try {
     await printRaw(payload);

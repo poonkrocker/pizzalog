@@ -5,6 +5,7 @@ export const CHANNEL_LABELS: Record<SaleChannel, string> = {
   takeaway: 'Para llevar',
   delivery: 'Delivery',
   dine_in: 'Salón',
+  salon: 'Salón',
   web: 'Web',
   whatsapp: 'WhatsApp',
   pedidosya: 'PedidosYa',

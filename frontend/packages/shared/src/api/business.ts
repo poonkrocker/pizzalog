@@ -10,6 +10,7 @@ export interface BusinessUpdateInput {
   description?: string | null;
   logo_url?: string | null;
   accepts_online_orders?: number;
+  use_digital_kds?: number;
   transfer_alias?: string | null;
   card_surcharge_pct?: number;
   pay_methods_pickup?: string[];

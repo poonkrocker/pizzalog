@@ -1,4 +1,5 @@
 import { config } from '@/lib/config';
+import type { User } from '@pizzalog/shared';
 
 export interface StaffSettlement {
   id: number;
@@ -176,23 +177,76 @@ export function formatDateAR(iso: string | null | undefined): string {
   return `${parts[2]}/${parts[1]}/${parts[0]}`;
 }
 
+const PORTAL_TOKEN_KEY = 'pizzalog_portal_token';
+const PANEL_TOKEN_KEY = 'pizzalog_token';
+
+export class PortalApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
+export function getPortalToken(): string | null {
+  try {
+    // Priorizar token del panel si el admin ya inició sesión, o el del portal de empleado
+    return localStorage.getItem(PORTAL_TOKEN_KEY) || localStorage.getItem(PANEL_TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setPortalToken(token: string | null): void {
+  try {
+    if (token) {
+      localStorage.setItem(PORTAL_TOKEN_KEY, token);
+    } else {
+      localStorage.removeItem(PORTAL_TOKEN_KEY);
+    }
+  } catch {
+    // ignore
+  }
+}
+
 async function publicRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const base = config.apiUrl.replace(/\/+$/, '');
+  const token = getPortalToken();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...((init?.headers as Record<string, string>) ?? {}),
+  };
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
   const res = await fetch(`${base}${path}`, {
     ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
+    headers,
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok || json.ok === false) {
-    throw new Error(json?.error?.message ?? 'Error al comunicarse con el servidor');
+    throw new PortalApiError(
+      json?.error?.message ?? 'Error al comunicarse con el servidor',
+      res.status,
+    );
   }
   return json.data as T;
 }
 
 export const publicStaffPortalApi = {
+  login: async (identifier: string, password: string): Promise<{ token: string; user: User }> => {
+    const res = await publicRequest<{ token: string; user: User }>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username: identifier, email: identifier, password }),
+    });
+    setPortalToken(res.token);
+    return res;
+  },
+  changePassword: (current_password: string, new_password: string) =>
+    publicRequest<{ changed: boolean }>('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ current_password, new_password }),
+    }),
   getPortal: (code: string) =>
     publicRequest<EmployeePortalData>(`/public/staff-portal/${encodeURIComponent(code)}`),
   createWithdrawal: (

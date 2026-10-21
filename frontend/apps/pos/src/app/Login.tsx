@@ -55,11 +55,11 @@ export function Login() {
         </h1>
         <form onSubmit={onSubmit}>
           <label className="t-field">
-            <span>Email</span>
+            <span>Usuario o Email</span>
             <input
-              type="email"
-              inputMode="email"
+              type="text"
               autoComplete="username"
+              placeholder="Ej: ivan, gonzalo o tu email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required

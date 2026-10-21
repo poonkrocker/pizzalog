@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
-import { formatARS } from '@pizzalog/shared';
+import { formatARS, type Role } from '@pizzalog/shared';
 import { useApi } from '@/lib/auth';
 import { Button, Loading, Modal, PageHeader } from '@/ui';
 import {
@@ -14,7 +14,38 @@ import {
   type StaffWithdrawal,
 } from './api';
 
-type StaffTab = 'overview' | 'hours' | 'withdrawals' | 'settlements' | 'config';
+type StaffTab = 'overview' | 'users' | 'hours' | 'withdrawals' | 'settlements' | 'config';
+
+interface AppUserRow {
+  id: number;
+  name: string;
+  username: string | null;
+  email: string;
+  role: Role;
+  active: number;
+  can_use_pos: number;
+  allowed_modules: string[] | null;
+  staff_person_id: number | null;
+  staff_person_code: string | null;
+  staff_person_name: string | null;
+}
+
+const PANEL_MODULE_OPTIONS: { id: string; label: string }[] = [
+  { id: 'dashboard', label: '📊 Resumen / Inicio' },
+  { id: 'orders', label: '🛎️ Pedidos' },
+  { id: 'drivers', label: '🛵 Cadetes' },
+  { id: 'production', label: '🥣 Calculadora & Costos' },
+  { id: 'products', label: '🍕 Productos' },
+  { id: 'categories', label: '🗂️ Categorías' },
+  { id: 'supplies', label: '🧀 Insumos' },
+  { id: 'suppliers', label: '🚚 Proveedores' },
+  { id: 'sales', label: '🧾 Ventas' },
+  { id: 'cash', label: '💵 Caja' },
+  { id: 'salon', label: '🍽️ Salón' },
+  { id: 'customers', label: '👥 Clientes' },
+  { id: 'staff', label: '🪪 Personal & Sueldos' },
+  { id: 'business', label: '🏪 Mi local' },
+];
 
 export function StaffPage() {
   const { client } = useApi();
@@ -24,6 +55,7 @@ export function StaffPage() {
   const [hours, setHours] = useState<StaffHour[]>([]);
   const [withdrawals, setWithdrawals] = useState<StaffWithdrawal[]>([]);
   const [settlements, setSettlements] = useState<StaffSettlement[]>([]);
+  const [users, setUsers] = useState<AppUserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -83,6 +115,19 @@ export function StaffPage() {
   const [pActive, setPActive] = useState(true);
   const [pNotes, setPNotes] = useState('');
 
+  // Modal: Crear / Editar Usuario y Permisos
+  const [userModalOpen, setUserModalOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<AppUserRow | null>(null);
+  const [uName, setUName] = useState('');
+  const [uUsername, setUUsername] = useState('');
+  const [uEmail, setUEmail] = useState('');
+  const [uPassword, setUPassword] = useState('');
+  const [uRole, setURole] = useState<Role>('cashier');
+  const [uPersonId, setUPersonId] = useState<string>('');
+  const [uCanPos, setUCanPos] = useState(true);
+  const [uActive, setUActive] = useState(true);
+  const [uModules, setUModules] = useState<string[]>([]);
+
   function notify(msg: string) {
     setToast(msg);
     setTimeout(() => setToast(null), 3500);
@@ -91,16 +136,18 @@ export function StaffPage() {
   async function loadAll() {
     setLoading(true);
     try {
-      const [ov, hrs, wds, setts] = await Promise.all([
+      const [ov, hrs, wds, setts, usrs] = await Promise.all([
         client.get<StaffOverviewResponse>('/staff/overview'),
         client.get<{ hours: StaffHour[] }>('/staff/hours'),
         client.get<{ withdrawals: StaffWithdrawal[] }>('/staff/withdrawals'),
         client.get<{ settlements: StaffSettlement[] }>('/staff/settlements'),
+        client.get<{ users: AppUserRow[] }>('/users').catch(() => ({ users: [] as AppUserRow[] })),
       ]);
       setOverview(ov);
       setHours(hrs.hours);
       setWithdrawals(wds.withdrawals);
       setSettlements(setts.settlements);
+      setUsers(usrs.users);
 
       if (!sStart && ov.week_start) setSStart(ov.week_start);
       if (!sEnd && ov.week_end) setSEnd(ov.week_end);
@@ -146,6 +193,72 @@ export function StaffPage() {
     if (!filterPerson) return settlements;
     return settlements.filter((s) => String(s.person_id) === filterPerson);
   }, [settlements, filterPerson]);
+
+  function openUserEditor(u: AppUserRow | null, prefillPerson?: StaffPersonSummary) {
+    if (u) {
+      setEditingUser(u);
+      setUName(u.name);
+      setUUsername(u.username ?? '');
+      setUEmail(u.email ?? '');
+      setUPassword('');
+      setURole(u.role);
+      setUPersonId(u.staff_person_id ? String(u.staff_person_id) : '');
+      setUCanPos(u.can_use_pos === 1);
+      setUActive(u.active === 1);
+      setUModules(
+        u.role === 'admin'
+          ? PANEL_MODULE_OPTIONS.map((m) => m.id)
+          : Array.isArray(u.allowed_modules)
+            ? u.allowed_modules
+            : u.role === 'manager'
+              ? PANEL_MODULE_OPTIONS.filter((m) => m.id !== 'business').map((m) => m.id)
+              : [],
+      );
+    } else {
+      setEditingUser(null);
+      setUName(prefillPerson?.name ?? '');
+      setUUsername(prefillPerson?.code ?? '');
+      setUEmail('');
+      setUPassword(prefillPerson?.code ? `${prefillPerson.code}123` : '');
+      setURole('cashier');
+      setUPersonId(prefillPerson ? String(prefillPerson.id) : '');
+      setUCanPos(true);
+      setUActive(true);
+      setUModules([]);
+    }
+    setUserModalOpen(true);
+  }
+
+  function toggleModule(modId: string) {
+    setUModules((prev) =>
+      prev.includes(modId) ? prev.filter((x) => x !== modId) : [...prev, modId],
+    );
+  }
+
+  async function submitUser(e: FormEvent) {
+    e.preventDefault();
+    const payload = {
+      name: uName.trim(),
+      username: uUsername.trim().toLowerCase(),
+      email: uEmail.trim() || undefined,
+      ...(uPassword.trim() ? { password: uPassword.trim() } : {}),
+      role: uRole,
+      staff_person_id: uPersonId ? Number(uPersonId) : null,
+      can_use_pos: uCanPos ? 1 : 0,
+      active: uActive ? 1 : 0,
+      allowed_modules: uRole === 'admin' ? null : uModules,
+    };
+    if (editingUser) {
+      await client.put(`/users/${editingUser.id}`, payload);
+      notify(`Usuario @${payload.username} actualizado`);
+    } else {
+      await client.post('/users', payload);
+      notify(`Usuario @${payload.username} creado`);
+    }
+    setUserModalOpen(false);
+    setEditingUser(null);
+    await loadAll();
+  }
 
   function openShiftBatchModal() {
     const initial: Record<number, { checked: boolean; extra: number }> = {};
@@ -409,6 +522,12 @@ export function StaffPage() {
           👥 Equipo & Perfiles Online ({activePeople.length})
         </button>
         <button
+          className={`cat-filter__chip${tab === 'users' ? ' cat-filter__chip--on' : ''}`}
+          onClick={() => setTab('users')}
+        >
+          🔐 Usuarios, Contraseñas y Permisos ({users.length})
+        </button>
+        <button
           className={`cat-filter__chip${tab === 'hours' ? ' cat-filter__chip--on' : ''}`}
           onClick={() => setTab('hours')}
         >
@@ -439,7 +558,7 @@ export function StaffPage() {
         <>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
             <div style={{ fontSize: 13, color: 'var(--muted)' }}>
-              Semana en curso: <strong>{formatDateAR(overview?.week_start)} al {formatDateAR(overview?.week_end)}</strong> · Cada integrante tiene su propio <b>Perfil Online</b> accesible por link directo sin entrar al panel de administración.
+              Semana en curso: <strong>{formatDateAR(overview?.week_start)} al {formatDateAR(overview?.week_end)}</strong> · Como administrador podés ver todos los perfiles directamente; cada empleado accede al suyo con su usuario y contraseña.
             </div>
             <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
               <label style={{ fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
@@ -463,102 +582,202 @@ export function StaffPage() {
               gap: 16,
             }}
           >
-            {visiblePeople.map((p) => (
-              <div
-                key={p.id}
-                style={{
-                  background: 'var(--surface)',
-                  border: '1px solid var(--line)',
-                  borderRadius: 14,
-                  padding: 18,
-                  opacity: p.is_active === 1 ? 1 : 0.65,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  justifyContent: 'space-between',
-                  gap: 12,
-                }}
-              >
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-                    <div>
-                      <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>
-                        {p.name}{' '}
-                        {p.is_active !== 1 && (
-                          <span className="badge" style={{ fontSize: 11 }}>inactivo</span>
+            {visiblePeople.map((p) => {
+              const linkedUser = users.find((u) => u.staff_person_id === p.id);
+              return (
+                <div
+                  key={p.id}
+                  style={{
+                    background: 'var(--surface)',
+                    border: '1px solid var(--line)',
+                    borderRadius: 14,
+                    padding: 18,
+                    opacity: p.is_active === 1 ? 1 : 0.65,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                  }}
+                >
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                      <div>
+                        <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>
+                          {p.name}{' '}
+                          {p.is_active !== 1 && (
+                            <span className="badge" style={{ fontSize: 11 }}>inactivo</span>
+                          )}
+                        </h3>
+                        <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+                          {p.role} · Liq. {p.settlement_type}
+                          {linkedUser?.username ? ` · Usuario: @${linkedUser.username}` : ''}
+                        </div>
+                      </div>
+                      <span className="badge badge--accent" style={{ fontSize: 13, fontWeight: 700 }}>
+                        {formatARS(p.current_rate)}/h
+                      </span>
+                    </div>
+
+                    {p.notes && (
+                      <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6, fontStyle: 'italic' }}>
+                        {p.notes}
+                      </div>
+                    )}
+
+                    <div style={{ marginTop: 12, borderTop: '1px solid var(--line)', paddingTop: 10, fontSize: 13, display: 'grid', gap: 6 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: 'var(--muted)' }}>📅 Semana en curso:</span>
+                        <strong>{p.week_effective_hours} hs efectivas</strong>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: 'var(--muted)' }}>📦 Retiros pendientes:</span>
+                        <strong style={{ color: p.pending_withdrawals_sum > 0 ? '#d73828' : 'inherit' }}>
+                          {p.pending_withdrawals_cnt} ({formatARS(p.pending_withdrawals_sum)})
+                        </strong>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span style={{ color: 'var(--muted)' }}>💰 Última liquidación:</span>
+                        {p.last_settlement ? (
+                          <strong>
+                            {formatARS(p.last_settlement.total_neto)}{' '}
+                            <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--muted)' }}>
+                              ({formatDateAR(p.last_settlement.period_end)})
+                            </span>
+                          </strong>
+                        ) : (
+                          <span>—</span>
                         )}
-                      </h3>
-                      <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
-                        {p.role} · Liq. {p.settlement_type}
                       </div>
                     </div>
-                    <span className="badge badge--accent" style={{ fontSize: 13, fontWeight: 700 }}>
-                      {formatARS(p.current_rate)}/h
-                    </span>
                   </div>
 
-                  {p.notes && (
-                    <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 6, fontStyle: 'italic' }}>
-                      {p.notes}
-                    </div>
-                  )}
-
-                  <div style={{ marginTop: 12, borderTop: '1px solid var(--line)', paddingTop: 10, fontSize: 13, display: 'grid', gap: 6 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: 'var(--muted)' }}>📅 Semana en curso:</span>
-                      <strong>{p.week_effective_hours} hs efectivas</strong>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: 'var(--muted)' }}>📦 Retiros pendientes:</span>
-                      <strong style={{ color: p.pending_withdrawals_sum > 0 ? '#d73828' : 'inherit' }}>
-                        {p.pending_withdrawals_cnt} ({formatARS(p.pending_withdrawals_sum)})
-                      </strong>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: 'var(--muted)' }}>💰 Última liquidación:</span>
-                      {p.last_settlement ? (
-                        <strong>
-                          {formatARS(p.last_settlement.total_neto)}{' '}
-                          <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--muted)' }}>
-                            ({formatDateAR(p.last_settlement.period_end)})
-                          </span>
-                        </strong>
-                      ) : (
-                        <span>—</span>
-                      )}
-                    </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, borderTop: '1px solid var(--line)', paddingTop: 10 }}>
+                    <a
+                      href={`/empleado/${p.code}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="btn btn--primary btn--sm"
+                      style={{ textDecoration: 'none', flex: 1, textAlign: 'center' }}
+                    >
+                      👁 Perfil Online
+                    </a>
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--sm"
+                      onClick={() => copyPortalLink(p.code, p.name)}
+                      title="Copiar link del Perfil Online para enviar por WhatsApp"
+                    >
+                      🔗 Link
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--sm"
+                      onClick={() => openUserEditor(linkedUser ?? null, p)}
+                      title="Configurar usuario, contraseña y permisos del empleado"
+                    >
+                      🔐 Accesos
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--sm"
+                      onClick={() => startEditPerson(p)}
+                    >
+                      Editar
+                    </button>
                   </div>
                 </div>
-
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, borderTop: '1px solid var(--line)', paddingTop: 10 }}>
-                  <a
-                    href={`/empleado/${p.code}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="btn btn--primary btn--sm"
-                    style={{ textDecoration: 'none', flex: 1, textAlign: 'center' }}
-                  >
-                    👁 Perfil Online
-                  </a>
-                  <button
-                    type="button"
-                    className="btn btn--ghost btn--sm"
-                    onClick={() => copyPortalLink(p.code, p.name)}
-                    title="Copiar link del Perfil Online para enviar por WhatsApp"
-                  >
-                    🔗 Copiar Link
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn--ghost btn--sm"
-                    onClick={() => startEditPerson(p)}
-                  >
-                    Editar / Tarifa
-                  </button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </>
+      )}
+
+      {/* PESTAÑA: USUARIOS, CONTRASEÑAS Y PERMISOS */}
+      {tab === 'users' && (
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 14, padding: 18 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+            <div>
+              <h3 style={{ margin: '0 0 4px', fontSize: 16 }}>🔐 Gestión de Usuarios y Permisos Individuales</h3>
+              <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)' }}>
+                Creá usuarios con nombre de usuario para cada empleado, asigná qué herramientas del Panel o si pueden usar la app TPV, y gestioná sus contraseñas.
+              </p>
+            </div>
+            <Button onClick={() => openUserEditor(null)}>
+              + Nuevo Usuario
+            </Button>
+          </div>
+
+          <div style={{ overflowX: 'auto' }}>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Nombre</th>
+                  <th>Usuario</th>
+                  <th>Perfil Empleado</th>
+                  <th>Rol Base</th>
+                  <th>App TPV</th>
+                  <th>Herramientas del Panel</th>
+                  <th>Estado</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((u) => (
+                  <tr key={u.id}>
+                    <td style={{ fontWeight: 700 }}>{u.name}</td>
+                    <td>
+                      <code style={{ fontWeight: 700, fontSize: 13 }}>
+                        @{u.username || u.email}
+                      </code>
+                    </td>
+                    <td>
+                      {u.staff_person_name ? (
+                        <a href={`/empleado/${u.staff_person_code}`} target="_blank" rel="noreferrer" className="link">
+                          🪪 {u.staff_person_name}
+                        </a>
+                      ) : (
+                        <span style={{ color: 'var(--muted)' }}>—</span>
+                      )}
+                    </td>
+                    <td>
+                      {u.role === 'admin' ? 'Administrador' : u.role === 'manager' ? 'Encargado' : 'Empleado / Cajero'}
+                    </td>
+                    <td>
+                      <span className={`badge ${u.can_use_pos === 1 ? 'badge--accent' : ''}`}>
+                        {u.can_use_pos === 1 ? '✓ Habilitado' : 'Sin acceso'}
+                      </span>
+                    </td>
+                    <td style={{ fontSize: 12 }}>
+                      {u.role === 'admin' ? (
+                        <strong>Acceso total</strong>
+                      ) : Array.isArray(u.allowed_modules) && u.allowed_modules.length > 0 ? (
+                        <span>
+                          {u.allowed_modules
+                            .map((id) => PANEL_MODULE_OPTIONS.find((m) => m.id === id)?.label ?? id)
+                            .join(', ')}
+                        </span>
+                      ) : u.role === 'manager' && u.allowed_modules === null ? (
+                        <span>Todos los módulos operativos</span>
+                      ) : (
+                        <span style={{ color: 'var(--muted)' }}>Solo Perfil Personal</span>
+                      )}
+                    </td>
+                    <td>
+                      <span className={`badge ${u.active === 1 ? 'badge--accent' : 'badge--warn'}`}>
+                        {u.active === 1 ? 'Activo' : 'Inactivo'}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      <button className="link" onClick={() => openUserEditor(u)}>
+                        Editar / Contraseña / Permisos
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
 
       {/* PESTAÑA 2: REGISTRO DE HORAS */}
@@ -863,7 +1082,6 @@ export function StaffPage() {
       {/* PESTAÑA 5: CONFIGURACIÓN (TARIFAS, HORARIOS REGULARES, FERIADOS) */}
       {tab === 'config' && (
         <div style={{ display: 'grid', gap: 20 }}>
-          {/* Historial de Tarifas por Hora */}
           <div style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 14, padding: 18 }}>
             <h3 style={{ margin: '0 0 12px' }}>💲 Tarifas por Hora (Vigentes e Históricas)</h3>
             <table className="table">
@@ -890,7 +1108,6 @@ export function StaffPage() {
             </table>
           </div>
 
-          {/* Horarios Regulares */}
           <div style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 14, padding: 18 }}>
             <h3 style={{ margin: '0 0 12px' }}>🕒 Horarios Regulares Asignados</h3>
             <table className="table">
@@ -917,7 +1134,6 @@ export function StaffPage() {
             </table>
           </div>
 
-          {/* Feriados */}
           <div style={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 14, padding: 18 }}>
             <h3 style={{ margin: '0 0 12px' }}>📅 Calendario de Feriados</h3>
             <table className="table">
@@ -941,6 +1157,172 @@ export function StaffPage() {
           </div>
         </div>
       )}
+
+      {/* MODAL USUARIO Y PERMISOS */}
+      <Modal
+        open={userModalOpen}
+        onClose={() => {
+          setUserModalOpen(false);
+          setEditingUser(null);
+        }}
+        title={editingUser ? `🔐 Editar Usuario · ${editingUser.name}` : '🔐 Crear Nuevo Usuario'}
+      >
+        <form onSubmit={submitUser}>
+          <div className="form-row">
+            <label style={{ fontSize: 13 }}>
+              <span>Nombre completo</span>
+              <input
+                type="text"
+                className="input"
+                value={uName}
+                onChange={(e) => setUName(e.target.value)}
+                required
+              />
+            </label>
+            <label style={{ fontSize: 13 }}>
+              <span>Nombre de usuario (login)</span>
+              <input
+                type="text"
+                className="input"
+                placeholder="Ej: ivan, lulu, bruno"
+                value={uUsername}
+                onChange={(e) => setUUsername(e.target.value.toLowerCase())}
+                required
+              />
+            </label>
+          </div>
+
+          <div className="form-row" style={{ marginTop: 10 }}>
+            <label style={{ fontSize: 13 }}>
+              <span>{editingUser ? 'Nueva Contraseña (vacío = mantener actual)' : 'Contraseña inicial'}</span>
+              <input
+                type="text"
+                className="input"
+                placeholder={editingUser ? 'Escribir solo si querés cambiarla' : 'Mínimo 4 caracteres'}
+                value={uPassword}
+                onChange={(e) => setUPassword(e.target.value)}
+                required={!editingUser}
+              />
+            </label>
+            <label style={{ fontSize: 13 }}>
+              <span>Vincular con Perfil de Empleado</span>
+              <select
+                className="input"
+                value={uPersonId}
+                onChange={(e) => setUPersonId(e.target.value)}
+              >
+                <option value="">— Sin perfil de empleado —</option>
+                {(overview?.people ?? []).map((p) => (
+                  <option key={p.id} value={String(p.id)}>
+                    {p.name} ({p.role})
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="form-row" style={{ marginTop: 10 }}>
+            <label style={{ fontSize: 13 }}>
+              <span>Rol Base</span>
+              <select
+                className="input"
+                value={uRole}
+                onChange={(e) => setURole(e.target.value as Role)}
+              >
+                <option value="cashier">Empleado / Cajero</option>
+                <option value="manager">Encargado</option>
+                <option value="admin">Administrador (Acceso Total)</option>
+              </select>
+            </label>
+            <label style={{ fontSize: 13 }}>
+              <span>Email (opcional)</span>
+              <input
+                type="text"
+                className="input"
+                placeholder="Se autogenera si queda vacío"
+                value={uEmail}
+                onChange={(e) => setUEmail(e.target.value)}
+              />
+            </label>
+          </div>
+
+          <div style={{ display: 'flex', gap: 18, margin: '14px 0', flexWrap: 'wrap' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={uCanPos}
+                onChange={(e) => setUCanPos(e.target.checked)}
+              />
+              <span>📱 Habilitar acceso a la App TPV (Caja, Mesas y Ventas)</span>
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={uActive}
+                onChange={(e) => setUActive(e.target.checked)}
+              />
+              <span>Usuario activo</span>
+            </label>
+          </div>
+
+          {uRole !== 'admin' && (
+            <div style={{ border: '1px solid var(--line)', borderRadius: 10, padding: 12, marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)' }}>
+                  Herramientas del Panel Web habilitadas para este usuario:
+                </span>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button
+                    type="button"
+                    className="link"
+                    style={{ fontSize: 11 }}
+                    onClick={() => setUModules(PANEL_MODULE_OPTIONS.map((m) => m.id))}
+                  >
+                    Marcar todas
+                  </button>
+                  <button
+                    type="button"
+                    className="link"
+                    style={{ fontSize: 11 }}
+                    onClick={() => setUModules([])}
+                  >
+                    Ninguna (solo Perfil Personal)
+                  </button>
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(175px, 1fr))', gap: 8 }}>
+                {PANEL_MODULE_OPTIONS.map((m) => (
+                  <label
+                    key={m.id}
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={uModules.includes(m.id)}
+                      onChange={() => toggleModule(m.id)}
+                    />
+                    <span>{m.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="form-actions">
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => {
+                setUserModalOpen(false);
+                setEditingUser(null);
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button type="submit">Guardar Usuario y Permisos</Button>
+          </div>
+        </form>
+      </Modal>
 
       {/* MODAL 1: CARGAR TURNO DE ATENCIÓN (BATCH) */}
       <Modal

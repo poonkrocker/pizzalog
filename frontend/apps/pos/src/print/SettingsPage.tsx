@@ -123,17 +123,36 @@ export function SettingsPage() {
 
   return (
     <div className="settings">
-      <h1 className="page-title">Ajustes de impresión</h1>
+      <h1 className="page-title">Ajustes y Comanderas</h1>
+
+      <section className="settings__block">
+        <h2 className="settings__subtitle">Sistema de Cocina (KDS vs Papel)</h2>
+        <label className="settings__toggle">
+          <input
+            type="checkbox"
+            checked={settings.useDigitalKds !== false}
+            onChange={(e) => void update({ useDigitalKds: e.target.checked })}
+          />
+          <span>
+            Usar Comandera Digital en pantalla (desactivar si utilizás comandas en papel y pincho)
+          </span>
+        </label>
+        <p className="muted-text" style={{ marginTop: 6, fontSize: 13 }}>
+          {settings.useDigitalKds !== false
+            ? 'La pestaña Cocina está activa en este dispositivo.'
+            : 'Modo comandas en papel activo (pedido / en preparación / pincho de entregado). La pestaña Cocina digital queda oculta.'}
+        </p>
+      </section>
 
       {!isNative() && (
         <p className="settings__warn">
-          Estás en el navegador: acá se puede configurar, pero la impresión
+          Estás en el navegador: acá se puede configurar, pero la impresión Bluetooth
           funciona en la app Android instalada.
         </p>
       )}
 
       <section className="settings__block">
-        <h2 className="settings__subtitle">Impresora</h2>
+        <h2 className="settings__subtitle">Impresora Bluetooth</h2>
         <p className="muted-text">
           {settings.name
             ? `Configurada: ${settings.name}`
@@ -187,7 +206,7 @@ export function SettingsPage() {
       </section>
 
       <section className="settings__block">
-        <h2 className="settings__subtitle">Impresión automática</h2>
+        <h2 className="settings__subtitle">Impresión automática en papel</h2>
         <label className="settings__toggle">
           <input
             type="checkbox"
@@ -202,7 +221,7 @@ export function SettingsPage() {
             checked={settings.autoComanda}
             onChange={(e) => void update({ autoComanda: e.target.checked })}
           />
-          <span>Imprimir comanda al enviar a una cuenta</span>
+          <span>Imprimir comanda en papel al enviar a una cuenta</span>
         </label>
       </section>
 

@@ -16,7 +16,7 @@ export function ProductionPage() {
 
   const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
   const [units, setUnits] = useState<number>(150);
-  const [batches, setBatches] = useState<number>(2);
+  const [batches, setBatches] = useState<number>(1);
   const [calculation, setCalculation] = useState<DoughCalculation | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
 
@@ -182,116 +182,96 @@ export function ProductionPage() {
               borderRadius: '8px',
               padding: '1.25rem',
               marginBottom: '1.5rem',
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+              display: 'flex',
+              flexWrap: 'wrap',
               gap: '1.25rem',
               alignItems: 'flex-end',
             }}
           >
-            <Field label="Tipo de Masa / Perfil">
-              <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
-                <Select
-                  value={selectedProfileId ?? ''}
-                  onChange={(e) => setSelectedProfileId(Number(e.target.value))}
-                  style={{ flex: 1 }}
-                >
-                  {profiles.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </Select>
-                <button
-                  type="button"
-                  title="Editar receta de esta masa"
-                  onClick={() => {
-                    setEditingProfile(activeProfile);
-                    setProfileModalOpen(true);
-                  }}
-                  style={{
-                    padding: '0.45rem 0.65rem',
-                    borderRadius: '6px',
-                    border: '1px solid #ccc',
-                    background: '#f8f8f8',
-                    cursor: 'pointer',
-                    fontSize: '0.82rem',
-                    fontWeight: 600,
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  ✏️ Editar
-                </button>
-                <button
-                  type="button"
-                  title="Crear un nuevo perfil de masa"
-                  onClick={() => {
-                    setEditingProfile(null);
-                    setProfileModalOpen(true);
-                  }}
-                  style={{
-                    padding: '0.45rem 0.65rem',
-                    borderRadius: '6px',
-                    border: '1px solid #2a9d8f',
-                    background: '#2a9d8f',
-                    color: '#fff',
-                    cursor: 'pointer',
-                    fontSize: '0.82rem',
-                    fontWeight: 700,
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  + Nueva Masa
-                </button>
-              </div>
-            </Field>
+            <div style={{ flex: '2 1 360px', minWidth: '280px' }}>
+              <Field label="Tipo de Masa / Perfil">
+                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <Select
+                    value={selectedProfileId ?? ''}
+                    onChange={(e) => setSelectedProfileId(Number(e.target.value))}
+                    style={{ flex: '1 1 220px', minWidth: '200px' }}
+                  >
+                    {profiles.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </Select>
+                  <button
+                    type="button"
+                    title="Editar receta de esta masa"
+                    onClick={() => {
+                      setEditingProfile(activeProfile);
+                      setProfileModalOpen(true);
+                    }}
+                    style={{
+                      padding: '0.45rem 0.7rem',
+                      borderRadius: '6px',
+                      border: '1px solid #ccc',
+                      background: '#f8f8f8',
+                      cursor: 'pointer',
+                      fontSize: '0.82rem',
+                      fontWeight: 600,
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    ✏️ Editar
+                  </button>
+                  <button
+                    type="button"
+                    title="Crear un nuevo perfil de masa"
+                    onClick={() => {
+                      setEditingProfile(null);
+                      setProfileModalOpen(true);
+                    }}
+                    style={{
+                      padding: '0.45rem 0.7rem',
+                      borderRadius: '6px',
+                      border: '1px solid #2a9d8f',
+                      background: '#2a9d8f',
+                      color: '#fff',
+                      cursor: 'pointer',
+                      fontSize: '0.82rem',
+                      fontWeight: 700,
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    + Nueva Masa
+                  </button>
+                </div>
+              </Field>
+            </div>
 
-            <Field label="Cantidad de Pizzas / Unidades">
-              <div style={{ display: 'flex', gap: '0.4rem' }}>
+            <div style={{ flex: '1 1 160px', minWidth: '150px' }}>
+              <Field label="Cantidad de Pizzas / Unidades">
                 <Input
                   type="number"
                   min="1"
                   max="2000"
                   value={units}
                   onChange={(e) => setUnits(Math.max(1, parseInt(e.target.value) || 1))}
-                  style={{ width: '100px' }}
                 />
-                <button
-                  type="button"
-                  onClick={() => setUnits((u) => u + 25)}
-                  style={{ padding: '0.3rem 0.6rem', borderRadius: '4px', border: '1px solid #ccc', background: '#f8f8f8', cursor: 'pointer', fontSize: '0.8rem' }}
-                >
-                  +25
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setUnits((u) => u + 50)}
-                  style={{ padding: '0.3rem 0.6rem', borderRadius: '4px', border: '1px solid #ccc', background: '#f8f8f8', cursor: 'pointer', fontSize: '0.8rem' }}
-                >
-                  +50
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setUnits(150)}
-                  style={{ padding: '0.3rem 0.6rem', borderRadius: '4px', border: '1px solid #ccc', background: '#f8f8f8', cursor: 'pointer', fontSize: '0.8rem' }}
-                >
-                  150 (Base)
-                </button>
-              </div>
-            </Field>
+              </Field>
+            </div>
 
-            <Field label="Dividir en Amasadas (Tandas)">
-              <Select
-                value={batches}
-                onChange={(e) => setBatches(Math.max(1, parseInt(e.target.value) || 1))}
-              >
-                <option value={1}>1 Amasada (Tanda única)</option>
-                <option value={2}>2 Amasadas (Mitad y mitad)</option>
-                <option value={3}>3 Amasadas</option>
-                <option value={4}>4 Amasadas</option>
-              </Select>
-            </Field>
+            <div style={{ flex: '1 1 140px', minWidth: '130px' }}>
+              <Field label="Dividir en tandas">
+                <Input
+                  type="number"
+                  min="1"
+                  max="50"
+                  value={batches}
+                  onChange={(e) => setBatches(Math.max(1, parseInt(e.target.value) || 1))}
+                />
+              </Field>
+            </div>
 
-            <div>
+            <div style={{ flex: '1 1 200px', minWidth: '180px' }}>
               <Button
                 variant={copied ? 'primary' : 'secondary'}
                 onClick={handleCopyWhatsApp}

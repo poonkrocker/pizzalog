@@ -10,28 +10,42 @@ use Pizzalog\Core\Response;
 use Pizzalog\Repositories\BusinessRepository;
 
 /**
- * Perfil del negocio: lo que se ve en el encabezado de la carta pública
- * (pizzalog.net/{slug}) y el propio slug que define esa URL.
- *
- * Desde la migración 015 las redes sociales viven en business_social_links
- * (tabla propia, una fila por red) y ya no en columnas sueltas.
- * Desde la 016 la ubicación es el link de Google Maps, no coordenadas.
+ * Perfil del negocio y opciones operativas (como comandera digital KDS vs comandas en papel).
  */
 final class BusinessController
 {
     private const FIELDS = 'id, name, slug, phone, address, google_maps_url, description,
-                            logo_url, theme, accepts_online_orders, transfer_alias, card_surcharge_pct,
+                            logo_url, theme, accepts_online_orders, use_digital_kds, transfer_alias, card_surcharge_pct,
                             pay_methods_pickup, pay_methods_delivery';
 
     private const THEME_COLORS   = ['bg', 'accent', 'link', 'text'];
     private const THEME_PATTERNS = ['mosaico', 'liso', 'rayas', 'lunares'];
-    private const PAY_METHODS     = ['cash', 'card', 'transfer', 'mp'];
+    private const PAY_METHODS    = ['cash', 'card', 'transfer', 'mp'];
 
+    private static bool $ensured = false;
     private BusinessRepository $repo;
 
     public function __construct()
     {
+        self::ensureSchema();
         $this->repo = new BusinessRepository();
+    }
+
+    public static function ensureSchema(): void
+    {
+        if (self::$ensured) {
+            return;
+        }
+        try {
+            $pdo = Database::pdo();
+            $col = $pdo->query("SHOW COLUMNS FROM businesses LIKE 'use_digital_kds'")->fetch();
+            if (!$col) {
+                $pdo->exec("ALTER TABLE businesses ADD COLUMN use_digital_kds TINYINT(1) NOT NULL DEFAULT 1 AFTER accepts_online_orders");
+            }
+            self::$ensured = true;
+        } catch (\Throwable) {
+            // Ignorar si no tiene permisos DDL
+        }
     }
 
     /** GET /business — el perfil del negocio del usuario. */
@@ -61,7 +75,6 @@ final class BusinessController
             Response::error('El nombre es obligatorio', 422);
         }
 
-        // El slug es la URL pública: minúsculas, números y guiones.
         $slug = strtolower(trim((string) $req->input('slug', '')));
         if (!preg_match('/^[a-z0-9](?:[a-z0-9-]{1,48}[a-z0-9])?$/', $slug)) {
             Response::error(
@@ -75,8 +88,6 @@ final class BusinessController
             Response::error('Esa dirección ya está en uso por otro local', 422);
         }
 
-        // Ubicación: el link que da el botón "Compartir" de Google Maps. No se
-        // restringe el dominio para no romper con acortadores (maps.app.goo.gl).
         $maps = trim((string) ($req->input('google_maps_url', '') ?? ''));
         if ($maps !== '') {
             if (!filter_var($maps, FILTER_VALIDATE_URL) || !preg_match('#^https?://#i', $maps)) {
@@ -87,7 +98,6 @@ final class BusinessController
             }
         }
 
-        // Tema de la carta: colores hex + patrón, con lista blanca de claves.
         $theme    = null;
         $rawTheme = $req->input('theme');
         if (is_array($rawTheme) && $rawTheme !== []) {
@@ -113,7 +123,6 @@ final class BusinessController
             }
         }
 
-        // Datos de pago del checkout (migración 017).
         $transferAlias = trim((string) ($req->input('transfer_alias', '') ?? ''));
         if (mb_strlen($transferAlias) > 255) {
             Response::error('El texto de transferencia es demasiado largo (máx. 255)', 422);
@@ -125,9 +134,6 @@ final class BusinessController
             Response::error('El recargo por tarjeta debe estar entre 0 y 100', 422);
         }
 
-        // Métodos aceptados por modalidad. Se guarda solo el subconjunto válido;
-        // null (o lista vacía / lista completa) = "todos", que en la carta no
-        // restringe nada. Al menos uno tiene que quedar por modalidad.
         $pickup   = $this->cleanMethods($req->input('pay_methods_pickup'));
         $delivery = $this->cleanMethods($req->input('pay_methods_delivery'));
         if ($pickup === []) {
@@ -142,10 +148,13 @@ final class BusinessController
             return $v === '' ? null : $v;
         })($req->input($k, '') ?? '');
 
+        $useDigitalKds = $req->input('use_digital_kds');
+        $useDigitalKdsBit = ($useDigitalKds === null) ? 1 : ((int) (bool) $useDigitalKds);
+
         Database::pdo()->prepare(
             'UPDATE businesses
                 SET name = ?, slug = ?, phone = ?, address = ?, google_maps_url = ?,
-                    description = ?, logo_url = ?, theme = ?, accepts_online_orders = ?,
+                    description = ?, logo_url = ?, theme = ?, accepts_online_orders = ?, use_digital_kds = ?,
                     transfer_alias = ?, card_surcharge_pct = ?,
                     pay_methods_pickup = ?, pay_methods_delivery = ?
               WHERE id = ?'
@@ -153,6 +162,7 @@ final class BusinessController
             $name, $slug, $opt('phone'), $opt('address'), $maps !== '' ? $maps : null,
             $opt('description'), $opt('logo_url'), $theme,
             (int) (bool) $req->input('accepts_online_orders', true),
+            $useDigitalKdsBit,
             $transferAlias !== '' ? $transferAlias : null, $surcharge,
             $this->encodeMethods($pickup), $this->encodeMethods($delivery),
             $bid,
@@ -160,8 +170,6 @@ final class BusinessController
 
         $this->show($req);
     }
-
-    // --- Horarios de atención -----------------------------------------
 
     /** GET /business/hours */
     public function hours(Request $req): void
@@ -176,12 +184,7 @@ final class BusinessController
         ]);
     }
 
-    /**
-     * PUT /business/hours
-     * Body: { hours: [ { day_of_week: 0-6, opens_at: 'HH:MM', closes_at: 'HH:MM' } ] }
-     * Reemplaza TODAS las franjas del negocio (mismo patrón que las variantes).
-     * Si closes_at <= opens_at se interpreta que cruza medianoche (20:00 → 02:00).
-     */
+    /** PUT /business/hours */
     public function updateHours(Request $req): void
     {
         $bid = (int) $req->auth['business_id'];
@@ -213,20 +216,13 @@ final class BusinessController
         $this->hours($req);
     }
 
-    // --- Redes sociales -----------------------------------------------
-
     /** GET /business/social-links */
     public function socialLinks(Request $req): void
     {
         Response::ok(['social_links' => $this->repo->socialLinks((int) $req->auth['business_id'])]);
     }
 
-    /**
-     * PUT /business/social-links
-     * Body: { social_links: [ { platform, url } ] } — en el orden deseado.
-     * `platform` es texto libre: el ícono lo resuelve el frontend y cae a uno
-     * genérico si no la conoce (sitio web, teléfono, email…).
-     */
+    /** PUT /business/social-links */
     public function updateSocialLinks(Request $req): void
     {
         $bid = (int) $req->auth['business_id'];
@@ -263,8 +259,6 @@ final class BusinessController
         $this->socialLinks($req);
     }
 
-    // ------------------------------------------------------------------
-
     private function acceptsOnlineOrders(int $bid): int
     {
         $stmt = Database::pdo()->prepare('SELECT accepts_online_orders FROM businesses WHERE id = ?');
@@ -281,24 +275,14 @@ final class BusinessController
         return substr($v, 0, 5);
     }
 
-    /**
-     * Sanitiza una lista de métodos de pago que llega del panel: deja solo los
-     * válidos, sin repetir y en el orden canónico. Devuelve [] si viene algo
-     * pero todo inválido (para que el caller lo rechace), o la lista completa
-     * tal cual si no se mandó nada (= sin restricción).
-     *
-     * @return string[]
-     */
     private function cleanMethods(mixed $raw): array
     {
         if (!is_array($raw)) {
-            return self::PAY_METHODS; // no se tocó: todos
+            return self::PAY_METHODS;
         }
-        $clean = array_values(array_intersect(self::PAY_METHODS, array_map('strval', $raw)));
-        return $clean;
+        return array_values(array_intersect(self::PAY_METHODS, array_map('strval', $raw)));
     }
 
-    /** null si están todos (no hace falta guardar restricción); si no, el JSON. */
     private function encodeMethods(array $methods): ?string
     {
         sort($methods);
@@ -310,7 +294,6 @@ final class BusinessController
         return json_encode(array_values(array_intersect(self::PAY_METHODS, $methods)));
     }
 
-    /** @return string[] lista efectiva (todos si viene null/ vacío). */
     private function decodeMethods(mixed $raw): array
     {
         if ($raw === null || $raw === '') {
@@ -335,6 +318,7 @@ final class BusinessController
             'description'           => $b['description'],
             'logo_url'              => $b['logo_url'],
             'accepts_online_orders' => (int) $b['accepts_online_orders'],
+            'use_digital_kds'       => isset($b['use_digital_kds']) ? (int) $b['use_digital_kds'] : 1,
             'transfer_alias'        => $b['transfer_alias'],
             'card_surcharge_pct'    => (float) $b['card_surcharge_pct'],
             'pay_methods_pickup'    => $this->decodeMethods($b['pay_methods_pickup']),

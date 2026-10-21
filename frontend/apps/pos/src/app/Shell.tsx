@@ -1,21 +1,51 @@
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { useAuth } from '@/lib/auth';
+import { useApi, useAuth } from '@/lib/auth';
 import { useOnline } from '@/lib/network';
 import { useSync } from '@/offline/sync';
 import { useCurrentCashSession } from '@/modules/cash/hooks';
+import { getPrinterSettings } from '@/print/printer';
 
 export function Shell() {
   const { user, logout } = useAuth();
+  const api = useApi();
   const online = useOnline();
   const { pendingCount } = useSync();
   const { data: cashSession } = useCurrentCashSession();
   const navigate = useNavigate();
 
   const [menuOpen, setMenuOpen] = useState(false);
+  const [useDigitalKds, setUseDigitalKds] = useState(true);
+  const [pwdModalOpen, setPwdModalOpen] = useState(false);
+  const [currentPwd, setCurrentPwd] = useState('');
+  const [newPwd, setNewPwd] = useState('');
+  const [pwdBusy, setPwdBusy] = useState(false);
+  const [pwdMsg, setPwdMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const isCashOpen = Boolean(cashSession && cashSession.status === 'open');
+
+  useEffect(() => {
+    void getPrinterSettings().then((s) => setUseDigitalKds(s.useDigitalKds !== false));
+    // También consultar configuración del negocio si está en línea
+    void api.business
+      .get()
+      .then((r) => {
+        if (r.business.use_digital_kds !== undefined) {
+          setUseDigitalKds(r.business.use_digital_kds === 1);
+        }
+      })
+      .catch(() => {});
+
+    function onSettingsChange(e: Event) {
+      const custom = e as CustomEvent<{ useDigitalKds?: boolean }>;
+      if (custom.detail && custom.detail.useDigitalKds !== undefined) {
+        setUseDigitalKds(custom.detail.useDigitalKds);
+      }
+    }
+    window.addEventListener('pizzalog:settings-changed', onSettingsChange);
+    return () => window.removeEventListener('pizzalog:settings-changed', onSettingsChange);
+  }, [api]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -31,6 +61,29 @@ export function Shell() {
       document.removeEventListener('touchstart', handleOutside);
     };
   }, [menuOpen]);
+
+  async function handleChangePassword() {
+    if (!currentPwd || !newPwd) return;
+    setPwdBusy(true);
+    setPwdMsg(null);
+    try {
+      await api.auth.changePassword(currentPwd, newPwd);
+      setPwdMsg({ text: '✓ Contraseña actualizada con éxito.', ok: true });
+      setCurrentPwd('');
+      setNewPwd('');
+      setTimeout(() => {
+        setPwdModalOpen(false);
+        setPwdMsg(null);
+      }, 1200);
+    } catch (e) {
+      setPwdMsg({
+        text: e instanceof Error ? e.message : 'No se pudo cambiar la contraseña',
+        ok: false,
+      });
+    } finally {
+      setPwdBusy(false);
+    }
+  }
 
   return (
     <div className="shell">
@@ -79,7 +132,7 @@ export function Shell() {
                   position: 'absolute',
                   top: 'calc(100% + 8px)',
                   right: 0,
-                  minWidth: '210px',
+                  minWidth: '220px',
                   background: 'var(--surface)',
                   border: '1px solid var(--line)',
                   borderRadius: '14px',
@@ -98,8 +151,10 @@ export function Shell() {
                   <div style={{ fontWeight: 700, fontSize: '14px', color: 'var(--cream)' }}>
                     {user?.name}
                   </div>
-                  {user?.email && (
-                    <div style={{ fontSize: '12px', color: 'var(--muted)' }}>{user.email}</div>
+                  {(user?.username || user?.email) && (
+                    <div style={{ fontSize: '12px', color: 'var(--muted)' }}>
+                      {user.username ? `@${user.username}` : user.email}
+                    </div>
                   )}
                 </div>
 
@@ -148,7 +203,34 @@ export function Shell() {
                     navigate('/ajustes');
                   }}
                 >
-                  <span>⚙</span> Ajustes de impresora
+                  <span>⚙</span> Ajustes y Comanderas
+                </button>
+
+                <button
+                  type="button"
+                  style={{
+                    width: '100%',
+                    textAlign: 'left',
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text)',
+                    padding: '10px 12px',
+                    borderRadius: '10px',
+                    fontSize: '14px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                  }}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setCurrentPwd('');
+                    setNewPwd('');
+                    setPwdMsg(null);
+                    setPwdModalOpen(true);
+                  }}
+                >
+                  <span>🔑</span> Cambiar mi contraseña
                 </button>
 
                 <div style={{ borderTop: '1px solid var(--line)', margin: '6px 0' }} />
@@ -210,15 +292,67 @@ export function Shell() {
           <span className="nav-item__icon">▤</span>
           Salón
         </NavLink>
-        <NavLink to="/cocina" className="nav-item">
-          <span className="nav-item__icon">♨</span>
-          Cocina
-        </NavLink>
+        {useDigitalKds && (
+          <NavLink to="/cocina" className="nav-item">
+            <span className="nav-item__icon">♨</span>
+            Cocina
+          </NavLink>
+        )}
         <NavLink to="/ajustes" className="nav-item">
           <span className="nav-item__icon">⚙</span>
           Ajustes
         </NavLink>
       </nav>
+
+      {pwdModalOpen && (
+        <div className="overlay" onClick={() => !pwdBusy && setPwdModalOpen(false)}>
+          <div className="sheet" onClick={(e) => e.stopPropagation()}>
+            <h2 className="sheet__title">🔑 Cambiar mi contraseña</h2>
+            <label className="t-field">
+              <span>Contraseña actual</span>
+              <input
+                type="password"
+                value={currentPwd}
+                onChange={(e) => setCurrentPwd(e.target.value)}
+                autoFocus
+              />
+            </label>
+            <label className="t-field">
+              <span>Nueva contraseña (mín. 4 caracteres)</span>
+              <input
+                type="password"
+                value={newPwd}
+                onChange={(e) => setNewPwd(e.target.value)}
+              />
+            </label>
+            {pwdMsg && (
+              <p
+                style={{
+                  color: pwdMsg.ok ? 'var(--success)' : '#f0a59b',
+                  fontSize: 14,
+                  marginBottom: 10,
+                }}
+              >
+                {pwdMsg.text}
+              </p>
+            )}
+            <button
+              className="t-btn t-btn--primary t-btn--block"
+              disabled={pwdBusy || !currentPwd || newPwd.length < 4}
+              onClick={() => void handleChangePassword()}
+            >
+              {pwdBusy ? 'Guardando…' : 'Guardar contraseña'}
+            </button>
+            <button
+              className="sheet__cancel"
+              disabled={pwdBusy}
+              onClick={() => setPwdModalOpen(false)}
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

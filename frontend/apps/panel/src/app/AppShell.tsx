@@ -1,14 +1,36 @@
 import { useEffect, useRef, useState } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
-import { useAuth } from '@/lib/auth';
-import { modulesForRole } from '@/modules/registry';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { ApiError } from '@pizzalog/shared';
+import { useApi, useAuth } from '@/lib/auth';
+import { modulesForUser } from '@/modules/registry';
+import { Button, Field, Input, Modal } from '@/ui';
 
 export function AppShell() {
   const { user, logout } = useAuth();
+  const api = useApi();
   const navigate = useNavigate();
-  const items = user ? modulesForRole(user.role).filter((m) => m.nav !== false) : [];
+  const location = useLocation();
+  const items = user ? modulesForUser(user).filter((m) => m.nav !== false) : [];
   const [menuOpen, setMenuOpen] = useState(false);
+  const [pwdOpen, setPwdOpen] = useState(false);
+  const [curPwd, setCurPwd] = useState('');
+  const [newPwd, setNewPwd] = useState('');
+  const [pwdBusy, setPwdBusy] = useState(false);
+  const [pwdMsg, setPwdMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  // Si el usuario entra a "/" pero no tiene permiso a Resumen (dashboard), redirigir a su primer módulo habilitado
+  useEffect(() => {
+    if (!user) return;
+    if (location.pathname === '/' && !items.some((m) => m.path === '')) {
+      const first = items[0];
+      if (first) {
+        navigate(`/${first.path}`, { replace: true });
+      } else if (user.staff_person_code || user.staff_code) {
+        navigate(`/empleado/${user.staff_person_code ?? user.staff_code}`, { replace: true });
+      }
+    }
+  }, [user, items, location.pathname, navigate]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -29,6 +51,29 @@ export function AppShell() {
     setMenuOpen(false);
     logout();
     navigate('/login');
+  }
+
+  async function handleChangePassword(e: React.FormEvent) {
+    e.preventDefault();
+    if (newPwd.trim().length < 4) {
+      setPwdMsg({ ok: false, text: 'La nueva contraseña debe tener al menos 4 caracteres.' });
+      return;
+    }
+    setPwdBusy(true);
+    setPwdMsg(null);
+    try {
+      await api.auth.changePassword(curPwd, newPwd.trim());
+      setPwdMsg({ ok: true, text: 'Contraseña actualizada correctamente.' });
+      setCurPwd('');
+      setNewPwd('');
+    } catch (err) {
+      setPwdMsg({
+        ok: false,
+        text: err instanceof ApiError ? err.message : 'No se pudo cambiar la contraseña.',
+      });
+    } finally {
+      setPwdBusy(false);
+    }
   }
 
   return (
@@ -78,6 +123,17 @@ export function AppShell() {
               <span className="navitem__label">{m.title}</span>
             </NavLink>
           ))}
+          {user?.staff_person_code && (
+            <NavLink
+              to={`/empleado/${user.staff_person_code}`}
+              className={({ isActive }) => `navitem${isActive ? ' navitem--active' : ''}`}
+            >
+              <span className="navitem__icon" aria-hidden="true">
+                🪪
+              </span>
+              <span className="navitem__label">Mi Perfil Personal</span>
+            </NavLink>
+          )}
         </nav>
         <div className="shell__user" ref={menuRef} style={{ position: 'relative' }}>
           <button
@@ -125,10 +181,37 @@ export function AppShell() {
                 <div style={{ fontWeight: 700, fontSize: '13px', color: '#f0e6d0' }}>
                   {user?.name}
                 </div>
-                {user?.email && (
-                  <div style={{ fontSize: '11px', color: '#a59f97' }}>{user.email}</div>
+                {(user?.username || user?.email) && (
+                  <div style={{ fontSize: '11px', color: '#a59f97' }}>
+                    {user.username ? `@${user.username}` : user.email}
+                  </div>
                 )}
               </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setPwdMsg(null);
+                  setCurPwd('');
+                  setNewPwd('');
+                  setPwdOpen(true);
+                }}
+                style={{
+                  width: '100%',
+                  textAlign: 'left',
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid #443f40',
+                  color: '#f0e6d0',
+                  padding: '8px 10px',
+                  borderRadius: '8px',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  marginBottom: '6px',
+                }}
+              >
+                🔑 Cambiar contraseña
+              </button>
               <button
                 type="button"
                 onClick={onLogout}
@@ -154,6 +237,47 @@ export function AppShell() {
       <main className="shell__main">
         <Outlet />
       </main>
+
+      <Modal open={pwdOpen} title="🔑 Cambiar mi contraseña" onClose={() => !pwdBusy && setPwdOpen(false)}>
+          <form onSubmit={handleChangePassword} className="stack">
+            <Field label="Contraseña actual">
+              <Input
+                type="password"
+                value={curPwd}
+                onChange={(e) => setCurPwd(e.target.value)}
+                required
+              />
+            </Field>
+            <Field label="Nueva contraseña (mínimo 4 caracteres)">
+              <Input
+                type="password"
+                value={newPwd}
+                onChange={(e) => setNewPwd(e.target.value)}
+                required
+              />
+            </Field>
+            {pwdMsg && (
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: '13px',
+                  color: pwdMsg.ok ? '#86efac' : '#fca5a5',
+                  fontWeight: 600,
+                }}
+              >
+                {pwdMsg.text}
+              </p>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
+              <Button variant="ghost" type="button" onClick={() => setPwdOpen(false)}>
+                Cerrar
+              </Button>
+              <Button type="submit" disabled={pwdBusy}>
+                {pwdBusy ? 'Guardando…' : 'Guardar contraseña'}
+              </Button>
+            </div>
+          </form>
+        </Modal>
     </div>
   );
 }

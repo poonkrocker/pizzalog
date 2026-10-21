@@ -5,8 +5,23 @@ export interface SalesQuery {
   from?: string;
   to?: string;
   channel?: SaleChannel;
+  without_cash_session?: number;
   limit?: number;
   offset?: number;
+}
+
+export interface SalesImportInput {
+  csv_text: string;
+  deepseek_api_key?: string;
+  use_ai?: boolean;
+}
+
+export interface SalesImportResult {
+  imported_sales: number;
+  imported_items: number;
+  skipped_duplicates: number;
+  total_amount?: number;
+  ai_harmonized: boolean;
 }
 
 export function salesApi(client: ApiClient) {
@@ -23,8 +38,9 @@ export function salesApi(client: ApiClient) {
       return client.get<{ sales: Sale[] }>(`/sales${q}`);
     },
     get: (id: number) => client.get<{ sale: SaleDetail }>(`/sales/${id}`),
-    // create lleva client_uuid: es idempotente, base del reenvío offline.
     create: (data: SaleInput) => client.post<{ sale: Sale }>('/sales', data),
     cancel: (id: number) => client.post<{ sale: Sale }>(`/sales/${id}/cancel`),
+    importCsv: (data: SalesImportInput) =>
+      client.post<SalesImportResult>('/sales/import', data),
   };
 }

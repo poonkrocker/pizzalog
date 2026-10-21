@@ -8,7 +8,13 @@ export interface User {
   name: string;
   email: string;
   role: Role;
-  hourly_rate?: number;
+  username?: string | null;
+  allowed_modules?: string[] | null;
+  can_use_pos?: boolean;
+  staff_person_id?: number | null;
+  staff_person_code?: string | null;
+  staff_code?: string | null;
+  hourly_rate?: number | null;
   is_active: number;
 }
 
@@ -115,7 +121,7 @@ export type SaleChannel =
   | 'pedidosya'
   | 'rappi'
   | 'phone'
-  | 'dine_in';
+  | 'dine_in' | 'salon';
 
 export interface SaleItemInput {
   product_id: number | null;
@@ -140,6 +146,8 @@ export interface Sale {
   sale_number: number;
   user_id?: number | null;
   user_name?: string | null;
+  cash_session_id?: number | null;
+  note?: string | null;
   subtotal: number;
   discount: number;
   total: number;
@@ -190,6 +198,7 @@ export interface Business {
   description: string | null;
   logo_url: string | null;
   accepts_online_orders: number;
+  use_digital_kds?: number;
   transfer_alias: string | null;
   card_surcharge_pct: number;
   pay_methods_pickup: string[];
@@ -325,6 +334,7 @@ export interface KitchenRound {
   tables_label: string | null;
   note: string | null;
   printed: boolean;
+  is_paid?: boolean;
   printed_at: string | null;
   created_at: string;
   items: KitchenRoundItem[];

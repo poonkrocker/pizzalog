@@ -4,13 +4,17 @@ namespace Pizzalog\Repositories;
 use Pizzalog\Core\Database;
 
 /**
- * Vista de cocina (KDS): las comandas (rondas) activas de las mesas abiertas,
+ * Vista de cocina (KDS): las comandas (rondas) activas de las mesas y pedidos,
  * con sus ítems, y el avance de estado e impresión.
+ *
+ * IMPORTANTE: Las comandas cobradas (s.status = 'closed') NO se borran de la
+ * cocina hasta que la cocina las marque como entregadas ('served'). Solo se
+ * excluyen las cuentas anuladas ('cancelled').
  */
 class KitchenRepository
 {
     /**
-     * Rondas en los estados pedidos, de sesiones abiertas, más antiguas primero.
+     * Rondas en los estados pedidos, más antiguas primero.
      * @param string[] $statuses
      */
     public function listActiveRounds(int $bid, array $statuses): array
@@ -18,13 +22,15 @@ class KitchenRepository
         $in   = implode(',', array_fill(0, count($statuses), '?'));
         $stmt = Database::pdo()->prepare(
             "SELECT r.id, r.session_id, r.number, r.status, r.note, r.printed_at, r.created_at,
+                    s.status AS session_status, s.label AS session_label,
                     (SELECT GROUP_CONCAT(t.label ORDER BY t.label SEPARATOR '+')
                        FROM session_tables st
                        JOIN tables t ON t.id = st.table_id
-                      WHERE st.session_id = r.session_id) AS tables_label
+                      WHERE st.session_id = r.session_id) AS raw_tables_label
                FROM table_rounds r
-               JOIN table_sessions s ON s.id = r.session_id
-              WHERE r.business_id = ? AND s.status IN ('open','bill_requested')
+          LEFT JOIN table_sessions s ON s.id = r.session_id
+              WHERE r.business_id = ?
+                AND (s.id IS NULL OR s.status != 'cancelled')
                 AND r.status IN ($in)
               ORDER BY r.created_at"
         );
@@ -57,13 +63,24 @@ class KitchenRepository
         }
 
         return array_map(static function (array $r) use ($itemsByRound): array {
-            $rid = (int) $r['id'];
+            $rid        = (int) $r['id'];
+            $tLabel     = trim((string) ($r['raw_tables_label'] ?? ''));
+            $sLabel     = trim((string) ($r['session_label'] ?? ''));
+            $combined   = $tLabel !== '' && $sLabel !== ''
+                ? ($tLabel . ' · ' . $sLabel)
+                : ($tLabel !== '' ? $tLabel : ($sLabel !== '' ? $sLabel : 'Mostrador'));
+
+            if (($r['session_status'] ?? '') === 'closed' && !str_contains($combined, 'Cobrado')) {
+                $combined .= ' ✓';
+            }
+
             return [
                 'id'           => $rid,
                 'session_id'   => (int) $r['session_id'],
                 'number'       => (int) $r['number'],
                 'status'       => $r['status'],
-                'tables_label' => $r['tables_label'],
+                'tables_label' => $combined,
+                'is_paid'      => ($r['session_status'] ?? '') === 'closed',
                 'note'         => $r['note'],
                 'printed'      => $r['printed_at'] !== null,
                 'printed_at'   => $r['printed_at'],

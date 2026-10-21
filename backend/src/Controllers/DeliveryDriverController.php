@@ -12,6 +12,11 @@ class DeliveryDriverController
 {
     private const VEHICLE_TYPES = ['moto', 'bici', 'auto', 'otro'];
 
+    public function __construct()
+    {
+        \Pizzalog\Services\OrderService::ensureSchema();
+    }
+
     /** GET /drivers?all=0|1 */
     public function index(Request $req): void
     {

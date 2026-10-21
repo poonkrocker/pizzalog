@@ -20,7 +20,7 @@ class SaleController
         $this->sales = new SaleService();
     }
 
-    /** GET /sales?from=YYYY-MM-DD&to=YYYY-MM-DD&channel=&limit=&offset= */
+    /** GET /sales?from=YYYY-MM-DD&to=YYYY-MM-DD&channel=&without_cash_session=&limit=&offset= */
     public function index(Request $req): void
     {
         $where  = ['s.business_id = ?'];
@@ -40,13 +40,16 @@ class SaleController
             $where[]  = 's.channel = ?';
             $params[] = $req->query['channel'];
         }
+        if (!empty($req->query['without_cash_session'])) {
+            $where[] = 's.cash_session_id IS NULL';
+        }
 
         $limit  = min(max((int) ($req->query['limit'] ?? 50), 1), 200);
         $offset = max((int) ($req->query['offset'] ?? 0), 0);
 
-        $sql = 'SELECT s.id, s.sale_number, s.user_id, u.name AS user_name,
+        $sql = 'SELECT s.id, s.sale_number, s.user_id, u.name AS user_name, s.cash_session_id,
                        s.subtotal, s.discount, s.total, s.payment_method, s.channel,
-                       s.status, s.created_at
+                       s.status, s.note, s.created_at
                   FROM sales s
                   LEFT JOIN users u ON u.id = s.user_id
                  WHERE ' . implode(' AND ', $where) . '
@@ -67,11 +70,7 @@ class SaleController
     }
 
     /**
-     * POST /sales  (venta directa de mostrador)
-     * Body: {
-     *   client_uuid?, payment_method?, discount?, note?, cash_session_id?,
-     *   items: [ { product_id, quantity, unit_price? }, ... ]
-     * }
+     * POST /sales  (venta directa de mostrador / llevar / delivery)
      */
     public function store(Request $req): void
     {
@@ -97,7 +96,6 @@ class SaleController
         $clientUuid = $req->input('client_uuid');
         $clientUuid = (is_string($clientUuid) && $clientUuid !== '') ? $clientUuid : null;
 
-        // Idempotencia para reintentos de sincronización offline.
         if ($clientUuid !== null) {
             $dup = $this->findByUuid($bid, $clientUuid);
             if ($dup) {
@@ -108,20 +106,18 @@ class SaleController
         $cashSessionId = $req->input('cash_session_id');
         $cashSessionId = ($cashSessionId === null || $cashSessionId === '') ? null : (int) $cashSessionId;
         if ($cashSessionId !== null && !$this->openSessionBelongs($bid, $cashSessionId)) {
-            Response::error('La sesión de caja no existe o está cerrada', 422);
+            $cashSessionId = null;
         }
         if ($cashSessionId === null) {
             $cashSessionId = $this->findCurrentOpenCashSessionId($bid);
         }
 
-        // Canal de la venta (mostrador, para llevar, delivery propio…).
         $channel = (string) $req->input('channel', 'counter');
         $allowedChannels = ['counter', 'takeaway', 'delivery', 'web', 'whatsapp', 'pedidosya', 'rappi', 'phone', 'dine_in'];
         if (!in_array($channel, $allowedChannels, true)) {
             Response::error('Canal de venta inválido', 422);
         }
 
-        // Validar ítems y cargar productos.
         $productIds = [];
         foreach ($items as $it) {
             $pid = (int) ($it['product_id'] ?? 0);
@@ -138,7 +134,6 @@ class SaleController
             }
         }
 
-        // Cargar variantes referenciadas, para tomar su precio y etiqueta.
         $variantIds = [];
         foreach ($items as $it) {
             if (isset($it['variant_id']) && (int) $it['variant_id'] > 0) {
@@ -147,7 +142,6 @@ class SaleController
         }
         $variants = $this->loadVariants($bid, array_values(array_unique($variantIds)));
 
-        // Armar líneas con snapshots de nombre y precio.
         $lines    = [];
         $subtotal = 0.0;
         foreach ($items as $it) {
@@ -156,27 +150,28 @@ class SaleController
             $product = $products[$pid];
 
             $variantId   = null;
-            $productName = $product['name'];
+            $productName = !empty($it['product_name']) && is_string($it['product_name'])
+                ? trim($it['product_name'])
+                : $product['name'];
 
             if ((int) $product['has_variants'] === 1) {
-                // Producto con variantes: hay que elegir una válida.
                 $vid = (int) ($it['variant_id'] ?? 0);
                 if ($vid <= 0 || !isset($variants[$vid]) || (int) $variants[$vid]['product_id'] !== $pid) {
                     Response::error("Elegí una variante válida para «{$product['name']}»", 422);
                 }
-                $variantId   = $vid;
-                $unitPrice   = (isset($it['unit_price']) && is_numeric($it['unit_price']) && (float) $it['unit_price'] >= 0)
+                $variantId = $vid;
+                $unitPrice = (isset($it['unit_price']) && is_numeric($it['unit_price']) && (float) $it['unit_price'] >= 0)
                     ? (float) $it['unit_price']
                     : (float) $variants[$vid]['price'];
-                $productName = $product['name'] . ' — ' . $variants[$vid]['label'];
+                if (empty($it['product_name'])) {
+                    $productName = $product['name'] . ' — ' . $variants[$vid]['label'];
+                }
             } elseif ((int) $product['is_open_price'] === 1) {
-                // Precio abierto: el monto lo define el cajero al vender.
                 if (!isset($it['unit_price']) || !is_numeric($it['unit_price']) || (float) $it['unit_price'] <= 0) {
                     Response::error("Ingresá el precio de «{$product['name']}»", 422);
                 }
                 $unitPrice = (float) $it['unit_price'];
             } else {
-                // Producto normal.
                 $unitPrice = (isset($it['unit_price']) && is_numeric($it['unit_price']) && (float) $it['unit_price'] >= 0)
                     ? (float) $it['unit_price']
                     : (float) $product['price'];
@@ -202,13 +197,18 @@ class SaleController
         }
 
         $note = trim((string) $req->input('note', '')) ?: null;
+        if ($cashSessionId === null) {
+            $note = $note ? ($note . ' [Sin caja abierta]') : '[Sin caja abierta]';
+        }
+
+        $useDigitalKds = $this->usesDigitalKds($bid);
 
         $pdo = Database::pdo();
         $pdo->beginTransaction();
         try {
             $saleId = $this->sales->create(
                 $bid, $userId, $lines, $paymentMethod, $discount,
-                $channel, $cashSessionId, $clientUuid, $note
+                $channel, $cashSessionId, $clientUuid, $note, null, $useDigitalKds
             );
             $pdo->commit();
         } catch (\PDOException $e) {
@@ -225,7 +225,241 @@ class SaleController
             throw $e;
         }
 
-        Response::ok(['sale' => $this->withItems($this->findOwnedById($bid, $saleId))], 201);
+        Response::ok([
+            'sale'                => $this->withItems($this->findOwnedById($bid, $saleId)),
+            'without_cash_session'=> $cashSessionId === null,
+        ], 201);
+    }
+
+    /**
+     * POST /sales/import
+     * Importador de ventas históricas (Loyverse CSV u otros sistemas previos), con soporte
+     * opcional de API Key de DeepSeek para armonizar encabezados y formatos no estándar.
+     * Body: { csv_text: string, deepseek_api_key?: string, use_ai?: bool }
+     */
+    public function import(Request $req): void
+    {
+        $bid    = (int) $req->auth['business_id'];
+        $userId = (int) $req->auth['user_id'];
+        $csvRaw = (string) $req->input('csv_text', '');
+        $apiKey = trim((string) $req->input('deepseek_api_key', ''));
+        $useAi  = (bool) $req->input('use_ai', false);
+
+        if (trim($csvRaw) === '') {
+            Response::error('Pegá o seleccioná un archivo CSV con los datos a importar', 422);
+        }
+
+        // Quitar BOM UTF-8 si existe
+        $csvRaw = preg_replace('/^\xEF\xBB\xBF/', '', $csvRaw) ?? $csvRaw;
+        $lines  = preg_split('/\r\n|\r|\n/', trim($csvRaw));
+        if (!$lines || count($lines) < 2) {
+            Response::error('El archivo CSV debe tener una fila de encabezados y al menos una fila de datos', 422);
+        }
+
+        // Detectar delimitador (coma o punto y coma)
+        $firstLine = $lines[0];
+        $delimiter = (substr_count($firstLine, ';') > substr_count($firstLine, ',')) ? ';' : ',';
+
+        $headers = array_map(static fn($h) => trim((string) $h), str_getcsv($firstLine, $delimiter));
+        $rows    = [];
+        for ($i = 1, $n = count($lines); $i < $n; $i++) {
+            if (trim($lines[$i]) === '') continue;
+            $r = str_getcsv($lines[$i], $delimiter);
+            if (count($r) === 1 && ($r[0] === null || trim((string) $r[0]) === '')) continue;
+            $rows[] = $r;
+        }
+
+        if ($rows === []) {
+            Response::error('No se encontraron filas válidas en el CSV', 422);
+        }
+
+        // Mapeo automático heurístico de columnas (Loyverse ES / EN y genéricos)
+        $map = $this->detectCsvColumns($headers);
+
+        // Si el usuario proporcionó DeepSeek API Key y pidió armonización con IA (o faltan columnas clave)
+        $aiUsed = false;
+        if ($apiKey !== '' && ($useAi || $map['item'] === null || $map['price'] === null)) {
+            $aiMap = $this->harmonizeWithDeepSeek($apiKey, $headers, array_slice($rows, 0, 5));
+            if (is_array($aiMap)) {
+                foreach ($aiMap as $k => $colIdx) {
+                    if (is_int($colIdx) && $colIdx >= 0 && $colIdx < count($headers)) {
+                        $map[$k] = $colIdx;
+                    }
+                }
+                $aiUsed = true;
+            }
+        }
+
+        // Cargar catálogo actual del negocio para vincular productos por nombre
+        $pdo = Database::pdo();
+        $prodStmt = $pdo->prepare('SELECT id, name, price FROM products WHERE business_id = ?');
+        $prodStmt->execute([$bid]);
+        $catalog = [];
+        foreach ($prodStmt->fetchAll() as $p) {
+            $catalog[mb_strtolower(trim((string) $p['name']))] = $p;
+        }
+
+        // Agrupar filas por recibo (o por fila individual si es un resumen por recibo)
+        $receipts = [];
+        foreach ($rows as $idx => $row) {
+            $get = static fn(?int $col): string => ($col !== null && isset($row[$col])) ? trim((string) $row[$col]) : '';
+
+            $typeTxt = mb_strtolower($get($map['type']));
+            if ($typeTxt !== '' && (str_contains($typeTxt, 'reembolso') || str_contains($typeTxt, 'refund') || str_contains($typeTxt, 'anulad') || str_contains($typeTxt, 'cancel'))) {
+                continue;
+            }
+
+            $receiptNo = $get($map['receipt']);
+            $dateRaw   = $get($map['date']);
+            $dateSql   = $this->parseFlexibleDate($dateRaw);
+
+            if ($receiptNo === '') {
+                $receiptNo = 'ROW-' . ($idx + 1) . '-' . substr(md5($dateSql . implode('|', $row)), 0, 6);
+            }
+
+            $itemName  = $get($map['item']);
+            $variant   = $get($map['variant']);
+            $qtyRaw    = $get($map['qty']);
+            $priceRaw  = $get($map['price']);
+            $discRaw   = $get($map['discount']);
+            $payRaw    = $get($map['payment']);
+            $chanRaw   = $get($map['channel']);
+
+            $qty       = $qtyRaw !== '' ? max(0.01, $this->parseNumber($qtyRaw)) : 1.0;
+            $lineAmount= $priceRaw !== '' ? max(0.0, $this->parseNumber($priceRaw)) : 0.0;
+            $discAmount= $discRaw !== '' ? abs($this->parseNumber($discRaw)) : 0.0;
+
+            if ($itemName === '') {
+                $itemName = 'Venta importada #' . $receiptNo;
+            }
+            $fullName = ($variant !== '' && mb_strtolower($variant) !== mb_strtolower($itemName))
+                ? ($itemName . ' — ' . $variant)
+                : $itemName;
+
+            $matchedProd = $catalog[mb_strtolower($itemName)] ?? $catalog[mb_strtolower($fullName)] ?? null;
+            $pid         = $matchedProd ? (int) $matchedProd['id'] : null;
+
+            // En Loyverse "Ventas brutas" es el total de la línea (precio * cantidad)
+            $unitPrice = $qty > 0 ? round($lineAmount / $qty, 2) : $lineAmount;
+            if ($unitPrice <= 0 && $matchedProd) {
+                $unitPrice  = (float) $matchedProd['price'];
+                $lineAmount = round($unitPrice * $qty, 2);
+            }
+
+            if (!isset($receipts[$receiptNo])) {
+                $receipts[$receiptNo] = [
+                    'receipt_no' => $receiptNo,
+                    'created_at' => $dateSql,
+                    'payment'    => $this->normalizeLoyversePayment($payRaw),
+                    'channel'    => $this->normalizeLoyverseChannel($chanRaw),
+                    'discount'   => 0.0,
+                    'lines'      => [],
+                ];
+            }
+
+            $receipts[$receiptNo]['discount'] += $discAmount;
+            $receipts[$receiptNo]['lines'][] = [
+                'product_id'   => $pid,
+                'product_name' => mb_substr($fullName, 0, 180),
+                'unit_price'   => $unitPrice,
+                'quantity'     => $qty,
+                'line_total'   => round($lineAmount, 2),
+            ];
+        }
+
+        if ($receipts === []) {
+            Response::error('No se encontraron ventas activas para importar', 422);
+        }
+
+        SaleService::ensureTableSessionSchema($pdo);
+        $numStmt = $pdo->prepare('SELECT COALESCE(MAX(sale_number), 0) FROM sales WHERE business_id = ?');
+        $numStmt->execute([$bid]);
+        $nextSaleNumber = (int) $numStmt->fetchColumn();
+
+        $importedCount = 0;
+        $skippedCount  = 0;
+        $totalImportedAmount = 0.0;
+
+        $pdo->beginTransaction();
+        try {
+            $insertSale = $pdo->prepare(
+                'INSERT INTO sales
+                    (business_id, sale_number, client_uuid, user_id, cash_session_id,
+                     subtotal, discount, total, payment_method, status, channel, note, created_at)
+                 VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, "completed", ?, ?, ?)'
+            );
+            $insertItem = $pdo->prepare(
+                'INSERT INTO sale_items
+                    (sale_id, product_id, variant_id, parent_sale_item_id, product_name,
+                     unit_price, quantity, line_total)
+                 VALUES (?, ?, NULL, NULL, ?, ?, ?, ?)'
+            );
+
+            foreach ($receipts as $r) {
+                $uuid = 'loy-' . substr(md5($bid . '|' . $r['receipt_no'] . '|' . $r['created_at']), 0, 28);
+                if ($this->findByUuid($bid, $uuid)) {
+                    $skippedCount++;
+                    continue;
+                }
+
+                $subtotal = 0.0;
+                foreach ($r['lines'] as $l) {
+                    $subtotal += $l['line_total'];
+                }
+                $subtotal = round($subtotal, 2);
+                $discount = min($subtotal, round($r['discount'], 2));
+                $total    = max(0.0, round($subtotal - $discount, 2));
+
+                if ($subtotal <= 0 && count($r['lines']) === 0) {
+                    $skippedCount++;
+                    continue;
+                }
+
+                $nextSaleNumber++;
+                $note = 'Importado Loyverse #' . $r['receipt_no'];
+
+                $insertSale->execute([
+                    $bid,
+                    $nextSaleNumber,
+                    $uuid,
+                    $userId,
+                    $subtotal,
+                    $discount,
+                    $total,
+                    $r['payment'],
+                    $r['channel'],
+                    $note,
+                    $r['created_at'],
+                ]);
+                $saleId = (int) $pdo->lastInsertId();
+
+                foreach ($r['lines'] as $l) {
+                    $insertItem->execute([
+                        $saleId,
+                        $l['product_id'],
+                        $l['product_name'],
+                        $l['unit_price'],
+                        $l['quantity'],
+                        $l['line_total'],
+                    ]);
+                }
+
+                $importedCount++;
+                $totalImportedAmount += $total;
+            }
+
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            Response::error('Error al importar ventas: ' . $e->getMessage(), 422);
+        }
+
+        Response::ok([
+            'imported_sales' => $importedCount,
+            'skipped_duplicates' => $skippedCount,
+            'total_amount'   => round($totalImportedAmount, 2),
+            'ai_harmonized'  => $aiUsed,
+        ]);
     }
 
     /** POST /sales/{id}/cancel — anula y devuelve stock */
@@ -275,6 +509,187 @@ class SaleController
 
     // -----------------------------------------------------------------
 
+    private function usesDigitalKds(int $bid): bool
+    {
+        try {
+            $pdo = Database::pdo();
+            $col = $pdo->query("SHOW COLUMNS FROM businesses LIKE 'use_digital_kds'")->fetch();
+            if (!$col) {
+                return true;
+            }
+            $stmt = $pdo->prepare('SELECT use_digital_kds FROM businesses WHERE id = ? LIMIT 1');
+            $stmt->execute([$bid]);
+            $val = $stmt->fetchColumn();
+            return $val === false ? true : ((int) $val === 1);
+        } catch (\Throwable) {
+            return true;
+        }
+    }
+
+    /**
+     * Detecta columnas de Loyverse (en español o inglés) o CSVs de ventas generales.
+     * @param string[] $headers
+     * @return array<string, ?int>
+     */
+    private function detectCsvColumns(array $headers): array
+    {
+        $map = [
+            'receipt'  => null,
+            'date'     => null,
+            'type'     => null,
+            'item'     => null,
+            'variant'  => null,
+            'qty'      => null,
+            'price'    => null,
+            'discount' => null,
+            'payment'  => null,
+            'channel'  => null,
+        ];
+
+        foreach ($headers as $i => $h) {
+            $k = mb_strtolower(trim($h));
+            $k = strtr($k, ['á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u']);
+
+            if ($map['receipt'] === null && (str_contains($k, 'recibo') || str_contains($k, 'receipt') || str_contains($k, 'comprobante') || str_contains($k, 'ticket') || $k === 'id')) {
+                if (!str_contains($k, 'tipo') && !str_contains($k, 'type')) {
+                    $map['receipt'] = $i;
+                }
+            }
+            if ($map['type'] === null && (str_contains($k, 'tipo de recibo') || str_contains($k, 'receipt type') || $k === 'estado' || $k === 'status')) {
+                $map['type'] = $i;
+            }
+            if ($map['date'] === null && (str_contains($k, 'fecha') || str_contains($k, 'date') || str_contains($k, 'hora') || str_contains($k, 'created'))) {
+                $map['date'] = $i;
+            }
+            if ($map['item'] === null && (str_contains($k, 'articulo') || str_contains($k, 'item') || str_contains($k, 'producto') || str_contains($k, 'product') || str_contains($k, 'descripcion'))) {
+                $map['item'] = $i;
+            }
+            if ($map['variant'] === null && (str_contains($k, 'variante') || str_contains($k, 'variant') || str_contains($k, 'opcion'))) {
+                $map['variant'] = $i;
+            }
+            if ($map['qty'] === null && (str_contains($k, 'cantidad') || str_contains($k, 'quantity') || $k === 'cant' || $k === 'qty' || str_contains($k, 'unidades'))) {
+                $map['qty'] = $i;
+            }
+            if ($map['price'] === null && (str_contains($k, 'ventas brutas') || str_contains($k, 'gross sales') || str_contains($k, 'ventas netas') || str_contains($k, 'net sales') || str_contains($k, 'total') || str_contains($k, 'importe') || str_contains($k, 'precio') || str_contains($k, 'monto'))) {
+                $map['price'] = $i;
+            }
+            if ($map['discount'] === null && (str_contains($k, 'descuento') || str_contains($k, 'discount'))) {
+                $map['discount'] = $i;
+            }
+            if ($map['payment'] === null && (str_contains($k, 'pago') || str_contains($k, 'payment') || str_contains($k, 'medio'))) {
+                $map['payment'] = $i;
+            }
+            if ($map['channel'] === null && (str_contains($k, 'consumo') || str_contains($k, 'dining') || str_contains($k, 'canal') || str_contains($k, 'modalidad'))) {
+                $map['channel'] = $i;
+            }
+        }
+
+        return $map;
+    }
+
+    /**
+     * Usa la API de DeepSeek para armonizar encabezados desconocidos de un CSV hacia el esquema de Pizzalog.
+     */
+    private function harmonizeWithDeepSeek(string $apiKey, array $headers, array $sampleRows): ?array
+    {
+        try {
+            $prompt = "Analiza estos encabezados de un CSV de ventas de gastronomía (ej. Loyverse u otro POS) y las primeras filas de muestra.\n"
+                . "Encabezados (con su índice 0-based): " . json_encode($headers, JSON_UNESCAPED_UNICODE) . "\n"
+                . "Muestra: " . json_encode($sampleRows, JSON_UNESCAPED_UNICODE) . "\n"
+                . "Devuelve ÚNICAMENTE un objeto JSON con los índices numéricos (int o null) correspondientes a cada campo:\n"
+                . '{"receipt": int|null, "date": int|null, "type": int|null, "item": int|null, "variant": int|null, "qty": int|null, "price": int|null, "discount": int|null, "payment": int|null, "channel": int|null}';
+
+            $ch = curl_init('https://api.deepseek.com/chat/completions');
+            if (!$ch) return null;
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_POST           => true,
+                CURLOPT_HTTPHEADER     => [
+                    'Content-Type: application/json',
+                    'Authorization: Bearer ' . $apiKey,
+                ],
+                CURLOPT_POSTFIELDS     => json_encode([
+                    'model'           => 'deepseek-chat',
+                    'messages'        => [
+                        ['role' => 'system', 'content' => 'Eres un asistente experto en migración de datos POS para pizzerías. Responde solo en JSON válido.'],
+                        ['role' => 'user', 'content' => $prompt],
+                    ],
+                    'response_format' => ['type' => 'json_object'],
+                    'temperature'     => 0.0,
+                ]),
+                CURLOPT_TIMEOUT        => 15,
+            ]);
+            $resp = curl_exec($ch);
+            curl_close($ch);
+            if (!is_string($resp) || $resp === '') return null;
+            $data = json_decode($resp, true);
+            $content = $data['choices'][0]['message']['content'] ?? null;
+            if (!is_string($content)) return null;
+            $parsed = json_decode($content, true);
+            return is_array($parsed) ? $parsed : null;
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    private function parseNumber(string $raw): float
+    {
+        $clean = preg_replace('/[^\d,.-]/', '', $raw) ?? '';
+        if ($clean === '') return 0.0;
+        // Si tiene punto de miles y coma decimal (ej. 12.500,00)
+        if (str_contains($clean, '.') && str_contains($clean, ',')) {
+            if (strrpos($clean, ',') > strrpos($clean, '.')) {
+                $clean = str_replace('.', '', $clean);
+                $clean = str_replace(',', '.', $clean);
+            } else {
+                $clean = str_replace(',', '', $clean);
+            }
+        } elseif (str_contains($clean, ',')) {
+            $clean = str_replace(',', '.', $clean);
+        }
+        return (float) $clean;
+    }
+
+    private function parseFlexibleDate(string $raw): string
+    {
+        $raw = trim($raw);
+        if ($raw === '') {
+            return date('Y-m-d H:i:s');
+        }
+        // Intentar formatos dd/mm/yyyy HH:MM o dd-mm-yyyy
+        if (preg_match('#^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})(?:\s+(\d{1,2}:\d{2}(?::\d{2})?))?#', $raw, $m)) {
+            $d = str_pad($m[1], 2, '0', STR_PAD_LEFT);
+            $mo = str_pad($m[2], 2, '0', STR_PAD_LEFT);
+            $y = strlen($m[3]) === 2 ? ('20' . $m[3]) : $m[3];
+            $t = !empty($m[4]) ? (strlen($m[4]) === 5 ? $m[4] . ':00' : $m[4]) : '20:00:00';
+            return "$y-$mo-$d $t";
+        }
+        $ts = strtotime($raw);
+        if ($ts !== false) {
+            return date('Y-m-d H:i:s', $ts);
+        }
+        return date('Y-m-d H:i:s');
+    }
+
+    private function normalizeLoyversePayment(string $raw): string
+    {
+        $k = mb_strtolower(trim($raw));
+        if (str_contains($k, 'efectivo') || str_contains($k, 'cash')) return 'cash';
+        if (str_contains($k, 'tarjeta') || str_contains($k, 'card') || str_contains($k, 'debito') || str_contains($k, 'credito')) return 'card';
+        if (str_contains($k, 'transfer')) return 'transfer';
+        if (str_contains($k, 'mercado') || $k === 'mp' || str_contains($k, 'qr')) return 'mp';
+        return 'cash';
+    }
+
+    private function normalizeLoyverseChannel(string $raw): string
+    {
+        $k = mb_strtolower(trim($raw));
+        if (str_contains($k, 'llevar') || str_contains($k, 'take')) return 'takeaway';
+        if (str_contains($k, 'domicilio') || str_contains($k, 'delivery') || str_contains($k, 'envio')) return 'delivery';
+        if (str_contains($k, 'aqui') || str_contains($k, 'salon') || str_contains($k, 'mesa') || str_contains($k, 'dine')) return 'dine_in';
+        return 'counter';
+    }
+
     private function withItems(array $sale): array
     {
         $sale = $this->castSale($sale);
@@ -303,6 +718,9 @@ class SaleController
             if (array_key_exists($k, $s) && $s[$k] !== null) {
                 $s[$k] = (int) $s[$k];
             }
+        }
+        if (!array_key_exists('cash_session_id', $s)) {
+            $s['cash_session_id'] = null;
         }
         foreach (['subtotal', 'discount', 'total'] as $k) {
             if (array_key_exists($k, $s)) {
@@ -339,7 +757,6 @@ class SaleController
         return $stmt->fetch() ?: null;
     }
 
-    /** @param int[] $ids @return array<int, array> mapa product_id => fila */
     private function loadProducts(int $bid, array $ids): array
     {
         if ($ids === []) {
@@ -360,7 +777,6 @@ class SaleController
         return $map;
     }
 
-    /** @param int[] $ids @return array<int, array> mapa variant_id => fila */
     private function loadVariants(int $bid, array $ids): array
     {
         if ($ids === []) {

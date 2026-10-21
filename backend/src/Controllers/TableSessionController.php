@@ -7,9 +7,8 @@ use Pizzalog\Repositories\TableSessionRepository;
 use Pizzalog\Services\TableCheckoutService;
 
 /**
- * Operación de mesa: abrir la cuenta, ver el detalle en vivo, sumar rondas
- * (comandas) y pedir la cuenta. Las maniobras (juntar/transferir/dividir) y
- * el cobro van en bloques aparte. Operable por cualquier usuario autenticado.
+ * Operación de mesa y cuentas abiertas (incluyendo cuentas diferidas de Llevar y Delivery):
+ * abrir la cuenta, ver el detalle en vivo, sumar rondas (comandas) y pedir la cuenta.
  */
 class TableSessionController
 {
@@ -37,31 +36,37 @@ class TableSessionController
     }
 
     /**
-     * POST /table-sessions — abrir cuenta
-     * Body: { table_ids: [int, ...], party_size?, note? }
+     * POST /table-sessions — abrir cuenta (en mesa/barra o cuenta diferida Llevar/Delivery sin mesa)
+     * Body: { table_ids?: [int, ...], label?, party_size?, note? }
      */
     public function store(Request $req): void
     {
         $bid      = (int) $req->auth['business_id'];
         $tableIds = $req->input('table_ids', []);
+        $label    = trim((string) $req->input('label', '')) ?: null;
 
-        if (!is_array($tableIds) || $tableIds === []) {
-            Response::error('Indicá al menos una mesa', 422);
+        if (!is_array($tableIds)) {
+            $tableIds = [];
         }
-        $tableIds = array_values(array_unique(array_map('intval', $tableIds)));
+        $tableIds = array_values(array_unique(array_filter(array_map('intval', $tableIds), static fn($v) => $v > 0)));
 
-        $check = $this->repo->validateTablesFree($bid, $tableIds);
-        if (!($check['ok'] ?? false)) {
-            $msg = isset($check['busy'])
-                ? 'La mesa ' . $check['busy'] . ' ya tiene una cuenta abierta'
-                : ($check['error'] ?? 'Mesas inválidas');
-            Response::error($msg, 422);
+        if ($tableIds === [] && $label === null) {
+            Response::error('Indicá al menos una mesa o un nombre para la cuenta (Llevar / Delivery)', 422);
+        }
+
+        if ($tableIds !== []) {
+            $check = $this->repo->validateTablesFree($bid, $tableIds);
+            if (!($check['ok'] ?? false)) {
+                $msg = isset($check['busy'])
+                    ? 'La mesa ' . $check['busy'] . ' ya tiene una cuenta abierta'
+                    : ($check['error'] ?? 'Mesas inválidas');
+                Response::error($msg, 422);
+            }
         }
 
         $partySize = $req->input('party_size');
         $partySize = is_numeric($partySize) ? (int) $partySize : null;
         $note      = trim((string) $req->input('note', '')) ?: null;
-        $label     = trim((string) $req->input('label', '')) ?: null;
 
         $id = $this->repo->openSession($bid, (int) $req->auth['user_id'], $tableIds, $partySize, $note, $label);
         Response::ok(['session' => $this->repo->getSessionDetail($bid, $id)], 201);
@@ -170,8 +175,6 @@ class TableSessionController
 
     /**
      * PUT /table-sessions/{id}/tables — reemplaza las mesas de la cuenta.
-     * Sirve para transferir (otro conjunto) y para juntar/soltar mesas.
-     * Body: { table_ids: [int, ...] }
      */
     public function setTables(Request $req): void
     {
@@ -204,7 +207,6 @@ class TableSessionController
 
     /**
      * POST /table-sessions/{id}/merge — fusiona otra cuenta dentro de esta.
-     * Body: { source_session_id }
      */
     public function merge(Request $req): void
     {
@@ -231,8 +233,6 @@ class TableSessionController
 
     /**
      * POST /table-sessions/{id}/close — cobra y cierra la cuenta.
-     * Body simple:   { payment_method, cash_session_id?, note? }
-     * Body dividido: { splits: [ { item_ids:[...], payment_method }, ... ], cash_session_id?, note? }
      */
     public function close(Request $req): void
     {

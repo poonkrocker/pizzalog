@@ -6,9 +6,10 @@ use Pizzalog\Core\Database;
 use Pizzalog\Repositories\TableSessionRepository;
 
 /**
- * Cierre/cobro de una cuenta de mesa. Convierte los ítems de la sesión en
- * una o varias ventas (división por ítems) usando el SaleService, descuenta
- * stock y deja la sesión cerrada. Todo en una sola transacción.
+ * Cierre/cobro de una cuenta de mesa o cuenta diferida (Llevar / Delivery).
+ * Convierte los ítems de la sesión en una o varias ventas usando SaleService,
+ * descuenta stock y deja la sesión cerrada. Las rondas en cocina permanecen
+ * visibles hasta que cocina las marque como entregadas ('served').
  */
 class TableCheckoutService
 {
@@ -39,12 +40,10 @@ class TableCheckoutService
     ): array {
         $items = $this->sessions->getOrderedItems($bid, $sessionId);
         if ($items === []) {
-            // Si la mesa no tiene consumos registrados, se cierra y libera la mesa directamente
             $this->sessions->markClosed($bid, $sessionId);
             return [];
         }
 
-        // Definir los grupos a facturar.
         $groups = $splits === []
             ? [['items' => $items, 'payment_method' => $paymentMethod]]
             : $this->buildSplitGroups($items, $splits);
@@ -58,6 +57,15 @@ class TableCheckoutService
             $csStmt->execute([$bid]);
             $csId = $csStmt->fetchColumn();
             $cashSessionId = $csId !== false ? (int) $csId : null;
+        }
+
+        $sessionInfo = $this->sessions->getSession($bid, $sessionId);
+        $sessLabel   = mb_strtolower((string) ($sessionInfo['label'] ?? ''));
+        $saleChannel = 'dine_in';
+        if (str_contains($sessLabel, 'delivery') || str_contains($sessLabel, '🛵')) {
+            $saleChannel = 'delivery';
+        } elseif (str_contains($sessLabel, 'llevar') || str_contains($sessLabel, '🛍')) {
+            $saleChannel = 'takeaway';
         }
 
         $pdo->beginTransaction();
@@ -85,7 +93,7 @@ class TableCheckoutService
 
                 $saleIds[] = $this->sales->create(
                     $bid, $userId, $lines, $normalizedMethod,
-                    $groupDiscount, 'dine_in', $cashSessionId, null, $note, $sessionId
+                    $groupDiscount, $saleChannel, $cashSessionId, null, $note, $sessionId
                 );
             }
 
@@ -98,10 +106,6 @@ class TableCheckoutService
         }
     }
 
-    /**
-     * Valida que los grupos de la división cubran exactamente todos los
-     * ítems cobrables (sin faltantes ni repetidos) y arma los grupos.
-     */
     private function buildSplitGroups(array $items, array $splits): array
     {
         $byId = [];

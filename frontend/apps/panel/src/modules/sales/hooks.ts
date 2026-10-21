@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { SalesQuery } from '@pizzalog/shared';
+import type { SalesImportInput, SalesQuery } from '@pizzalog/shared';
 import { useApi } from '@/lib/auth';
 
 export function useSales(params: SalesQuery) {
@@ -25,5 +25,17 @@ export function useCancelSale() {
   return useMutation({
     mutationFn: (id: number) => api.sales.cancel(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['sales'] }),
+  });
+}
+
+export function useImportSales() {
+  const api = useApi();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: SalesImportInput) => api.sales.importCsv(data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sales'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
   });
 }

@@ -42,6 +42,7 @@ export function RoundCard({ round, busy, onAdvance }: Props) {
       </div>
       <div className="kds-card__sub">
         Comanda {round.number} · {STATUS_LABEL[round.status] ?? round.status}
+        {round.is_paid ? ' · ✓ Cobrada' : ''}
       </div>
 
       <ul className="kds-items">

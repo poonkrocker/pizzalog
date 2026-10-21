@@ -1,4 +1,4 @@
-import type { Role } from '@pizzalog/shared';
+import type { Role, User } from '@pizzalog/shared';
 import type { ModuleDef } from './types';
 import { DashboardPage } from './dashboard/DashboardPage';
 import { OrdersPage } from './orders/OrdersPage';
@@ -16,8 +16,6 @@ import { ProductionPage } from './production/ProductionPage';
 import { StaffPage } from './staff/StaffPage';
 
 // Registro central de módulos del panel.
-// Para sumar uno: crear su carpeta en modules/, importar su página y agregar
-// una entrada acá. Aparece solo en el menú y el router, para los roles dados.
 export const modules: ModuleDef[] = [
   {
     id: 'dashboard',
@@ -135,4 +133,14 @@ export const modules: ModuleDef[] = [
 
 export function modulesForRole(role: Role): ModuleDef[] {
   return modules.filter((m) => m.roles.includes(role));
+}
+
+export function modulesForUser(user: User): ModuleDef[] {
+  if (user.role === 'admin') {
+    return modules;
+  }
+  if (Array.isArray(user.allowed_modules)) {
+    return modules.filter((m) => user.allowed_modules!.includes(m.id));
+  }
+  return modules.filter((m) => m.roles.includes(user.role));
 }

@@ -49,8 +49,6 @@ export function BusinessPage() {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
-  // Los hooks del logo van ACÁ, antes de cualquier return condicional: React
-  // exige que se ejecuten siempre y en el mismo orden en cada render.
   const logoInput = useRef<HTMLInputElement>(null);
   const [logoCrop, setLogoCrop] = useState<File | null>(null);
   const [logoUploading, setLogoUploading] = useState(false);
@@ -99,6 +97,7 @@ export function BusinessPage() {
         google_maps_url: form.google_maps_url || null,
         logo_url: form.logo_url || null,
         accepts_online_orders: form.accepts_online_orders,
+        use_digital_kds: form.use_digital_kds ?? 1,
         transfer_alias: form.transfer_alias || null,
         card_surcharge_pct: form.card_surcharge_pct ?? 0,
         pay_methods_pickup: form.pay_methods_pickup ?? ALL_METHODS,
@@ -226,6 +225,20 @@ export function BusinessPage() {
           Interruptor general, aparte del horario: destildalo para cerrar los pedidos por hoy sin
           tocar las franjas horarias.
         </p>
+
+        <div className="pay-block">
+          <h2 className="theme-block__title">Comandera de Cocina (TPV)</h2>
+          <Checkbox
+            label="Usar comandera digital en cocina (KDS)"
+            checked={(form.use_digital_kds ?? 1) === 1}
+            onChange={(e) =>
+              setForm((f) => (f ? { ...f, use_digital_kds: e.target.checked ? 1 : 0 } : f))
+            }
+          />
+          <p className="field__hint">
+            Destildalo si en el local utilizan sistema de comandas en papel (comandera de pedido, en preparación y pincho de entregado). También se puede activar o desactivar en cada dispositivo desde Ajustes de la app TPV.
+          </p>
+        </div>
 
         <div className="pay-block">
           <h2 className="theme-block__title">Cobros en la carta online</h2>
@@ -372,8 +385,6 @@ export function BusinessPage() {
   );
 }
 
-// Métodos de pago disponibles y sus etiquetas. Debe coincidir con el backend
-// (BusinessController::PAY_METHODS) y con la carta.
 const ALL_METHODS = ['cash', 'card', 'transfer', 'mp'];
 
 const METHOD_LABELS: Record<string, string> = {
@@ -383,11 +394,6 @@ const METHOD_LABELS: Record<string, string> = {
   mp: 'Mercado Pago',
 };
 
-/**
- * Multi-selección de formas de pago para una modalidad. Guarda el subconjunto
- * elegido; si el negocio marca todas, el backend lo interpreta como "sin
- * restricción". No deja dejar cero (al menos una tiene que quedar tildada).
- */
 function PayMethodsPicker({
   label,
   value,
@@ -399,7 +405,7 @@ function PayMethodsPicker({
 }) {
   function toggle(method: string) {
     const has = value.includes(method);
-    if (has && value.length === 1) return; // no dejar vacío
+    if (has && value.length === 1) return;
     onChange(has ? value.filter((m) => m !== method) : [...value, method]);
   }
 

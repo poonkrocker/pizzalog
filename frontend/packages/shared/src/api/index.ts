@@ -51,7 +51,7 @@ export type Api = ReturnType<typeof createApi>;
 export { ApiClient, ApiError } from './client';
 export type { ApiClientConfig } from './client';
 export type { RoundItemInput, CloseSplit } from './tables';
-export type { SalesQuery } from './sales';
+export type { SalesQuery, SalesImportInput, SalesImportResult } from './sales';
 export type { OrdersQuery } from './orders';
 export type { SettlementQuery } from './drivers';
 export type { AnalyticsQuery } from './analytics';

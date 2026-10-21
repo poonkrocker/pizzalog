@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { formatARS, type RoundItem } from '@pizzalog/shared';
+import { useCurrentCashSession } from '@/modules/cash/hooks';
 import { AddRoundSheet } from './AddRoundSheet';
 import {
   useCancelSession,
@@ -25,10 +26,13 @@ export function SessionPage() {
   const closeSession = useCloseSession();
   const cancelSession = useCancelSession();
   const discountItemMut = useDiscountSessionItem();
+  const cashQuery = useCurrentCashSession();
+  const isCashOpen = cashQuery.isLoading ? true : cashQuery.data !== null && cashQuery.data !== undefined;
   const navigate = useNavigate();
 
   const [addOpen, setAddOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
+  const [showGlobalDiscount, setShowGlobalDiscount] = useState(false);
   const [discountPct, setDiscountPct] = useState<number>(0);
   const [customDiscount, setCustomDiscount] = useState<string>('');
   const [itemForDiscount, setItemForDiscount] = useState<RoundItem | null>(null);
@@ -41,7 +45,11 @@ export function SessionPage() {
 
   const s = session.data;
   const tablesLabel = s.tables?.map((t) => t.label).join(' + ') ?? '';
-  const accountTitle = s.label ? `${tablesLabel} · ${s.label}` : `Mesa ${tablesLabel}`;
+  const accountTitle = tablesLabel
+    ? s.label
+      ? `${tablesLabel} · ${s.label}`
+      : `Mesa ${tablesLabel}`
+    : s.label || `Cuenta #${s.id}`;
   const total = s.totals?.subtotal ?? 0;
   const rounds = s.rounds ?? [];
   const sid = sessionId;
@@ -102,7 +110,7 @@ export function SessionPage() {
   }
 
   async function doCancel() {
-    if (!confirm('¿Cancelar la mesa? Se descarta la cuenta sin cobrar.')) return;
+    if (!confirm('¿Cancelar la cuenta? Se descarta sin cobrar.')) return;
     await cancelSession.mutateAsync(sid);
     navigate('/salon');
   }
@@ -151,27 +159,28 @@ export function SessionPage() {
                     <span style={{ flex: 1 }}>
                       {it.qty}× {it.name}
                     </span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                       {it.status === 'ordered' && (
                         <button
                           type="button"
                           style={{
-                            background: hasDisc ? 'rgba(253, 183, 64, 0.2)' : 'var(--surface-2)',
-                            border: hasDisc ? '1px solid var(--ocre)' : '1px solid var(--line)',
-                            borderRadius: '5px',
-                            color: 'var(--ocre)',
-                            fontSize: '12px',
-                            fontWeight: 700,
-                            padding: '3px 8px',
+                            background: hasDisc ? 'rgba(253, 183, 64, 0.14)' : 'transparent',
+                            border: hasDisc ? '1px solid rgba(253, 183, 64, 0.45)' : '1px solid transparent',
+                            borderRadius: '4px',
+                            color: hasDisc ? 'var(--ocre)' : 'var(--muted)',
+                            fontSize: '11px',
+                            fontWeight: hasDisc ? 700 : 500,
+                            padding: '1px 5px',
                             cursor: 'pointer',
+                            opacity: hasDisc ? 1 : 0.65,
                           }}
                           onClick={() => {
                             setCustomItemDiscount('');
                             setItemForDiscount(it);
                           }}
-                          title="Aplicar descuento a este producto"
+                          title="Descuento en este producto"
                         >
-                          {hasDisc ? `-${it.discount_pct}%` : '% Desc.'}
+                          {hasDisc ? `-${it.discount_pct}%` : '%'}
                         </button>
                       )}
                       <span style={{ whiteSpace: 'nowrap' }}>
@@ -219,7 +228,7 @@ export function SessionPage() {
             </button>
           )}
           <button className="t-btn method-btn method-btn--danger" onClick={() => void doCancel()}>
-            Cancelar mesa
+            Cancelar cuenta
           </button>
           <button
             className="t-btn t-btn--primary"
@@ -332,71 +341,26 @@ export function SessionPage() {
           <div className="sheet sheet--tall" onClick={(e) => e.stopPropagation()}>
             <h2 className="sheet__title">Cobrar {accountTitle}</h2>
 
-            {/* Ítems de la cuenta con opción de descuento individual */}
-            {allActiveItems.length > 0 && (
+            {!isCashOpen && (
               <div
                 style={{
-                  marginBottom: '12px',
-                  maxHeight: '24vh',
-                  overflowY: 'auto',
-                  background: 'var(--bg)',
-                  border: '1px solid var(--line)',
-                  borderRadius: '10px',
-                  padding: '8px 12px',
+                  background: 'rgba(253, 183, 64, 0.14)',
+                  border: '1px solid var(--ocre)',
+                  color: 'var(--ocre)',
+                  padding: '8px 10px',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  marginBottom: '10px',
                 }}
               >
-                <div style={{ fontSize: '12px', color: 'var(--muted)', marginBottom: '6px', fontWeight: 600 }}>
-                  Productos en la cuenta (tocá % Desc. para descontar uno en particular):
-                </div>
-                {allActiveItems.map((it) => {
-                  const hasDisc = Boolean(it.discount_pct && it.discount_pct > 0);
-                  return (
-                    <div
-                      key={it.id}
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        padding: '5px 0',
-                        borderBottom: '1px solid var(--line)',
-                        gap: '8px',
-                        fontSize: '14px',
-                      }}
-                    >
-                      <span style={{ flex: 1 }}>
-                        {it.qty}× {it.name}
-                      </span>
-                      <button
-                        type="button"
-                        style={{
-                          background: hasDisc ? 'rgba(253, 183, 64, 0.2)' : 'var(--surface-2)',
-                          border: hasDisc ? '1px solid var(--ocre)' : '1px solid var(--line)',
-                          borderRadius: '5px',
-                          color: 'var(--ocre)',
-                          fontSize: '11px',
-                          fontWeight: 700,
-                          padding: '2px 7px',
-                          cursor: 'pointer',
-                        }}
-                        onClick={() => {
-                          setCustomItemDiscount('');
-                          setItemForDiscount(it);
-                        }}
-                      >
-                        {hasDisc ? `-${it.discount_pct}%` : '% Desc.'}
-                      </button>
-                      <b style={{ color: 'var(--ocre)' }}>
-                        {formatARS(it.line_total ?? it.unit_price * it.qty)}
-                      </b>
-                    </div>
-                  );
-                })}
+                ⚠️ Atención: La caja está cerrada. Este cobro se registrará igualmente bajo «Ventas sin caja abierta».
               </div>
             )}
 
             <div
               style={{
-                marginBottom: '14px',
+                marginBottom: '12px',
                 background: 'var(--surface-2)',
                 border: '1px solid var(--line)',
                 padding: '12px',
@@ -425,82 +389,145 @@ export function SessionPage() {
                 style={{
                   display: 'flex',
                   justifyContent: 'space-between',
+                  alignItems: 'center',
                   fontSize: '18px',
                   fontWeight: 700,
                   borderTop: '1px solid var(--line)',
                   paddingTop: '6px',
                 }}
               >
-                <span>Total a cobrar:</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>Total a cobrar:</span>
+                  <button
+                    type="button"
+                    style={{
+                      background: 'transparent',
+                      border: '1px solid var(--line)',
+                      borderRadius: '4px',
+                      color: discountAmount > 0 ? 'var(--ocre)' : 'var(--muted)',
+                      fontSize: '11px',
+                      padding: '2px 6px',
+                      cursor: 'pointer',
+                    }}
+                    onClick={() => setShowGlobalDiscount((v) => !v)}
+                  >
+                    {discountAmount > 0 ? 'Editar desc.' : '+ desc.'}
+                  </button>
+                </div>
                 <strong style={{ color: 'var(--ocre)' }}>{formatARS(finalTotal)}</strong>
               </div>
             </div>
 
-            <div style={{ marginBottom: '14px' }}>
-              <span
-                style={{
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  display: 'block',
-                  marginBottom: '8px',
-                  color: 'var(--muted)',
-                }}
-              >
-                Descuento sobre toda la cuenta:
-              </span>
+            {(showGlobalDiscount || discountAmount > 0) && (
               <div
                 style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(3, 1fr)',
-                  gap: '8px',
-                  marginBottom: '10px',
+                  marginBottom: '12px',
+                  padding: '10px',
+                  background: 'var(--bg)',
+                  border: '1px solid var(--line)',
+                  borderRadius: '8px',
                 }}
               >
-                {[0, 10, 15, 20, 30, 50].map((pct) => {
-                  const active = discountPct === pct && customDiscount === '';
-                  return (
-                    <button
-                      key={pct}
-                      type="button"
-                      className="t-btn"
-                      style={{
-                        minHeight: '42px',
-                        padding: '6px 10px',
-                        fontSize: '14px',
-                        fontWeight: 700,
-                        background: active ? 'rgba(253, 183, 64, 0.22)' : 'var(--surface-2)',
-                        border: active ? '2px solid var(--ocre)' : '1px solid var(--line)',
-                        color: 'var(--ocre)',
-                      }}
-                      onClick={() => {
-                        setDiscountPct(pct);
-                        setCustomDiscount('');
-                      }}
-                    >
-                      {pct === 0 ? 'Sin desc.' : `${pct}%`}
-                    </button>
-                  );
-                })}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '13px', color: 'var(--muted)', whiteSpace: 'nowrap' }}>
-                  O monto $:
-                </span>
-                <input
-                  type="number"
-                  min="0"
-                  max={total}
-                  placeholder="$ Monto a descontar"
-                  className="t-input"
-                  style={{ minHeight: '42px', fontSize: '15px' }}
-                  value={customDiscount}
-                  onChange={(e) => {
-                    setCustomDiscount(e.target.value);
-                    setDiscountPct(0);
+                {allActiveItems.length > 0 && (
+                  <div style={{ marginBottom: '10px', maxHeight: '18vh', overflowY: 'auto' }}>
+                    <div style={{ fontSize: '11px', color: 'var(--muted)', marginBottom: '4px' }}>
+                      Descuento por ítem:
+                    </div>
+                    {allActiveItems.map((it) => {
+                      const hasDisc = Boolean(it.discount_pct && it.discount_pct > 0);
+                      return (
+                        <div
+                          key={it.id}
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            padding: '3px 0',
+                            fontSize: '13px',
+                            gap: '6px',
+                          }}
+                        >
+                          <span style={{ flex: 1 }}>
+                            {it.qty}× {it.name}
+                          </span>
+                          <button
+                            type="button"
+                            style={{
+                              background: hasDisc ? 'rgba(253, 183, 64, 0.16)' : 'var(--surface-2)',
+                              border: '1px solid var(--line)',
+                              borderRadius: '4px',
+                              color: hasDisc ? 'var(--ocre)' : 'var(--muted)',
+                              fontSize: '11px',
+                              padding: '1px 6px',
+                              cursor: 'pointer',
+                            }}
+                            onClick={() => {
+                              setCustomItemDiscount('');
+                              setItemForDiscount(it);
+                            }}
+                          >
+                            {hasDisc ? `-${it.discount_pct}%` : '%'}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(6, 1fr)',
+                    gap: '6px',
+                    marginBottom: '8px',
                   }}
-                />
+                >
+                  {[0, 10, 15, 20, 30, 50].map((pct) => {
+                    const active = discountPct === pct && customDiscount === '';
+                    return (
+                      <button
+                        key={pct}
+                        type="button"
+                        className="t-btn"
+                        style={{
+                          minHeight: '34px',
+                          padding: '4px 6px',
+                          fontSize: '12px',
+                          fontWeight: 600,
+                          background: active ? 'rgba(253, 183, 64, 0.22)' : 'var(--surface-2)',
+                          border: active ? '1px solid var(--ocre)' : '1px solid var(--line)',
+                          color: 'var(--ocre)',
+                        }}
+                        onClick={() => {
+                          setDiscountPct(pct);
+                          setCustomDiscount('');
+                        }}
+                      >
+                        {pct === 0 ? '0%' : `${pct}%`}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ fontSize: '12px', color: 'var(--muted)', whiteSpace: 'nowrap' }}>
+                    Monto $:
+                  </span>
+                  <input
+                    type="number"
+                    min="0"
+                    max={total}
+                    placeholder="$ Monto a descontar"
+                    className="t-input"
+                    style={{ minHeight: '34px', fontSize: '13px' }}
+                    value={customDiscount}
+                    onChange={(e) => {
+                      setCustomDiscount(e.target.value);
+                      setDiscountPct(0);
+                    }}
+                  />
+                </div>
               </div>
-            </div>
+            )}
 
             {error && <p className="t-error">{error}</p>}
             <div className="method-grid">

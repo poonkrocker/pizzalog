@@ -26,10 +26,11 @@ export function useOpenSession() {
   const api = useApi();
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: { tableIds: number[]; label?: string; partySize?: number }) =>
+    mutationFn: (input: { tableIds: number[]; label?: string; partySize?: number; note?: string }) =>
       api.tables.openSession(input.tableIds, {
         label: input.label,
         party_size: input.partySize,
+        note: input.note,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['floor'] });

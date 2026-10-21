@@ -487,6 +487,7 @@ class StaffController
     {
         $bid = (int) $req->auth['business_id'];
         $this->ensureSeeded($bid);
+        UserController::ensureSchema();
         $pdo = Database::pdo();
 
         [$weekStart, $weekEnd] = $this->currentWeekRange();
@@ -662,6 +663,18 @@ class StaffController
             )->execute([$bid, $personId, $rate, date('Y-m-d'), 'Tarifa inicial']);
         }
 
+        // Crear usuario vinculado automáticamente con username = $code
+        try {
+            UserController::ensureSchema();
+            $initialPwd = trim((string) $req->input('password', '')) ?: ($code . '123');
+            $pwdHash    = password_hash($initialPwd, PASSWORD_DEFAULT);
+            $pdo->prepare(
+                "INSERT INTO users (business_id, name, username, email, password_hash, role, allowed_modules, can_use_pos, staff_person_id, is_active)
+                 VALUES (?, ?, ?, NULL, ?, 'cashier', '[]', 1, ?, 1)"
+            )->execute([$bid, $name, $code, $pwdHash, $personId]);
+        } catch (\Throwable) {
+        }
+
         Response::ok(['id' => $personId, 'code' => $code], 201);
     }
 
@@ -717,6 +730,7 @@ class StaffController
     {
         $bid = (int) $req->auth['business_id'];
         $this->ensureSeeded($bid);
+        UserController::ensureSchema();
         $pdo = Database::pdo();
 
         $personId = isset($req->query['person_id']) && $req->query['person_id'] !== '' ? (int) $req->query['person_id'] : null;
@@ -854,6 +868,7 @@ class StaffController
     {
         $bid = (int) $req->auth['business_id'];
         $this->ensureSeeded($bid);
+        UserController::ensureSchema();
         $pdo = Database::pdo();
 
         $personId = isset($req->query['person_id']) && $req->query['person_id'] !== '' ? (int) $req->query['person_id'] : null;
@@ -962,6 +977,7 @@ class StaffController
     {
         $bid = (int) $req->auth['business_id'];
         $this->ensureSeeded($bid);
+        UserController::ensureSchema();
         $pdo = Database::pdo();
 
         $personId = isset($req->query['person_id']) && $req->query['person_id'] !== '' ? (int) $req->query['person_id'] : null;
@@ -1290,12 +1306,62 @@ class StaffController
     }
 
     /**
+     * Verifica que quien consulta el Perfil Online sea el administrador/encargado del local
+     * o el propio empleado autenticado con su usuario y contraseña.
+     */
+    private function authorizePortalAccess(Request $req, array $person): void
+    {
+        UserController::ensureSchema();
+        $token = $req->bearerToken();
+        if ($token === null) {
+            Response::error('Iniciá sesión con tu usuario y contraseña para ver tu perfil', 401);
+        }
+
+        $secret  = \Pizzalog\Core\Config::get('jwt')['secret'] ?? '';
+        $payload = \Pizzalog\Core\Jwt::decode($token, $secret);
+        if ($payload === null || empty($payload['sub'])) {
+            Response::error('Tu sesión expiró. Iniciá sesión nuevamente.', 401);
+        }
+
+        $stmt = Database::pdo()->prepare(
+            'SELECT id, business_id, name, username, role, staff_person_id, is_active
+               FROM users WHERE id = ? LIMIT 1'
+        );
+        $stmt->execute([(int) $payload['sub']]);
+        $user = $stmt->fetch();
+
+        if (!$user || (int) $user['is_active'] !== 1) {
+            Response::error('Usuario no autorizado', 401);
+        }
+
+        $personBid = (int) $person['business_id'];
+        if ((int) $user['business_id'] !== $personBid) {
+            Response::error('No pertenecés a este local', 403);
+        }
+
+        // El administrador o manager del local puede ver todos los perfiles de empleados
+        if (in_array($user['role'], ['admin', 'manager'], true)) {
+            return;
+        }
+
+        // El empleado solo puede ver su propio perfil
+        $matchesId   = isset($user['staff_person_id']) && (int) $user['staff_person_id'] === (int) $person['id'];
+        $matchesCode = !empty($user['username']) && strtolower((string) $user['username']) === strtolower((string) $person['code']);
+        $matchesName = strtolower(trim((string) $user['name'])) === strtolower(trim((string) $person['name']));
+
+        if (!$matchesId && !$matchesCode && !$matchesName) {
+            Response::error('Solo podés acceder a tu propio perfil de empleado', 403);
+        }
+    }
+
+    /**
      * GET /public/staff-portal/{code}
      * Devuelve todos los datos del Perfil Personal del empleado (idéntico a su Excel personal).
      */
     public function portalShow(Request $req): void
     {
         $person = $this->findPersonByCode((string) $req->param('code'));
+        $this->authorizePortalAccess($req, $person);
         $bid    = (int) $person['business_id'];
         $pid    = (int) $person['id'];
         $pdo    = Database::pdo();
@@ -1439,6 +1505,7 @@ class StaffController
     public function portalStoreWithdrawal(Request $req): void
     {
         $person   = $this->findPersonByCode((string) $req->param('code'));
+        $this->authorizePortalAccess($req, $person);
         $bid      = (int) $person['business_id'];
         $personId = (int) $person['id'];
 
@@ -1475,6 +1542,7 @@ class StaffController
     public function portalStoreHour(Request $req): void
     {
         $person   = $this->findPersonByCode((string) $req->param('code'));
+        $this->authorizePortalAccess($req, $person);
         $bid      = (int) $person['business_id'];
         $personId = (int) $person['id'];
 

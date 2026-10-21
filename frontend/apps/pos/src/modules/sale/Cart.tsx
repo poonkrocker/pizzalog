@@ -14,6 +14,9 @@ interface Props {
   onClear: () => void;
   checkoutLabel?: string;
   onCheckout: () => void;
+  deferLabel?: string;
+  onDefer?: () => void;
+  primaryAction?: 'checkout' | 'defer';
 }
 
 export function Cart({
@@ -28,6 +31,9 @@ export function Cart({
   onClear,
   checkoutLabel = 'Cobrar',
   onCheckout,
+  deferLabel = 'A la cuenta',
+  onDefer,
+  primaryAction = 'checkout',
 }: Props) {
   const [discountLine, setDiscountLine] = useState<CartLine | null>(null);
   const [customLineAmount, setCustomLineAmount] = useState('');
@@ -96,13 +102,14 @@ export function Cart({
                   <button
                     type="button"
                     style={{
-                      background: l.discountPct ? 'rgba(253, 183, 64, 0.2)' : 'var(--surface-2)',
-                      border: l.discountPct ? '1px solid var(--ocre)' : '1px solid var(--line)',
+                      background: l.discountPct ? 'rgba(253, 183, 64, 0.16)' : 'transparent',
+                      border: l.discountPct ? '1px solid rgba(253, 183, 64, 0.5)' : 'none',
                       borderRadius: '4px',
-                      color: 'var(--ocre)',
-                      fontSize: '12px',
-                      fontWeight: 700,
-                      padding: '2px 7px',
+                      color: l.discountPct ? 'var(--ocre)' : 'var(--muted)',
+                      fontSize: '11px',
+                      fontWeight: l.discountPct ? 700 : 500,
+                      padding: l.discountPct ? '1px 5px' : '1px 4px',
+                      opacity: l.discountPct ? 1 : 0.65,
                       cursor: 'pointer',
                     }}
                     onClick={() => {
@@ -111,7 +118,7 @@ export function Cart({
                     }}
                     title="Descuento en este producto"
                   >
-                    {l.discountPct ? `-${l.discountPct}%` : '% Desc.'}
+                    {l.discountPct ? `-${l.discountPct}%` : '%'}
                   </button>
                 </div>
               </div>
@@ -160,31 +167,52 @@ export function Cart({
               <button
                 type="button"
                 style={{
-                  background: discount > 0 ? 'rgba(253, 183, 64, 0.2)' : 'var(--surface-2)',
-                  color: 'var(--ocre)',
-                  border: discount > 0 ? '1px solid var(--ocre)' : '1px solid var(--line)',
-                  borderRadius: '6px',
+                  background: 'none',
+                  color: discount > 0 ? 'var(--ocre)' : 'var(--muted)',
+                  border: 'none',
                   fontSize: '12px',
-                  fontWeight: 700,
-                  padding: '4px 10px',
+                  fontWeight: 500,
+                  padding: '2px 4px',
+                  opacity: discount > 0 ? 1 : 0.7,
                   cursor: 'pointer',
+                  textDecoration: 'underline',
+                  textUnderlineOffset: '2px',
                 }}
                 onClick={() => setGlobalModalOpen(true)}
               >
-                🏷️ Desc. general
+                {discount > 0 ? 'editar desc.' : '+ desc.'}
               </button>
             )}
           </div>
           <strong>{formatARS(total)}</strong>
         </div>
 
-        <button
-          className="t-btn t-btn--primary t-btn--block cart__pay"
-          disabled={lines.length === 0}
-          onClick={onCheckout}
-        >
-          {checkoutLabel}
-        </button>
+        {onDefer ? (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            <button
+              className={`t-btn ${primaryAction === 'defer' ? 't-btn--primary' : 'method-btn'} cart__pay`}
+              disabled={lines.length === 0}
+              onClick={onDefer}
+            >
+              {deferLabel}
+            </button>
+            <button
+              className={`t-btn ${primaryAction === 'checkout' ? 't-btn--primary' : 'method-btn'} cart__pay`}
+              disabled={lines.length === 0}
+              onClick={onCheckout}
+            >
+              {checkoutLabel}
+            </button>
+          </div>
+        ) : (
+          <button
+            className="t-btn t-btn--primary t-btn--block cart__pay"
+            disabled={lines.length === 0}
+            onClick={onCheckout}
+          >
+            {checkoutLabel}
+          </button>
+        )}
       </div>
 
       {/* Modal Descuento por Ítem */}

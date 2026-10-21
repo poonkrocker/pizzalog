@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { FloorTable } from '@pizzalog/shared';
+import { formatARS, type FloorTable } from '@pizzalog/shared';
 import { useOnline } from '@/lib/network';
 import { BarSheet } from './BarSheet';
-import { useFloor, useOpenSession } from './hooks';
+import { useFloor, useOpenSession, useOpenSessions } from './hooks';
 
 // Base del croquis (igual que el editor del panel). Las mesas se posicionan en
 // porcentajes sobre esta base, así el plano escala fluido con el ancho.
@@ -13,12 +13,16 @@ const BASE_H = 600;
 export function SalonPage() {
   const floor = useFloor();
   const open = useOpenSession();
+  const openSessions = useOpenSessions();
   const online = useOnline();
   const navigate = useNavigate();
   const [activeArea, setActiveArea] = useState<number | null>(null);
   const [barFor, setBarFor] = useState<FloorTable | null>(null);
 
   const areas = floor.data ?? [];
+  const deferredAccounts = (openSessions.data ?? []).filter(
+    (s) => !s.table_ids || s.table_ids.length === 0,
+  );
 
   useEffect(() => {
     if (activeArea === null && areas.length > 0) {
@@ -49,6 +53,55 @@ export function SalonPage() {
 
   return (
     <div className="salon">
+      {deferredAccounts.length > 0 && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            overflowX: 'auto',
+            padding: '8px 12px',
+            background: 'var(--surface-2)',
+            borderBottom: '1px solid var(--line)',
+            flexShrink: 0,
+          }}
+        >
+          <span
+            style={{
+              fontSize: '12px',
+              fontWeight: 700,
+              color: 'var(--muted)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Pendientes (Llevar / Delivery):
+          </span>
+          {deferredAccounts.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              className="t-btn"
+              style={{
+                minHeight: '36px',
+                padding: '4px 12px',
+                fontSize: '13px',
+                background: 'rgba(253, 183, 64, 0.14)',
+                border: '1px solid var(--ocre)',
+                color: 'var(--cream)',
+                whiteSpace: 'nowrap',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+              onClick={() => navigate(`/salon/${s.id}`)}
+            >
+              <span>{s.label || `Cuenta #${s.id}`}</span>
+              <strong style={{ color: 'var(--ocre)' }}>{formatARS(s.subtotal ?? 0)}</strong>
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="cat-tabs">
         {areas.map((a) => (
           <button

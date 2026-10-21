@@ -39,8 +39,8 @@ require dirname(__DIR__) . '/bootstrap.php';
 
 $router = new Router();
 $auth   = Auth::authenticate();
-$manage = Auth::requireRole(['admin', 'manager']);  // crear/editar/borrar catálogo
-$admin  = Auth::requireRole(['admin']);             // gestión de empleados
+$manage = Auth::requireRole(['admin', 'manager']);  // crear/editar/borrar catálogo o empleado con permisos
+$admin  = Auth::requireRole(['admin']);             // gestión de usuarios
 
 // --- Salud ------------------------------------------------------------
 $router->get('/', fn() => \Pizzalog\Core\Response::ok(['service' => 'pizzalog-api', 'status' => 'up']));
@@ -48,6 +48,7 @@ $router->get('/', fn() => \Pizzalog\Core\Response::ok(['service' => 'pizzalog-ap
 // --- Autenticación ----------------------------------------------------
 $router->post('/auth/login', [AuthController::class, 'login']);
 $router->get('/auth/me', [AuthController::class, 'me'], [$auth]);
+$router->post('/auth/change-password', [AuthController::class, 'changePassword'], [$auth]);
 
 // --- Categorías -------------------------------------------------------
 $router->get('/categories', [CategoryController::class, 'index'], [$auth]);
@@ -58,20 +59,17 @@ $router->put('/categories/{id}', [CategoryController::class, 'update'], [$auth, 
 $router->delete('/categories/{id}', [CategoryController::class, 'destroy'], [$auth, $manage]);
 
 // --- Productos --------------------------------------------------------
-// Lectura: cualquier usuario autenticado. Escritura: admin o manager.
 $router->post('/products/preview-ingredients', [ProductController::class, 'previewIngredients'], [$auth]);
 $router->post('/uploads/image', [UploadController::class, 'image'], [$auth, $manage]);
 
 $router->get('/business', [BusinessController::class, 'show'], [$auth]);
 $router->put('/business', [BusinessController::class, 'update'], [$auth, $admin]);
-// Horarios de atención y redes: reemplazo total en cada PUT.
 $router->get('/business/hours', [BusinessController::class, 'hours'], [$auth]);
 $router->put('/business/hours', [BusinessController::class, 'updateHours'], [$auth, $manage]);
 $router->get('/business/social-links', [BusinessController::class, 'socialLinks'], [$auth]);
 $router->put('/business/social-links', [BusinessController::class, 'updateSocialLinks'], [$auth, $manage]);
 
 $router->get('/products', [ProductController::class, 'index'], [$auth]);
-// 'reorder' y 'bulk-price' van antes de '{id}' para que no los capture como id.
 $router->put('/products/reorder', [ProductController::class, 'reorder'], [$auth, $manage]);
 $router->post('/products/bulk-price', [ProductController::class, 'bulkPriceUpdate'], [$auth, $manage]);
 $router->get('/products/{id}', [ProductController::class, 'show'], [$auth]);
@@ -87,13 +85,13 @@ $router->get('/products/{id}/combo', [ComboController::class, 'show'], [$auth]);
 $router->put('/products/{id}/combo', [ComboController::class, 'update'], [$auth, $manage]);
 
 // --- Ventas -----------------------------------------------------------
-// Registrar/listar/ver: cualquier usuario (el cajero vende). Anular: manager.
 $router->get('/sales', [SaleController::class, 'index'], [$auth]);
+$router->post('/sales/import', [SaleController::class, 'import'], [$auth, $manage]);
 $router->get('/sales/{id}', [SaleController::class, 'show'], [$auth]);
 $router->post('/sales', [SaleController::class, 'store'], [$auth]);
 $router->post('/sales/{id}/cancel', [SaleController::class, 'cancel'], [$auth, $manage]);
 
-// --- Analytics (solo admin/manager) -----------------------------------
+// --- Analytics (admin/manager o empleado con permiso) -----------------
 $router->get('/analytics/summary', [AnalyticsController::class, 'summary'], [$auth, $manage]);
 $router->get('/analytics/top-products', [AnalyticsController::class, 'topProducts'], [$auth, $manage]);
 $router->get('/analytics/product-margins', [AnalyticsController::class, 'productMargins'], [$auth, $manage]);
@@ -111,17 +109,15 @@ $router->get('/production/cost-margins', [ProductionController::class, 'costMarg
 $router->post('/production/recipes', [ProductionController::class, 'saveRecipe'], [$auth, $manage]);
 $router->post('/production/simulate', [ProductionController::class, 'simulate'], [$auth, $manage]);
 
-// --- Empleados (solo admin) -------------------------------------------
-$router->get('/users', [UserController::class, 'index'], [$auth, $admin]);
-$router->get('/users/{id}', [UserController::class, 'show'], [$auth, $admin]);
+// --- Empleados / Usuarios ---------------------------------------------
+$router->get('/users', [UserController::class, 'index'], [$auth, $manage]);
+$router->get('/users/{id}', [UserController::class, 'show'], [$auth, $manage]);
 $router->post('/users', [UserController::class, 'store'], [$auth, $admin]);
 $router->put('/users/{id}', [UserController::class, 'update'], [$auth, $admin]);
 $router->delete('/users/{id}', [UserController::class, 'destroy'], [$auth, $admin]);
 
 // --- Asistencia -------------------------------------------------------
-// Fichaje: cualquier sesión (el dispositivo del local); identifica por PIN.
 $router->post('/attendance/punch', [AttendanceController::class, 'punch'], [$auth]);
-// Reportes y correcciones: admin/manager.
 $router->get('/attendance', [AttendanceController::class, 'index'], [$auth, $manage]);
 $router->get('/attendance/open', [AttendanceController::class, 'open'], [$auth, $manage]);
 $router->get('/attendance/summary', [AttendanceController::class, 'summary'], [$auth, $manage]);
@@ -147,18 +143,16 @@ $router->post('/staff/settlements', [StaffController::class, 'storeSettlement'],
 $router->put('/staff/settlements/{id}/status', [StaffController::class, 'updateSettlementStatus'], [$auth, $manage]);
 $router->delete('/staff/settlements/{id}', [StaffController::class, 'destroySettlement'], [$auth, $manage]);
 
-// --- Portal Online Individual de Empleado (público por código) --------
+// --- Portal Online Individual de Empleado (protegido por token de empleado o admin)
 $router->get('/public/staff-portal/{code}', [StaffController::class, 'portalShow']);
 $router->post('/public/staff-portal/{code}/withdrawals', [StaffController::class, 'portalStoreWithdrawal']);
 $router->post('/public/staff-portal/{code}/hours', [StaffController::class, 'portalStoreHour']);
 
 // --- Caja / arqueo ----------------------------------------------------
-// Operación (abrir, mover, cerrar, ver la propia): cualquier sesión.
 $router->post('/cash/open', [CashController::class, 'open'], [$auth]);
 $router->get('/cash/current', [CashController::class, 'current'], [$auth]);
 $router->post('/cash/movement', [CashController::class, 'movement'], [$auth]);
 $router->post('/cash/close', [CashController::class, 'close'], [$auth]);
-// Historial: admin/manager.
 $router->get('/cash', [CashController::class, 'index'], [$auth, $manage]);
 $router->get('/cash/{id}', [CashController::class, 'show'], [$auth, $manage]);
 
@@ -188,16 +182,14 @@ $router->put('/drivers/{id}', [DeliveryDriverController::class, 'update'], [$aut
 $router->delete('/drivers/{id}', [DeliveryDriverController::class, 'destroy'], [$auth, $manage]);
 
 // --- Menú público / checkout (SIN autenticación) ----------------------
-// El negocio se identifica por su slug. Precios siempre del servidor.
-// 'menu/secreta' va antes de 'menu' por claridad; son rutas distintas.
 $router->get('/public/{slug}/menu/secreta', [PublicController::class, 'secretMenu']);
 $router->get('/public/{slug}/menu', [PublicController::class, 'menu']);
 $router->post('/public/{slug}/orders', [PublicController::class, 'createOrder']);
+$router->post('/public/{slug}/external-order', [PublicController::class, 'externalOrder']);
 $router->get('/public/{slug}/table/{id}', [PublicController::class, 'tableInfo']);
 $router->post('/public/{slug}/table-order', [PublicController::class, 'createTableOrder']);
 
 // --- Facturación ------------------------------------------------------
-// Emisores (cuentas): solo admin. Comprobantes y resumen: admin/manager.
 $router->get('/fiscal/issuers', [FiscalController::class, 'issuersIndex'], [$auth, $admin]);
 $router->post('/fiscal/issuers', [FiscalController::class, 'issuerStore'], [$auth, $admin]);
 $router->get('/fiscal/issuers/{id}', [FiscalController::class, 'issuerShow'], [$auth, $admin]);
@@ -210,7 +202,6 @@ $router->get('/fiscal/invoices/{id}', [FiscalController::class, 'invoiceShow'], 
 $router->post('/fiscal/invoices/{id}/retry', [FiscalController::class, 'invoiceRetry'], [$auth, $manage]);
 
 // --- Salón: áreas y mesas ---------------------------------------------
-// Lectura: cualquier usuario autenticado. Escritura: admin/manager.
 $router->get('/table-areas', [TableAreaController::class, 'index'], [$auth]);
 $router->post('/table-areas', [TableAreaController::class, 'store'], [$auth, $manage]);
 $router->put('/table-areas/{id}', [TableAreaController::class, 'update'], [$auth, $manage]);
@@ -218,7 +209,6 @@ $router->delete('/table-areas/{id}', [TableAreaController::class, 'destroy'], [$
 
 $router->get('/floor', [TableController::class, 'floor'], [$auth]);
 $router->get('/tables', [TableController::class, 'index'], [$auth]);
-// 'layout' va antes de '{id}' para que no lo capture como id.
 $router->put('/tables/layout', [TableController::class, 'layout'], [$auth, $manage]);
 $router->get('/tables/{id}', [TableController::class, 'show'], [$auth]);
 $router->post('/tables', [TableController::class, 'store'], [$auth, $manage]);

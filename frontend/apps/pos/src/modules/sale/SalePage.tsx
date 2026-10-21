@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ApiError, formatARS, uuid, type Product, type ProductVariant, type SaleInput } from '@pizzalog/shared';
 import { useOnline } from '@/lib/network';
+import { useCurrentCashSession } from '@/modules/cash/hooks';
 import { Cart } from './Cart';
 import { ProductGrid } from './ProductGrid';
 import { VariantPicker } from './VariantPicker';
@@ -35,6 +36,8 @@ export function SalePage() {
   const catalog = useCatalog();
   const checkout = useCheckout();
   const online = useOnline();
+  const cashQuery = useCurrentCashSession();
+  const isCashOpen = cashQuery.isLoading ? true : cashQuery.data !== null && cashQuery.data !== undefined;
 
   const allProducts = catalog.data?.products ?? [];
   const allCategories = catalog.data?.categories ?? [];
@@ -75,7 +78,7 @@ export function SalePage() {
   const [globalDiscount, setGlobalDiscount] = useState<number>(0);
   const [paying, setPaying] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [result, setResult] = useState<{ kind: 'online' | 'queued' | 'round'; detail?: string } | null>(null);
+  const [result, setResult] = useState<{ kind: 'online' | 'queued' | 'round'; detail?: string; withoutCash?: boolean } | null>(null);
   const [lastPrint, setLastPrint] = useState<string | null>(null);
   const [printMsg, setPrintMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -156,7 +159,6 @@ export function SalePage() {
     });
   }
 
-  // Al tocar un producto: ramas según variantes / precio abierto / normal.
   function add(product: Product) {
     if (product.has_variants === 1) {
       setVariantFor(product);
@@ -249,7 +251,7 @@ export function SalePage() {
       })),
       payment_method: method,
       discount: globalDiscount > 0 ? globalDiscount : undefined,
-      channel: channel === 'delivery' ? 'delivery' : 'takeaway',
+      channel: channel === 'delivery' ? 'delivery' : channel === 'here' ? 'salon' : 'takeaway',
     };
     try {
       const outcome = await checkout(input);
@@ -268,7 +270,7 @@ export function SalePage() {
       if (settings.autoTicket && isNative()) {
         void tryPrint(payload).then((err) => setPrintMsg(err));
       }
-      setResult({ kind: outcome });
+      setResult({ kind: outcome, withoutCash: !isCashOpen });
       clearCart();
       setPaying(false);
     } catch (err) {
@@ -362,8 +364,11 @@ export function SalePage() {
         onSetLineDiscount={setLineDiscount}
         onSetGlobalDiscount={setGlobalDiscount}
         onClear={clearCart}
-        checkoutLabel={channel === 'here' ? 'A la cuenta' : 'Cobrar'}
-        onCheckout={() => (channel === 'here' ? setToAccount(true) : setPaying(true))}
+        checkoutLabel="Cobrar"
+        onCheckout={() => setPaying(true)}
+        deferLabel="A la cuenta"
+        onDefer={online ? () => setToAccount(true) : undefined}
+        primaryAction={channel === 'here' ? 'defer' : 'checkout'}
       />
 
       {variantFor && (
@@ -407,6 +412,8 @@ export function SalePage() {
       {toAccount && (
         <SendToAccountSheet
           lines={cart}
+          channel={channel}
+          isCashOpen={isCashOpen}
           onDone={(accountName, placeLabel) => {
             setToAccount(false);
             void getPrinterSettings().then((settings) => {
@@ -422,7 +429,7 @@ export function SalePage() {
                 void tryPrint(payload).then((err) => setPrintMsg(err));
               }
               clearCart();
-              setResult({ kind: 'round', detail: accountName });
+              setResult({ kind: 'round', detail: accountName, withoutCash: !isCashOpen });
             });
           }}
           onClose={() => setToAccount(false)}
@@ -460,6 +467,22 @@ export function SalePage() {
             <p className="sheet__total">
               Total a cobrar: <strong>{total.toLocaleString('es-AR')}</strong>
             </p>
+            {!isCashOpen && (
+              <div
+                style={{
+                  background: 'rgba(253, 183, 64, 0.14)',
+                  border: '1px solid var(--ocre)',
+                  color: 'var(--ocre)',
+                  padding: '8px 10px',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  marginBottom: '10px',
+                }}
+              >
+                ⚠️ Atención: La caja está cerrada. Esta venta se registrará igualmente bajo «Ventas sin caja abierta».
+              </div>
+            )}
             {!online && (
               <p className="sheet__offline">Sin conexión: la venta se guardará y se enviará al volver.</p>
             )}
@@ -499,6 +522,11 @@ export function SalePage() {
               {result.kind === 'queued' && 'Se enviará automáticamente cuando vuelva la conexión.'}
               {result.kind === 'round' && `Quedó en la cuenta «${result.detail}». Se cobra al cerrar la cuenta.`}
             </p>
+            {result.withoutCash && (
+              <p style={{ color: 'var(--ocre)', fontSize: '12px', fontWeight: 600, margin: '4px 0 8px' }}>
+                ⚠️ Registrada sin turno de caja abierto.
+              </p>
+            )}
             {lastPrint && isNative() && (
               <button
                 className="t-btn t-btn--block"
