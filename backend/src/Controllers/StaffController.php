@@ -165,6 +165,9 @@ class StaffController
      */
     private function ensureSeeded(int $bid): void
     {
+        if ($bid !== 1) {
+            return;
+        }
         $pdo = Database::pdo();
         $stmt = $pdo->prepare('SELECT COUNT(*) FROM staff_people WHERE business_id = ?');
         $stmt->execute([$bid]);

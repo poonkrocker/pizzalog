@@ -26,7 +26,11 @@ function firstOfMonthStr(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
 }
 
-type Preset = 'today' | '7days' | 'month' | 'custom';
+function firstOfYearStr(): string {
+  return `${new Date().getFullYear()}-01-01`;
+}
+
+type Preset = 'today' | '7days' | 'month' | 'year' | 'all' | 'custom';
 
 function ingredientCategoryLabel(cat: string): { label: string; icon: string; bg: string } {
   switch (cat) {
@@ -59,6 +63,12 @@ export function DashboardPage() {
     } else if (p === 'month') {
       setFrom(firstOfMonthStr());
       setTo(todayStr());
+    } else if (p === 'year') {
+      setFrom(firstOfYearStr());
+      setTo(todayStr());
+    } else if (p === 'all') {
+      setFrom('2022-09-15');
+      setTo(todayStr());
     }
   };
 
@@ -78,10 +88,24 @@ export function DashboardPage() {
   const productCombos = combinationsQuery.data?.product_combinations ?? [];
   const ingredientCombos = combinationsQuery.data?.ingredient_combinations ?? [];
 
-  // Calcular valor máximo para escalar el gráfico de barras diario
-  const maxRevenue = useMemo(() => {
-    return Math.max(...points.map((p) => p.revenue), 100);
+  // Agrupar serie temporal por mes si supera los 45 puntos (ej. año completo o histórico 2022–2026)
+  const chartPoints = useMemo(() => {
+    if (points.length <= 45) return points;
+    const byMonth = new Map<string, { day: string; sales_count: number; revenue: number }>();
+    for (const pt of points) {
+      const ym = pt.day.slice(0, 7);
+      const cur = byMonth.get(ym) ?? { day: ym, sales_count: 0, revenue: 0 };
+      cur.sales_count += pt.sales_count;
+      cur.revenue += pt.revenue;
+      byMonth.set(ym, cur);
+    }
+    return Array.from(byMonth.values());
   }, [points]);
+
+  // Calcular valor máximo para escalar el gráfico de barras
+  const maxRevenue = useMemo(() => {
+    return Math.max(...chartPoints.map((p) => p.revenue), 100);
+  }, [chartPoints]);
 
   const maxIngredientUnits = useMemo(() => {
     return Math.max(...ingredients.map((i) => i.units), 1);
@@ -92,7 +116,7 @@ export function DashboardPage() {
       <PageHeader
         eyebrow="Panel de Control"
         title={`¡Hola, ${user?.name ?? 'Admin'}!`}
-        description="Resumen operativo y métricas de rendimiento de Pizzería Arrabbiata."
+        description={`Resumen operativo y métricas de rendimiento de ${user?.business_id === 1 ? 'Pizzería Arrabbiata' : 'Pizza Test'}.`}
       />
 
       {/* Accesos rápidos */}
@@ -237,6 +261,38 @@ export function DashboardPage() {
           </button>
           <button
             type="button"
+            onClick={() => handlePresetChange('year')}
+            style={{
+              padding: '0.4rem 0.8rem',
+              borderRadius: '6px',
+              border: 'none',
+              background: preset === 'year' ? 'var(--c-accent, #e63946)' : '#f0f0f0',
+              color: preset === 'year' ? '#fff' : '#333',
+              fontWeight: preset === 'year' ? 700 : 400,
+              cursor: 'pointer',
+              fontSize: '0.85rem',
+            }}
+          >
+            Este año
+          </button>
+          <button
+            type="button"
+            onClick={() => handlePresetChange('all')}
+            style={{
+              padding: '0.4rem 0.8rem',
+              borderRadius: '6px',
+              border: 'none',
+              background: preset === 'all' ? 'var(--c-accent, #e63946)' : '#f0f0f0',
+              color: preset === 'all' ? '#fff' : '#333',
+              fontWeight: preset === 'all' ? 700 : 400,
+              cursor: 'pointer',
+              fontSize: '0.85rem',
+            }}
+          >
+            Histórico (desde 2022)
+          </button>
+          <button
+            type="button"
             onClick={() => setPreset('custom')}
             style={{
               padding: '0.4rem 0.8rem',
@@ -354,22 +410,24 @@ export function DashboardPage() {
                 padding: '1.25rem',
               }}
             >
-              <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.1rem' }}>Evolución Diaria de Facturación</h3>
+              <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.1rem' }}>
+                {points.length > 45 ? 'Evolución Mensual de Facturación' : 'Evolución Diaria de Facturación'}
+              </h3>
 
-              {points.length === 0 ? (
+              {chartPoints.length === 0 ? (
                 <p style={{ color: '#888', fontStyle: 'italic', fontSize: '0.9rem' }}>
                   Sin ventas registradas en el período.
                 </p>
               ) : (
-                <div style={{ display: 'flex', alignItems: 'flex-end', gap: '0.5rem', height: '180px', paddingTop: '1rem' }}>
-                  {points.map((pt) => {
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: '0.35rem', height: '180px', paddingTop: '1rem', overflowX: 'auto' }}>
+                  {chartPoints.map((pt) => {
                     const pct = Math.round((pt.revenue / maxRevenue) * 100);
-                    const dayLabel = pt.day.slice(5); // MM-DD
+                    const dayLabel = pt.day.length === 7 ? pt.day.slice(2) : pt.day.slice(5); // YY-MM o MM-DD
                     return (
                       <div
                         key={pt.day}
                         style={{
-                          flex: 1,
+                          flex: '1 0 18px',
                           display: 'flex',
                           flexDirection: 'column',
                           alignItems: 'center',

@@ -4,6 +4,7 @@ namespace Pizzalog\Controllers;
 use Pizzalog\Core\Database;
 use Pizzalog\Core\Request;
 use Pizzalog\Core\Response;
+use Pizzalog\Services\LoyverseMigrationService;
 
 /**
  * Caja / arqueo.
@@ -17,6 +18,10 @@ use Pizzalog\Core\Response;
  */
 class CashController
 {
+    public function __construct()
+    {
+        LoyverseMigrationService::ensureMigrated();
+    }
     /** POST /cash/open   Body: { opening_amount, note? } */
     public function open(Request $req): void
     {
@@ -199,6 +204,14 @@ class CashController
         $session['expected_amount'] = $session['status'] === 'closed'
             ? $session['expected_amount']
             : $totals['expected'];
+
+        // Para turnos históricos de Loyverse con recibos de pago mixto, ajustar cash_sales exacto al arqueo del turno
+        if ($session['status'] === 'closed' && str_starts_with((string) ($session['note'] ?? ''), 'Turno Loyverse')) {
+            $session['cash_sales'] = round(
+                (float) $session['expected_amount'] - (float) $session['opening_amount'] - $totals['movements_in'] + $totals['movements_out'],
+                2
+            );
+        }
 
         $session['sales_by_method'] = $this->salesByMethod($id);
         $session['movements']       = $this->movements($id);

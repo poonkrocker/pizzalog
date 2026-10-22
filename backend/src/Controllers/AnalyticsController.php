@@ -4,6 +4,7 @@ namespace Pizzalog\Controllers;
 use Pizzalog\Core\Database;
 use Pizzalog\Core\Request;
 use Pizzalog\Core\Response;
+use Pizzalog\Services\LoyverseMigrationService;
 
 /**
  * Tableros de control. Todas las consultas:
@@ -108,7 +109,7 @@ class AnalyticsController
               WHERE s.business_id = ? AND s.status = "completed"
                 AND si.product_name NOT LIKE "Cobro compartido%"
                 AND s.created_at BETWEEN ? AND ?
-              GROUP BY si.product_id
+              GROUP BY COALESCE(CAST(si.product_id AS CHAR), si.product_name)
               ORDER BY units DESC
               LIMIT ' . $limit
         );
@@ -369,6 +370,7 @@ class AnalyticsController
      */
     private function ctx(Request $req): array
     {
+        LoyverseMigrationService::ensureMigrated();
         $bid  = (int) $req->auth['business_id'];
         $to   = $req->query['to']   ?? date('Y-m-d');
         $from = $req->query['from'] ?? date('Y-m-d', strtotime('-29 days'));

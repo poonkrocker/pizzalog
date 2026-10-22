@@ -5,6 +5,7 @@ use Pizzalog\Core\Database;
 use Pizzalog\Core\Request;
 use Pizzalog\Core\Response;
 use Pizzalog\Repositories\StockRepository;
+use Pizzalog\Services\LoyverseMigrationService;
 use Pizzalog\Services\SaleService;
 
 class SaleController
@@ -16,8 +17,17 @@ class SaleController
 
     public function __construct()
     {
+        LoyverseMigrationService::ensureMigrated();
         $this->stock = new StockRepository();
         $this->sales = new SaleService();
+    }
+
+    /** POST /sales/migrate-loyverse */
+    public function migrateLoyverse(Request $req): void
+    {
+        $force = (bool) $req->input('force', false);
+        $res   = LoyverseMigrationService::ensureMigrated($force);
+        Response::ok(['migration' => $res]);
     }
 
     /** GET /sales?from=YYYY-MM-DD&to=YYYY-MM-DD&channel=&without_cash_session=&limit=&offset= */

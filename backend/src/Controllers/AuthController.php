@@ -6,12 +6,14 @@ use Pizzalog\Core\Database;
 use Pizzalog\Core\Jwt;
 use Pizzalog\Core\Request;
 use Pizzalog\Core\Response;
+use Pizzalog\Services\LoyverseMigrationService;
 
 class AuthController
 {
     public function __construct()
     {
         UserController::ensureSchema();
+        LoyverseMigrationService::ensureMigrated();
     }
 
     /**
