@@ -185,17 +185,107 @@ function formatGroupedHours($rows) {
     return implode('<br>', $out);
 }
 
-// Verificar si el negocio está abierto y obtener horarios
+/**
+ * Fusiona los turnos de business_hours que cruzan la medianoche
+ * (ej. 20:30 a 23:59:59 + 00:00:00 a 00:30:00 del día siguiente,
+ *  o turnos con start_time > end_time como 20:30 a 00:30)
+ * para calcular correctamente las franjas horarias y la apertura.
+ */
+function getUnifiedBusinessShifts(array $all_hours): array {
+    $daysOrder = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
+    $byDay = [];
+    foreach ($daysOrder as $d) $byDay[$d] = [];
+    foreach ($all_hours as $r) {
+        $d = $r['day_of_week'] ?? '';
+        if (isset($byDay[$d])) {
+            $byDay[$d][] = $r;
+        }
+    }
+
+    $unified = [];
+
+    for ($i = 0; $i < 7; $i++) {
+        $d = $daysOrder[$i];
+        $nextD = $daysOrder[($i + 1) % 7];
+        $count = count($byDay[$d]);
+
+        for ($j = 0; $j < $count; $j++) {
+            $row = $byDay[$d][$j];
+            if (!empty($row['_used'])) continue;
+
+            $s = trim((string)$row['start_time']);
+            $e = trim((string)$row['end_time']);
+
+            // 1. Cruce directo en una sola fila (start > end, ej 20:30 - 00:30 o 20:00 - 00:00)
+            if ($s > $e) {
+                $unified[] = [
+                    'start_day'  => $d,
+                    'start_time' => $s,
+                    'end_day'    => $nextD,
+                    'end_time'   => $e,
+                ];
+                continue;
+            }
+
+            // 2. Fila que termina en 23:59 / 23:59:59 -> buscar si el día siguiente arranca en 00:00
+            $endsAtMidnight = preg_match('/^23:59(?::\d{2})?$/', $e);
+            if ($endsAtMidnight) {
+                $foundContinuation = false;
+                if (!empty($byDay[$nextD])) {
+                    foreach ($byDay[$nextD] as &$nextRow) {
+                        if (!empty($nextRow['_used'])) continue;
+                        if (preg_match('/^00:00(?::\d{2})?$/', trim((string)$nextRow['start_time']))) {
+                            $nextRow['_used'] = true;
+                            $unified[] = [
+                                'start_day'  => $d,
+                                'start_time' => $s,
+                                'end_day'    => $nextD,
+                                'end_time'   => trim((string)$nextRow['end_time']),
+                            ];
+                            $foundContinuation = true;
+                            break;
+                        }
+                    }
+                    unset($nextRow);
+                }
+                if (!$foundContinuation) {
+                    $unified[] = [
+                        'start_day'  => $d,
+                        'start_time' => $s,
+                        'end_day'    => $nextD,
+                        'end_time'   => '00:00:00',
+                    ];
+                }
+                continue;
+            }
+
+            // 3. Residuo 00:00 a 00:xx que no fue fusionado
+            if (preg_match('/^00:00(?::\d{2})?$/', $s) && preg_match('/^00:\d{2}(?::\d{2})?$/', $e)) {
+                continue;
+            }
+
+            // 4. Turno normal diurno
+            $unified[] = [
+                'start_day'  => $d,
+                'start_time' => $s,
+                'end_day'    => $d,
+                'end_time'   => $e,
+            ];
+        }
+    }
+
+    return $unified;
+}
+
+// Verificar si el negocio está abierto y obtener horarios y ventanas de turnos
 $is_open = false;
 $closed_message = "Estamos cerrados ahora. Horarios de atención:<br>";
+$shift_start_iso = null;
+$shift_end_iso   = null;
+$next_shift_is_today = false;
 
 try {
-    // Horarios del día actual (para saber si está abierto)
-    $stmt = $pdo->prepare("SELECT start_time, end_time FROM business_hours WHERE day_of_week = ?");
-    $stmt->execute([$current_day_es]);
-    $hours = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-    // Todos los horarios (para mostrar en el aviso)
+    // Todos los horarios (para mostrar en el aviso y calcular turnos unificados)
     $all_hours_stmt = $pdo->query("
         SELECT day_of_week, start_time, end_time
         FROM business_hours
@@ -211,160 +301,75 @@ try {
         $closed_message = "Estamos cerrados ahora, pero podés dejar tu pedido programado para cuando abramos. Horarios de atención:<br>" . formatGroupedHours($all_hours);
     }
 
-    // ¿Está abierto ahora? (maneja cruces de medianoche y derrame del día anterior)
+    $tz = new DateTimeZone('America/Argentina/Cordoba');
+    $nowDt = new DateTime('now', $tz);
     $daysOrder = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
-    $idxDay = array_search($current_day_es, $daysOrder, true);
-    $yesterday = $daysOrder[($idxDay + 6) % 7];
+    $idxToday = array_search($current_day_es, $daysOrder, true);
 
-    $stmtOpen = $pdo->prepare("
-        SELECT 1
-        FROM business_hours bh
-        WHERE
-            (
-                bh.day_of_week = ?
-                AND bh.start_time <= bh.end_time
-                AND ? BETWEEN bh.start_time AND bh.end_time
-            )
-            OR
-            (
-                bh.day_of_week = ?
-                AND bh.start_time > bh.end_time
-                AND ( ? >= bh.start_time OR ? <= bh.end_time )
-            )
-            OR
-            (
-                bh.day_of_week = ?
-                AND bh.start_time > bh.end_time
-                AND ? <= bh.end_time
-            )
-        LIMIT 1
-    ");
-    $stmtOpen->execute([
-        $current_day_es, $current_time,
-        $current_day_es, $current_time, $current_time,
-        $yesterday,      $current_time
-    ]);
-    $is_open = (bool)$stmtOpen->fetchColumn();
-    } catch (PDOException $e) {
-    error_log("Error en consulta de horarios: " . $e->getMessage());
-    $closed_message = "Estamos cerrados ahora. Error al verificar horarios, contacta al administrador.";
-}
+    $unifiedShifts = getUnifiedBusinessShifts($all_hours);
 
+    // Creamos las instancias de turnos desde ayer (-1) hasta 7 días hacia adelante
+    $shiftsInstances = [];
+    for ($offset = -1; $offset <= 7; $offset++) {
+        $refDt = (clone $nowDt)->modify("{$offset} day");
+        $refDateStr = $refDt->format('Y-m-d');
+        $dayName = $daysOrder[($idxToday + $offset + 70) % 7];
 
-// ============================================================
-//  Turno activo → ventana de horarios para el selector de pedido
-//  Calcula inicio y fin del turno EN CURSO (maneja cruce de
-//  medianoche y el derrame del turno de ayer) para poder ofrecer
-//  franjas de 15' desde "ahora + preparación" hasta el cierre.
-// ============================================================
-$shift_start_iso = null;
-$shift_end_iso   = null;
-if ($is_open) {
-    try {
-        $tz    = new DateTimeZone('America/Argentina/Cordoba');
-        $nowDt = new DateTime('now', $tz);
+        foreach ($unifiedShifts as $u) {
+            if ($u['start_day'] !== $dayName) continue;
 
-        $daysOrderShift  = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
-        $idxShift        = array_search($current_day_es, $daysOrderShift, true);
-        $yesterdayShift  = $daysOrderShift[($idxShift + 6) % 7];
-
-        $shiftStmt = $pdo->prepare("
-            SELECT day_of_week, start_time, end_time
-            FROM business_hours
-            WHERE day_of_week IN (?, ?)
-        ");
-        $shiftStmt->execute([$current_day_es, $yesterdayShift]);
-        $shiftRows = $shiftStmt->fetchAll(PDO::FETCH_ASSOC);
-
-        $todayStr     = $nowDt->format('Y-m-d');
-        $yesterdayStr = (clone $nowDt)->modify('-1 day')->format('Y-m-d');
-
-        foreach ($shiftRows as $row) {
-            $isToday   = ($row['day_of_week'] === $current_day_es);
-            $start     = $row['start_time'];
-            $end       = $row['end_time'];
-            $overnight = ($start > $end); // ej. 20:00 - 00:00
-
-            $s = null; $e = null;
-            if ($isToday && !$overnight) {
-                // Turno normal del día (ej. mediodía 12:00 - 15:00)
-                $s = new DateTime("$todayStr $start", $tz);
-                $e = new DateTime("$todayStr $end",   $tz);
-                if (!($nowDt >= $s && $nowDt <= $e)) { $s = null; }
-            } elseif ($isToday && $overnight) {
-                // Empieza hoy y termina mañana (ej. 20:00 - 00:00)
-                $s = new DateTime("$todayStr $start", $tz);
-                $e = (new DateTime("$todayStr $end", $tz))->modify('+1 day');
-                if (!($nowDt >= $s)) { $s = null; }
-            } elseif (!$isToday && $overnight) {
-                // Turno de ayer que se derrama en la madrugada de hoy
-                $s = new DateTime("$yesterdayStr $start", $tz);
-                $e = new DateTime("$todayStr $end", $tz);
-                if (!($nowDt <= $e)) { $s = null; }
+            $sDt = new DateTime("{$refDateStr} {$u['start_time']}", $tz);
+            if ($u['start_day'] === $u['end_day']) {
+                $eDt = new DateTime("{$refDateStr} {$u['end_time']}", $tz);
+            } else {
+                $eDt = (clone $sDt)->modify('+1 day');
+                $parts = explode(':', $u['end_time']);
+                $eh = (int)($parts[0] ?? 0);
+                $em = (int)($parts[1] ?? 0);
+                $es = (int)($parts[2] ?? 0);
+                $eDt->setTime($eh, $em, $es);
             }
-
-            if ($s !== null && $e !== null) {
-                $shift_start_iso = $s->format('c'); // ISO 8601 con offset (-03:00)
-                $shift_end_iso   = $e->format('c');
-                break;
-            }
+            $shiftsInstances[] = [
+                's' => $sDt,
+                'e' => $eDt,
+                'day' => $dayName
+            ];
         }
-    } catch (Exception $e) {
-        error_log("Error calculando turno activo: " . $e->getMessage());
-        $shift_start_iso = null;
-        $shift_end_iso   = null;
     }
-}
 
-// ============================================================
-//  Local cerrado → buscamos el PRÓXIMO turno de apertura (hoy más
-//  tarde, o en los próximos días) para poder ofrecer franjas de
-//  "pedido programado" aunque estemos cerrados ahora mismo.
-// ============================================================
-if (!$is_open) {
-    try {
-        $tz    = new DateTimeZone('America/Argentina/Cordoba');
-        $nowDt = new DateTime('now', $tz);
+    // 1. ¿Hay algún turno activo AHORA?
+    $activeShift = null;
+    foreach ($shiftsInstances as $inst) {
+        if ($nowDt >= $inst['s'] && $nowDt <= $inst['e']) {
+            $activeShift = $inst;
+            break;
+        }
+    }
 
-        $daysOrderNext = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
-        $idxToday = array_search($current_day_es, $daysOrderNext, true);
-
-        $allShiftsStmt = $pdo->query("SELECT day_of_week, start_time, end_time FROM business_hours");
-        $allShifts = $allShiftsStmt->fetchAll(PDO::FETCH_ASSOC);
-
-        $best = null; // ['s' => DateTime, 'e' => DateTime]
-        for ($offset = 0; $offset < 8 && $best === null; $offset++) {
-            $dayIdx  = ($idxToday + $offset) % 7;
-            $dayName = $daysOrderNext[$dayIdx];
-            $dateStr = (clone $nowDt)->modify("+{$offset} day")->format('Y-m-d');
-
-            foreach ($allShifts as $row) {
-                if ($row['day_of_week'] !== $dayName) continue;
-
-                $start = $row['start_time'];
-                $end   = $row['end_time'];
-                $overnight = ($start > $end); // ej. 20:00 - 00:00
-
-                $s = new DateTime("$dateStr $start", $tz);
-                $e = $overnight
-                    ? (new DateTime("$dateStr $end", $tz))->modify('+1 day')
-                    : new DateTime("$dateStr $end", $tz);
-
-                if ($s > $nowDt && ($best === null || $s < $best['s'])) {
-                    $best = ['s' => $s, 'e' => $e];
+    if ($activeShift !== null) {
+        $is_open = true;
+        $shift_start_iso = $activeShift['s']->format('c');
+        $shift_end_iso   = $activeShift['e']->format('c');
+    } else {
+        $is_open = false;
+        // Buscamos el próximo turno que empiece después de ahora
+        $nextShift = null;
+        foreach ($shiftsInstances as $inst) {
+            if ($inst['s'] > $nowDt) {
+                if ($nextShift === null || $inst['s'] < $nextShift['s']) {
+                    $nextShift = $inst;
                 }
             }
         }
-
-        if ($best !== null) {
-            $shift_start_iso = $best['s']->format('c');
-            $shift_end_iso   = $best['e']->format('c');
-            // Para el mensaje del selector: ¿el próximo turno es hoy o más adelante?
-            $next_shift_is_today = ($best['s']->format('Y-m-d') === $nowDt->format('Y-m-d'));
+        if ($nextShift !== null) {
+            $shift_start_iso = $nextShift['s']->format('c');
+            $shift_end_iso   = $nextShift['e']->format('c');
+            $next_shift_is_today = ($nextShift['s']->format('Y-m-d') === $nowDt->format('Y-m-d'));
         }
-    } catch (Exception $e) {
-        error_log("Error calculando próximo turno: " . $e->getMessage());
     }
+} catch (PDOException $e) {
+    error_log("Error en consulta de horarios: " . $e->getMessage());
+    $closed_message = "Estamos cerrados ahora. Error al verificar horarios, contacta al administrador.";
 }
 
 
@@ -456,6 +461,37 @@ try {
 } catch (Throwable $e) {
     // tabla inexistente o error → valores por defecto
 }
+
+// Carga dinámica de productos de la categoría 'Extras' para sumar a las pizzas
+$available_extras = [];
+try {
+    $extrasStmt = $pdo->prepare("
+        SELECT mi.id, mi.name, mi.price, mi.description 
+        FROM menu_items mi
+        JOIN categories c ON mi.category_id = c.id
+        WHERE LOWER(TRIM(c.name)) = 'extras' AND mi.is_visible = 1
+        ORDER BY mi.display_order ASC, mi.price ASC
+    ");
+    $extrasStmt->execute();
+    $available_extras = $extrasStmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (Throwable $e) {
+    $available_extras = [];
+}
+
+// Fallback con los extras estándar de Pizzalog si aún no están cargados en la base de datos
+if (empty($available_extras)) {
+    $available_extras = [
+        ['id' => 'extra_stracciatella', 'name' => 'Stracciatella', 'price' => 5000.00],
+        ['id' => 'extra_anchoas',       'name' => 'Anchoas',       'price' => 3000.00],
+        ['id' => 'extra_dip_oliva',     'name' => 'Dip de aceite de oliva', 'price' => 1500.00]
+    ];
+}
+
+// Control de versión:
+// Versión 1 (actual / clásica): $enable_extras = false
+// Versión 2 (con botones de extras): $enable_extras = true (se activa en index_extras.php o con ?extras=1)
+$is_extras_version = $is_extras_version ?? false;
+$enable_extras = $is_extras_version || (isset($_GET['extras']) && $_GET['extras'] !== '0');
 ?>
 
 <!DOCTYPE html>
@@ -649,9 +685,95 @@ try {
 }
 .pickup-time-confirm:disabled { opacity: .5; cursor: not-allowed; }
 
+/* ===== BOTONES / PILLS DE EXTRAS EN TARJETA DE PIZZA ===== */
+.pizza-extras-container {
+  margin: 10px 0 8px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  text-align: left;
+}
+.extras-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--marron, #4a2f28);
+  opacity: 0.85;
+}
+.extras-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.extra-pill {
+  background: #f8f9fa;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 20px;
+  padding: 5px 10px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  font-family: inherit;
+  color: #334155;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.extra-pill:hover {
+  border-color: var(--rojo, #c0392b);
+  background: #fff5f5;
+  color: var(--rojo, #c0392b);
+}
+.extra-pill.active {
+  background: var(--rojo, #c0392b) !important;
+  color: #ffffff !important;
+  border-color: var(--rojo, #c0392b) !important;
+  box-shadow: 0 2px 5px rgba(192, 57, 43, 0.3);
+}
+.extra-pill.active .extra-price-tag {
+  color: #ffffff !important;
+  opacity: 0.95;
+}
+.extra-pill .extra-plus {
+  font-weight: bold;
+}
+.extra-pill .extra-price-tag {
+  font-size: 0.76rem;
+  color: #64748b;
+  font-weight: normal;
+}
+.added-toast {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: #16a34a;
+  color: #fff;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: bold;
+  opacity: 0;
+  transform: translateY(-5px);
+  transition: all 0.25s ease;
+  pointer-events: none;
+  z-index: 10;
+}
+.added-toast.show {
+  opacity: 1;
+  transform: translateY(0);
+}
 </style>
 </head>
 <body>
+    <?php if ($enable_extras): ?>
+        <div style="background: #fef3c7; color: #92400e; padding: 7px 12px; font-size: 0.85rem; text-align: center; font-weight: 600; border-bottom: 1px solid #fde68a;">
+            🍕 Versión con botones de Extras activados &nbsp;·&nbsp; <a href="index.php" style="color: #b45309; text-decoration: underline;">Ver versión clásica</a>
+        </div>
+    <?php endif; ?>
     <section class="section">
         <div class="menu-container">
 
@@ -825,6 +947,75 @@ try {
         let currentSubproductItem = null;
         let currentDependentItem = null;
 
+        function toggleItemExtra(btn, ev) {
+            if (ev) {
+                ev.stopPropagation();
+                ev.preventDefault();
+            }
+            btn.classList.toggle('active');
+            const plusSpan = btn.querySelector('.extra-plus');
+            if (plusSpan) {
+                plusSpan.textContent = btn.classList.contains('active') ? '✓' : '+';
+            }
+
+            const card = btn.closest('.pizza-item');
+            if (!card) return;
+
+            const basePrice = parseFloat(card.dataset.itemPrice) || 0;
+            const activePills = card.querySelectorAll('.extra-pill.active');
+            let extrasTotal = 0;
+            activePills.forEach(pill => {
+                extrasTotal += parseFloat(pill.dataset.extraPrice) || 0;
+            });
+
+            const finalPrice = basePrice + extrasTotal;
+            const priceSpan = card.querySelector('.item-price');
+            if (priceSpan) {
+                priceSpan.textContent = finalPrice.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            }
+        }
+
+        function addItemWithExtras(card, isVegan = false) {
+            const baseName = card.dataset.itemName;
+            const itemId = card.dataset.itemId;
+            const basePrice = parseFloat(card.dataset.itemPrice) || 0;
+
+            const activePills = card.querySelectorAll('.extra-pill.active');
+            const selectedExtras = [];
+            let extrasTotal = 0;
+            activePills.forEach(pill => {
+                const extraName = pill.dataset.extraName;
+                const extraPrice = parseFloat(pill.dataset.extraPrice) || 0;
+                selectedExtras.push(extraName);
+                extrasTotal += extraPrice;
+            });
+
+            let displayName = isVegan ? `${baseName} (Vegana)` : baseName;
+            if (selectedExtras.length > 0) {
+                displayName += ` (+ ${selectedExtras.join(', + ')})`;
+            }
+
+            const finalPrice = basePrice + extrasTotal;
+
+            addToCart(displayName, finalPrice, itemId, isVegan);
+
+            const toast = card.querySelector('.added-toast');
+            if (toast) {
+                toast.classList.add('show');
+                setTimeout(() => toast.classList.remove('show'), 1200);
+            }
+
+            activePills.forEach(pill => {
+                pill.classList.remove('active');
+                const plusSpan = pill.querySelector('.extra-plus');
+                if (plusSpan) plusSpan.textContent = '+';
+            });
+            const priceSpan = card.querySelector('.item-price');
+            if (priceSpan) {
+                priceSpan.textContent = basePrice.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            }
+        }
+
         function addItemToCart(name, itemId, price, isVegan, hasSubproducts, requiredSelections, requiresPizza = false) {
             let displayName = isVegan ? `${name} (Vegana)` : name;
             
@@ -842,7 +1033,7 @@ try {
             const item = {
                 id: itemId,
                 name: name,
-                price: price,
+                price: Number(price) || 0,
                 quantity: 1,
                 isVegan: isVegan,
                 subproducts: selectedSubproducts,
@@ -851,6 +1042,7 @@ try {
             
             const existingItem = cart.find(cartItem => 
                 cartItem.id === itemId && 
+                cartItem.name === name &&
                 cartItem.isVegan === isVegan && 
                 JSON.stringify(cartItem.subproducts) === JSON.stringify(selectedSubproducts) &&
                 JSON.stringify(cartItem.dependentPizza) === JSON.stringify(dependentPizza)

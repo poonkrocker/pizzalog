@@ -84,7 +84,7 @@
 </div>
 
 <!-- Modal: horario del pedido (turno actual, franjas de 15') -->
-<div class="pickup-time-modal" id="pickupTimeModal">
+<div class="pickup-time-modal" id="pickupTimeModal" style="display: none;">
     <h3>¿Para qué horario querés tu pedido?</h3>
     <p class="pickup-time-sub" id="pickupTimeSub">Elegí a qué hora querés tu pedido:</p>
     <div class="pickup-time-slots" id="pickupTimeSlots"></div>
