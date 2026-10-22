@@ -124,11 +124,16 @@ $show_extras = $enable_extras && $is_pizza_category && !$item['requires_pizza'] 
         </div>
 
     <?php else: ?>
-        <h3><?php echo htmlspecialchars($item['name']); ?></h3>
-        <p class="item-desc">
-            <?php echo nl2br(htmlspecialchars($item['description'])); ?>
-        </p>
         <?php if ($show_extras): ?>
+            <div class="item-title-row">
+                <h3><?php echo htmlspecialchars($item['name']); ?></h3>
+                <?php if ($item['has_vegan_option']): ?>
+                    <button type="button" class="vegan-badge-btn" data-item-id="<?php echo $item['id']; ?>" onclick="event.stopPropagation(); addItemWithExtras(this.closest('.pizza-item'), true)" title="Pedir en versión vegana">🌿 Vegana</button>
+                <?php endif; ?>
+            </div>
+            <p class="item-desc">
+                <?php echo nl2br(htmlspecialchars($item['description'])); ?>
+            </p>
             <div class="pizza-extras-container" onclick="event.stopPropagation()">
                 <span class="extras-label">Sumale a tu pizza:</span>
                 <div class="extras-pills">
@@ -146,17 +151,21 @@ $show_extras = $enable_extras && $is_pizza_category && !$item['requires_pizza'] 
                 </div>
             </div>
             <div class="added-toast">✓ Agregada</div>
-        <?php endif; ?>
-        <div class="price-container">
-            <p>$<span class="item-price" data-price="<?php echo $item['price']; ?>"><?php echo number_format($item['price'], 2); ?></span></p>
-            <?php if ($item['has_vegan_option']): ?>
-                <?php if ($show_extras): ?>
-                    <button type="button" class="vegan-button" data-item-id="<?php echo $item['id']; ?>" onclick="event.stopPropagation(); addItemWithExtras(this.closest('.pizza-item'), true)">🌿 Versión Vegana</button>
-                <?php else: ?>
+            <div class="price-container">
+                <p>$<span class="item-price" data-price="<?php echo $item['price']; ?>"><?php echo number_format($item['price'], 2); ?></span></p>
+            </div>
+        <?php else: ?>
+            <h3><?php echo htmlspecialchars($item['name']); ?></h3>
+            <p class="item-desc">
+                <?php echo nl2br(htmlspecialchars($item['description'])); ?>
+            </p>
+            <div class="price-container">
+                <p>$<span class="item-price" data-price="<?php echo $item['price']; ?>"><?php echo number_format($item['price'], 2); ?></span></p>
+                <?php if ($item['has_vegan_option']): ?>
                     <button type="button" class="vegan-button" data-item-id="<?php echo $item['id']; ?>" onclick="event.stopPropagation(); addItemToCart('<?php echo htmlspecialchars($item['name']); ?>', '<?php echo $item['id']; ?>', <?php echo $item['price']; ?>, true, <?php echo !empty($sub_products[$item['id']]) ? 'true' : 'false'; ?>, <?php echo $item['required_selections'] ?: '0'; ?>)">🌿 Versión Vegana</button>
                 <?php endif; ?>
-            <?php endif; ?>
-        </div>
+            </div>
+        <?php endif; ?>
     <?php endif; ?>
 
    

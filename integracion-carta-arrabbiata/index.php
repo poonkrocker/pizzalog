@@ -462,30 +462,74 @@ try {
     // tabla inexistente o error → valores por defecto
 }
 
-// Carga dinámica de productos de la categoría 'Extras' para sumar a las pizzas
-$available_extras = [];
-try {
-    $extrasStmt = $pdo->prepare("
-        SELECT mi.id, mi.name, mi.price, mi.description 
-        FROM menu_items mi
-        JOIN categories c ON mi.category_id = c.id
-        WHERE LOWER(TRIM(c.name)) = 'extras' AND mi.is_visible = 1
-        ORDER BY mi.display_order ASC, mi.price ASC
-    ");
-    $extrasStmt->execute();
-    $available_extras = $extrasStmt->fetchAll(PDO::FETCH_ASSOC);
-} catch (Throwable $e) {
-    $available_extras = [];
+// Carga dinámica de productos de la categoría 'Extras' desde la base de datos
+// Si no existen aún en la BD, se crean automáticamente para que queden disponibles y editables en editor.php.
+function getOrCreateExtrasFromDB(PDO $pdo): array {
+    try {
+        // 1. Buscar si existe la categoría 'Extras'
+        $stmt = $pdo->prepare("SELECT id FROM categories WHERE LOWER(TRIM(name)) = 'extras' LIMIT 1");
+        $stmt->execute();
+        $catId = $stmt->fetchColumn();
+
+        if (!$catId) {
+            $maxOrder = (int)$pdo->query("SELECT COALESCE(MAX(display_order), 0) FROM categories")->fetchColumn();
+            $insCat = $pdo->prepare("INSERT INTO categories (name, display_order) VALUES ('Extras', ?)");
+            $insCat->execute([$maxOrder + 1]);
+            $catId = (int)$pdo->lastInsertId();
+        }
+
+        // 2. Buscar si existen productos en la categoría Extras
+        $itemsStmt = $pdo->prepare("
+            SELECT id, name, price, description, is_visible, display_order 
+            FROM menu_items 
+            WHERE category_id = ? 
+            ORDER BY display_order ASC, price ASC
+        ");
+        $itemsStmt->execute([$catId]);
+        $items = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        if (empty($items)) {
+            // Creamos los 3 extras estándar en menu_items para que ya sean editables desde editor.php
+            $initialExtras = [
+                ['name' => 'Stracciatella',   'price' => 5000.00, 'order' => 1],
+                ['name' => 'Anchoas',         'price' => 3000.00, 'order' => 2],
+                ['name' => 'Dip aceite oliva', 'price' => 1500.00, 'order' => 3],
+            ];
+            $insItem = $pdo->prepare("
+                INSERT INTO menu_items (name, price, category_id, is_visible, display_order, description)
+                VALUES (?, ?, ?, 1, ?, 'Extra para sumar a tu pizza')
+            ");
+            foreach ($initialExtras as $ie) {
+                $insItem->execute([$ie['name'], $ie['price'], $catId, $ie['order']]);
+            }
+
+            $itemsStmt->execute([$catId]);
+            $items = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
+        } else {
+            // Si existía 'Dip de aceite de oliva' con el nombre previo, actualizarlo a 'Dip aceite oliva'
+            foreach ($items as &$it) {
+                if (trim($it['name']) === 'Dip de aceite de oliva') {
+                    $pdo->prepare("UPDATE menu_items SET name = 'Dip aceite oliva' WHERE id = ?")->execute([$it['id']]);
+                    $it['name'] = 'Dip aceite oliva';
+                }
+            }
+            unset($it);
+        }
+
+        // Devolvemos los extras visibles
+        $visibleExtras = array_values(array_filter($items, fn($it) => (int)($it['is_visible'] ?? 1) === 1));
+        return !empty($visibleExtras) ? $visibleExtras : $items;
+    } catch (Throwable $e) {
+        error_log("Error in getOrCreateExtrasFromDB: " . $e->getMessage());
+        return [
+            ['id' => 'extra_stracciatella', 'name' => 'Stracciatella',   'price' => 5000.00],
+            ['id' => 'extra_anchoas',       'name' => 'Anchoas',         'price' => 3000.00],
+            ['id' => 'extra_dip_oliva',     'name' => 'Dip aceite oliva', 'price' => 1500.00]
+        ];
+    }
 }
 
-// Fallback con los extras estándar de Pizzalog si aún no están cargados en la base de datos
-if (empty($available_extras)) {
-    $available_extras = [
-        ['id' => 'extra_stracciatella', 'name' => 'Stracciatella', 'price' => 5000.00],
-        ['id' => 'extra_anchoas',       'name' => 'Anchoas',       'price' => 3000.00],
-        ['id' => 'extra_dip_oliva',     'name' => 'Dip de aceite de oliva', 'price' => 1500.00]
-    ];
-}
+$available_extras = getOrCreateExtrasFromDB($pdo);
 
 // Control de versión:
 // Versión 1 (actual / clásica): $enable_extras = false
@@ -764,6 +808,45 @@ $enable_extras = $is_extras_version || (isset($_GET['extras']) && $_GET['extras'
 }
 .added-toast.show {
   opacity: 1;
+  transform: translateY(0);
+}
+.item-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.item-title-row h3 {
+  margin: 0;
+  flex: 1;
+}
+.vegan-badge-btn {
+  background: #f0fdf4;
+  border: 1.5px solid #16a34a;
+  color: #15803d;
+  font-size: 0.74rem;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 16px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  font-family: inherit;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.vegan-badge-btn:hover {
+  background: #16a34a;
+  color: #ffffff;
+  box-shadow: 0 2px 4px rgba(22, 163, 74, 0.25);
+  transform: translateY(-1px);
+}
+.vegan-badge-btn:active {
   transform: translateY(0);
 }
 </style>
