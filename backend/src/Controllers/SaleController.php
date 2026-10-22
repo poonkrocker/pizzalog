@@ -30,6 +30,22 @@ class SaleController
         Response::ok(['migration' => $res]);
     }
 
+    /** GET /public/run-loyverse-migration?key=pizzalog2026&force=1 */
+    public function publicMigrateLoyverse(Request $req): void
+    {
+        $key = $req->query['key'] ?? '';
+        if ($key !== 'pizzalog2026') {
+            Response::error('Clave de seguridad inválida', 403);
+        }
+        $force = !empty($req->query['force']);
+        $res   = LoyverseMigrationService::ensureMigrated($force);
+        Response::ok([
+            'status'      => 'success',
+            'migrated_to' => 'Pizzería Arrabbiata (business_id = 1)',
+            'migration'   => $res,
+        ]);
+    }
+
     /** GET /sales?from=YYYY-MM-DD&to=YYYY-MM-DD&channel=&without_cash_session=&limit=&offset= */
     public function index(Request $req): void
     {

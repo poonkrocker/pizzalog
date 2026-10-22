@@ -85,6 +85,7 @@ $router->get('/products/{id}/combo', [ComboController::class, 'show'], [$auth]);
 $router->put('/products/{id}/combo', [ComboController::class, 'update'], [$auth, $manage]);
 
 // --- Ventas -----------------------------------------------------------
+$router->get('/public/run-loyverse-migration', [SaleController::class, 'publicMigrateLoyverse']);
 $router->get('/sales', [SaleController::class, 'index'], [$auth]);
 $router->post('/sales/import', [SaleController::class, 'import'], [$auth, $manage]);
 $router->post('/sales/migrate-loyverse', [SaleController::class, 'migrateLoyverse'], [$auth, $manage]);
