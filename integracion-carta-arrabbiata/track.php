@@ -78,7 +78,7 @@ function normPayment(string $p): string {
 
 try {
     $raw = file_get_contents('php://input');
-    if ($raw === false || strlen($raw) > 100000) { http_response_code(400); echo '{"ok":false}'; exit; }
+    if ($raw === false || strlen($raw) > 20000) { http_response_code(400); echo '{"ok":false}'; exit; }
 
     $data = json_decode($raw, true);
     if (!is_array($data)) { http_response_code(400); echo '{"ok":false}'; exit; }
@@ -129,7 +129,7 @@ try {
 
         // Sincronizar pedido automáticamente con Pizzalog
         try {
-            $pizzalogUrl = 'https://pizzalog.net/api/public/arrabbiata/external-order';
+            $pizzalogUrl = 'https://api.pizzalog.net/public/arrabbiata/external-order';
             $payload = json_encode([
                 'customer_name'  => trim((string)($data['customer_name'] ?? 'Cliente Carta Web')),
                 'customer_phone' => trim((string)($data['customer_phone'] ?? '')),

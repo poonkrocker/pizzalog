@@ -537,14 +537,14 @@ try {
 /* Secret image visibility control */
 .secret-image {
   position: fixed;
-  right: 15px;
-  bottom: 60px;
-  width: 88px;
+  right: 20px;
+  bottom: 105px;
+  width: 72px;
   height: auto;
   opacity: 0;
   pointer-events: none;
   transition: opacity .35s ease;
-  z-index: 1200;
+  z-index: 1000;
 }
 .secret-image.visible {
   opacity: 1;
@@ -711,9 +711,7 @@ try {
         </div>
     </section>
 
-<a href="#category-7">
-    <img id="secret-image" class="secret-image" src="https://arrabbiata.com.ar/Uploads/csgif.gif" alt="Carta Secreta" onclick="toggleSecretMode()">
-</a>
+    <img id="secret-image" class="secret-image" src="https://arrabbiata.com.ar/Uploads/csgif.gif" alt="Carta Secreta" onclick="toggleSecretMode(event)" style="cursor:pointer;">
 
     <?php include dirname(__DIR__) . '/cart_modal.php'; ?>
 
@@ -794,7 +792,9 @@ try {
             }
         });
 
-        function toggleSecretMode() {
+        function toggleSecretMode(ev) {
+            if (ev && ev.preventDefault) ev.preventDefault();
+            if (ev && ev.stopPropagation) ev.stopPropagation();
             document.body.classList.toggle('secret-mode');
             const secretImage = document.getElementById('secret-image');
 
@@ -804,7 +804,9 @@ try {
                     clearInterval(showImageInterval);
                     showImageInterval = null;
                 }
-                secretImage.style.display = 'none';
+                if (secretImage) secretImage.style.display = 'none';
+                const secretSec = document.querySelector('.secret-category');
+                if (secretSec) secretSec.scrollIntoView({ behavior: 'smooth' });
             }
         }
 
@@ -864,6 +866,18 @@ try {
             showCartButton();
         }
 
+        function removeCartItem(index) {
+            const cart = JSON.parse(localStorage.getItem('cart')) || [];
+            if (index >= 0 && index < cart.length) {
+                cart.splice(index, 1);
+                localStorage.setItem('cart', JSON.stringify(cart));
+                updateCartUI();
+                if (cart.length === 0) {
+                    closeCart();
+                }
+            }
+        }
+
         function updateCartUI() {
             const cart = JSON.parse(localStorage.getItem('cart')) || [];
             const cartCount = document.getElementById('cartCount');
@@ -878,23 +892,27 @@ try {
             let itemCount = 0;
             
             cartItems.innerHTML = '';
-            cart.forEach(item => {
+            cart.forEach((item, index) => {
                 let itemTotal = item.price * item.quantity;
                 itemCount += item.quantity;
                 
                 const cartItem = document.createElement('div');
                 cartItem.className = 'cart-item';
                 let displayName = item.name;
-                if (item.subproducts.length > 0) {
+                if (item.subproducts && item.subproducts.length > 0) {
                     displayName += ` (${item.subproducts.map(s => s.name).join(', ')})`;
                 }
                 if (item.dependentPizza) {
                     displayName += ` + ${item.dependentPizza.name}`;
                     itemTotal += item.dependentPizza.price * item.quantity;
                 }
+                const safeName = displayName.replace(/"/g, '&quot;');
                 cartItem.innerHTML = `
-                    <span>${displayName} x${item.quantity}</span>
-                    <span>$${itemTotal.toFixed(2)}</span>
+                    <div class="cart-item-info">
+                        <button type="button" class="cart-item-remove" onclick="removeCartItem(${index})" title="Eliminar este ítem" aria-label="Eliminar ${safeName}">✕</button>
+                        <span class="cart-item-name">${displayName} x${item.quantity}</span>
+                    </div>
+                    <span class="cart-item-price">$${itemTotal.toFixed(2)}</span>
                 `;
                 cartItems.appendChild(cartItem);
                 total += itemTotal;
@@ -920,7 +938,9 @@ try {
             cartContainer.classList.add('active');
         }
 
-        function toggleCart() {
+        function toggleCart(ev) {
+            if (ev && ev.preventDefault) ev.preventDefault();
+            if (ev && ev.stopPropagation) ev.stopPropagation();
             const modal = document.getElementById('cartModal');
             const overlay = document.getElementById('overlay');
             const isVisible = modal.style.display === 'block';
@@ -932,7 +952,9 @@ try {
             updateCartUI();
         }
 
-        function closeCart() {
+        function closeCart(ev) {
+            if (ev && ev.preventDefault) ev.preventDefault();
+            if (ev && ev.stopPropagation) ev.stopPropagation();
             const modal = document.getElementById('cartModal');
             const overlay = document.getElementById('overlay');
             modal.style.display = 'none';
@@ -1098,34 +1120,6 @@ try {
             submitOrder(selectedPickupTime);
         }
 
-        // Inyectar campo de teléfono en el modal del carrito si cart_modal.php no lo tiene aún, y recordar datos del cliente
-        document.addEventListener('DOMContentLoaded', function() {
-            const nameInput = document.getElementById('customerName');
-            if (nameInput && !document.getElementById('customerPhone')) {
-                const phoneGroup = document.createElement('div');
-                phoneGroup.className = 'input-group';
-                phoneGroup.innerHTML = '<input type="tel" id="customerPhone" placeholder="Tu teléfono / WhatsApp">';
-                const parentGroup = nameInput.closest('.input-group');
-                if (parentGroup && parentGroup.parentNode) {
-                    parentGroup.parentNode.insertBefore(phoneGroup, parentGroup.nextSibling);
-                }
-            }
-            try {
-                const savedName = localStorage.getItem('rrbb_customer_name');
-                const savedPhone = localStorage.getItem('rrbb_customer_phone');
-                const savedAddr = localStorage.getItem('rrbb_customer_address');
-                if (savedName && document.getElementById('customerName') && !document.getElementById('customerName').value) {
-                    document.getElementById('customerName').value = savedName;
-                }
-                if (savedPhone && document.getElementById('customerPhone') && !document.getElementById('customerPhone').value) {
-                    document.getElementById('customerPhone').value = savedPhone;
-                }
-                if (savedAddr && document.getElementById('deliveryAddress') && !document.getElementById('deliveryAddress').value) {
-                    document.getElementById('deliveryAddress').value = savedAddr;
-                }
-            } catch (e) {}
-        });
-
         // Paso 1: validar el pedido y abrir el selector de horario
         function sendOrder() {
             const cart = JSON.parse(localStorage.getItem('cart')) || [];
@@ -1135,20 +1129,21 @@ try {
             const address = document.getElementById('deliveryAddress')?.value.trim() || '';
 
             if (!customerName) { alert('Por favor ingresa tu nombre para el pedido'); return; }
+            if (!customerPhone) { alert('Por favor ingresá tu teléfono o WhatsApp'); return; }
             if (deliveryType === 'envio' && !address) { alert('Por favor ingresá la dirección de entrega'); return; }
             if (!paymentMethod) { alert('Por favor selecciona una forma de pago'); return; }
             if (cart.length === 0) { alert('El carrito está vacío'); return; }
 
             try {
                 localStorage.setItem('rrbb_customer_name', customerName);
-                if (customerPhone) localStorage.setItem('rrbb_customer_phone', customerPhone);
+                localStorage.setItem('rrbb_customer_phone', customerPhone);
                 if (address) localStorage.setItem('rrbb_customer_address', address);
             } catch (e) {}
 
             openPickupTimeModal();
         }
 
-        // Paso 2: con el horario elegido, armar el mensaje y mandar a WhatsApp + Pizzalog
+        // Paso 2: con el horario elegido, armar el mensaje y mandar a WhatsApp
         function submitOrder(pickupTime) {
             const cart = JSON.parse(localStorage.getItem('cart')) || [];
             const customerName = document.getElementById('customerName').value.trim();
@@ -1163,15 +1158,17 @@ try {
                 ? `🛵 *Envío a domicilio*\nDirección: ${address}`
                 : `🏪 *Retiro en local* (27 de abril 798)`;
 
-            let message = `Hola, soy *${customerName}*${customerPhone ? ` (${customerPhone})` : ''} y quisiera hacer el siguiente pedido:\n\n`;
+            let message = `Hola, soy *${customerName}*`;
+            if (customerPhone) message += ` (${customerPhone})`;
+            message += ` y quisiera hacer el siguiente pedido:\n\n`;
+
             let total = 0;
             const pizzalogItems = [];
-
             cart.forEach(item => {
                 const qty = Number(item.quantity) || 1;
                 let unitPrice = Number(item.price) || 0;
                 let displayName = item.name;
-                if (Array.isArray(item.subproducts) && item.subproducts.length > 0) {
+                if (item.subproducts && item.subproducts.length > 0) {
                     displayName += ` (${item.subproducts.map(s => s.name).join(', ')})`;
                 }
                 if (item.dependentPizza) {
@@ -1209,7 +1206,7 @@ try {
             const preorderTag = isPreorder ? '\n📅 *Pedido programado (local cerrado al momento de pedir)*' : '';
             message += `\n\n${entrega}\n🕒 *${horarioLabel}:* ${pickupTime}${preorderTag}\nTotal: $${total.toFixed(2)}\nForma de pago: ${paymentMethod}`;
 
-            // Registramos el pedido en track.php (que además lo sincroniza automáticamente con Pizzalog)
+            // Registramos el pedido en track.php (que además lo sincroniza con Pizzalog)
             trackEvent({
                 type: 'order',
                 source: 'carta',
