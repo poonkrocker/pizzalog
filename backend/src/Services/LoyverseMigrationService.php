@@ -291,6 +291,10 @@ class LoyverseMigrationService
 
     private function cleanArrabbiataTestData(PDO $pdo, int $bid): void
     {
+        try {
+            $pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
+        } catch (\Throwable $e) {}
+
         $queries = [
             "DELETE oi FROM order_items oi JOIN orders o ON o.id = oi.order_id WHERE o.business_id = $bid",
             "DELETE FROM orders WHERE business_id = $bid",
@@ -306,6 +310,7 @@ class LoyverseMigrationService
             "DELETE cm FROM cash_movements cm JOIN cash_sessions cs ON cs.id = cm.cash_session_id WHERE cs.business_id = $bid",
             "DELETE FROM cash_sessions WHERE business_id = $bid",
             "DELETE FROM customers WHERE business_id = $bid",
+            "DELETE FROM sale_items WHERE sale_id NOT IN (SELECT id FROM sales)",
         ];
 
         foreach ($queries as $q) {
@@ -315,6 +320,10 @@ class LoyverseMigrationService
                 // Ignorar si alguna tabla opcional no existe
             }
         }
+
+        try {
+            $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
+        } catch (\Throwable $e) {}
     }
 
     private static function normName(string $s): string
