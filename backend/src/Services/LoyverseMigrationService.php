@@ -23,7 +23,6 @@ class LoyverseMigrationService
         if (self::$checkedInProcess && !$force) {
             return null;
         }
-        self::$checkedInProcess = true;
 
         try {
             $pdo = Database::pdo();
@@ -40,11 +39,17 @@ class LoyverseMigrationService
                 $stmt->execute([self::MIGRATION_KEY]);
                 $existing = $stmt->fetchColumn();
                 if ($existing !== false) {
-                    return json_decode((string) $existing, true) ?: ['already_applied' => true];
+                    $decoded = json_decode((string) $existing, true);
+                    if (!isset($decoded['error'])) {
+                        self::$checkedInProcess = true;
+                        return $decoded ?: ['already_applied' => true];
+                    }
                 }
             }
 
-            return (new self())->run($pdo);
+            $res = (new self())->run($pdo);
+            self::$checkedInProcess = true;
+            return $res;
         } catch (\Throwable $e) {
             error_log('LoyverseMigrationService error: ' . $e->getMessage());
             return ['error' => $e->getMessage()];
@@ -98,6 +103,8 @@ class LoyverseMigrationService
 
         $pdo->beginTransaction();
         try {
+            $pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
+
             // 3a) Turnos de caja (1.145 turnos)
             $shiftBatches = array_chunk($shifts, 250, true);
             foreach ($shiftBatches as $batch) {
@@ -146,37 +153,43 @@ class LoyverseMigrationService
                 $pdo->prepare($sql)->execute($params);
             }
 
-            // 3c) Recibos (14.419 ventas) e Ítems por recibo (37.318 líneas)
-            $saleRowsBuffer = [];
-            $saleParamsBuffer = [];
+            // 3c) Primero: insertar TODAS las ventas (sales) en lotes
+            $saleBatches = array_chunk($receipts, 350, true);
+            foreach ($saleBatches as $batch) {
+                $saleRows = [];
+                $saleParams = [];
+                foreach ($batch as $rIdx => $r) {
+                    // $r = [0:num, 1:dt, 2:shiftSeq, 3:sub, 4:disc, 5:tot, 6:pm, 7:st, 8:ch, 9:nt, 10:items]
+                    $saleId  = $baseSaleId + $rIdx + 1;
+                    $saleNum = $rIdx + 1;
+                    $csId    = !empty($r[2]) ? ($baseShiftId + (int) $r[2]) : null;
+
+                    $saleRows[] = '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+                    $saleParams[] = $saleId;
+                    $saleParams[] = $bid;
+                    $saleParams[] = $saleNum;
+                    $saleParams[] = $adminUserId;
+                    $saleParams[] = $csId;
+                    $saleParams[] = (float) $r[3];
+                    $saleParams[] = (float) $r[4];
+                    $saleParams[] = (float) $r[5];
+                    $saleParams[] = (string) $r[6];
+                    $saleParams[] = (string) $r[7];
+                    $saleParams[] = (string) $r[8];
+                    $saleParams[] = mb_substr((string) $r[9], 0, 255);
+                    $saleParams[] = (string) $r[1];
+                }
+                $this->flushSalesBatch($pdo, $saleRows, $saleParams);
+            }
+
+            // 3d) Segundo: insertar TODOS los ítems por venta (sale_items) en lotes
             $itemRowsBuffer = [];
             $itemParamsBuffer = [];
 
             foreach ($receipts as $rIdx => $r) {
-                // $r = [0:num, 1:dt, 2:shiftSeq, 3:sub, 4:disc, 5:tot, 6:pm, 7:st, 8:ch, 9:nt, 10:items]
-                $saleId  = $baseSaleId + $rIdx + 1;
-                $saleNum = $rIdx + 1;
-                $csId    = !empty($r[2]) ? ($baseShiftId + (int) $r[2]) : null;
+                $saleId = $baseSaleId + $rIdx + 1;
+                $items  = $r[10] ?? [];
 
-                $saleRowsBuffer[] = '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
-                $saleParamsBuffer[] = $saleId;
-                $saleParamsBuffer[] = $bid;
-                $saleParamsBuffer[] = $saleNum;
-                $saleParamsBuffer[] = $adminUserId;
-                $saleParamsBuffer[] = $csId;
-                $saleParamsBuffer[] = (float) $r[3];
-                $saleParamsBuffer[] = (float) $r[4];
-                $saleParamsBuffer[] = (float) $r[5];
-                $saleParamsBuffer[] = (string) $r[6];
-                $saleParamsBuffer[] = (string) $r[7];
-                $saleParamsBuffer[] = (string) $r[8];
-                $saleParamsBuffer[] = mb_substr((string) $r[9], 0, 255);
-                $saleParamsBuffer[] = (string) $r[1];
-
-                // Ajustar placeholder de sales (13 columnas incluyendo created_at)
-                $saleRowsBuffer[count($saleRowsBuffer) - 1] = '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
-
-                $items = $r[10] ?? [];
                 if ($items === []) {
                     $tot = (float) $r[5];
                     $itemRowsBuffer[] = '(?, NULL, ?, ?, 1, ?)';
@@ -215,27 +228,23 @@ class LoyverseMigrationService
                     }
                 }
 
-                if (count($saleRowsBuffer) >= 400) {
-                    $this->flushSalesBatch($pdo, $saleRowsBuffer, $saleParamsBuffer);
-                    $saleRowsBuffer = [];
-                    $saleParamsBuffer = [];
-                }
-                if (count($itemRowsBuffer) >= 600) {
+                if (count($itemRowsBuffer) >= 500) {
                     $this->flushItemsBatch($pdo, $itemRowsBuffer, $itemParamsBuffer);
                     $itemRowsBuffer = [];
                     $itemParamsBuffer = [];
                 }
             }
 
-            if ($saleRowsBuffer !== []) {
-                $this->flushSalesBatch($pdo, $saleRowsBuffer, $saleParamsBuffer);
-            }
             if ($itemRowsBuffer !== []) {
                 $this->flushItemsBatch($pdo, $itemRowsBuffer, $itemParamsBuffer);
             }
 
+            $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
             $pdo->commit();
         } catch (\Throwable $e) {
+            try {
+                $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
+            } catch (\Throwable) {}
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
             }
