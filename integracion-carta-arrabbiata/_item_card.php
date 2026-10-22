@@ -31,7 +31,7 @@ $variants_use_modal = $variant_count > 3;
 $enable_extras = $enable_extras ?? false;
 $cat_name = strtolower($category['name'] ?? '');
 $is_pizza_category = (strpos($cat_name, 'pizza') !== false || strpos($cat_name, 'secreta') !== false);
-$show_extras = $enable_extras && $is_pizza_category && !$item['requires_pizza'] && empty($sub_products[$item['id']]) && !$has_variants && !empty($available_extras);
+$show_extras = $enable_extras && $is_pizza_category && !$item['requires_pizza'] && empty($sub_products[$item['id']]) && !$variants_use_modal && !empty($available_extras);
 ?>
 <div class="pizza-item <?php echo $item['is_secret_menu'] ? 'secret-item' : ''; ?> <?php echo $has_variants ? 'has-variants' : ''; ?>"
      data-item-id="<?php echo $item['id']; ?>"
@@ -43,10 +43,10 @@ $show_extras = $enable_extras && $is_pizza_category && !$item['requires_pizza'] 
      data-required-selections="<?php echo $item['required_selections'] ?: '0'; ?>"
      <?php if ($has_variants && $variants_use_modal): ?>
          onclick="openVariantModal('<?php echo $item['id']; ?>')"
-     <?php elseif ($has_variants): ?>
-         onclick="addSelectedVariant(this)"
      <?php elseif ($show_extras): ?>
          onclick="addItemWithExtras(this)"
+     <?php elseif ($has_variants): ?>
+         onclick="addSelectedVariant(this)"
      <?php elseif (!$item['requires_pizza']): ?>
          onclick="addItemToCart('<?php echo htmlspecialchars($item['name']); ?>', '<?php echo $item['id']; ?>', <?php echo $item['price']; ?>, false, <?php echo !empty($sub_products[$item['id']]) ? 'true' : 'false'; ?>, <?php echo $item['required_selections'] ?: '0'; ?>)"
      <?php endif; ?>>
@@ -92,7 +92,16 @@ $show_extras = $enable_extras && $is_pizza_category && !$item['requires_pizza'] 
         </div>
 
     <?php elseif ($has_variants): ?>
-        <h3><?php echo htmlspecialchars($item['name']); ?></h3>
+        <?php if ($show_extras): ?>
+            <div class="item-title-row">
+                <h3><?php echo htmlspecialchars($item['name']); ?></h3>
+                <?php if ($item['has_vegan_option']): ?>
+                    <button type="button" class="vegan-badge-btn" data-item-id="<?php echo $item['id']; ?>" onclick="event.stopPropagation(); addItemWithExtras(this.closest('.pizza-item'), true)" title="Pedir en versión vegana">🌿 Vegana</button>
+                <?php endif; ?>
+            </div>
+        <?php else: ?>
+            <h3><?php echo htmlspecialchars($item['name']); ?></h3>
+        <?php endif; ?>
         <p class="item-desc">
             <?php echo nl2br(htmlspecialchars($item['description'])); ?>
         </p>
@@ -118,6 +127,25 @@ $show_extras = $enable_extras && $is_pizza_category && !$item['requires_pizza'] 
                 <?php endforeach; ?>
             </div>
             <p class="variant-desc"><?php echo htmlspecialchars($__default['description'] ?? ''); ?></p>
+            <?php if ($show_extras): ?>
+                <div class="pizza-extras-container" onclick="event.stopPropagation()">
+                    <span class="extras-label">Sumale a tu pizza:</span>
+                    <div class="extras-pills">
+                        <?php foreach ($available_extras as $extra): ?>
+                            <button type="button"
+                                    class="extra-pill"
+                                    data-extra-id="<?php echo htmlspecialchars($extra['id']); ?>"
+                                    data-extra-name="<?php echo htmlspecialchars($extra['name']); ?>"
+                                    data-extra-price="<?php echo (float)$extra['price']; ?>"
+                                    onclick="toggleItemExtra(this, event)">
+                                <span class="extra-plus">+</span> <?php echo htmlspecialchars($extra['name']); ?>
+                                <span class="extra-price-tag">(+$<?php echo number_format($extra['price'], 0, ',', '.'); ?>)</span>
+                            </button>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+                <div class="added-toast">✓ Agregada</div>
+            <?php endif; ?>
             <div class="price-container">
                 <p>$<span class="item-price variant-current-price" data-price="<?php echo $__default['price']; ?>"><?php echo number_format($__default['price'], 2); ?></span></p>
             </div>

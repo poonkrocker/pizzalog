@@ -377,6 +377,11 @@ try {
 try {
     $categories_stmt = $pdo->query("SELECT * FROM categories ORDER BY display_order");
     $categories = $categories_stmt->fetchAll();
+    // Excluir la categoría 'Extras' de la navegación y de las secciones de la carta
+    // (sus productos se usan exclusivamente como opciones / botones en las pizzas)
+    $categories = array_values(array_filter($categories, function($cat) {
+        return strtolower(trim($cat['name'])) !== 'extras';
+    }));
 } catch (PDOException $e) {
     $categories = [];
 }
@@ -532,10 +537,13 @@ function getOrCreateExtrasFromDB(PDO $pdo): array {
 $available_extras = getOrCreateExtrasFromDB($pdo);
 
 // Control de versión:
-// Versión 1 (actual / clásica): $enable_extras = false
-// Versión 2 (con botones de extras): $enable_extras = true (se activa en index_extras.php o con ?extras=1)
-$is_extras_version = $is_extras_version ?? false;
-$enable_extras = $is_extras_version || (isset($_GET['extras']) && $_GET['extras'] !== '0');
+// index.php es ahora la versión oficial con extras activados por defecto.
+// index_old.php pasa $force_disable_extras = true para mostrar la versión clásica sin extras.
+if (!empty($force_disable_extras) || (isset($_GET['extras']) && $_GET['extras'] === '0')) {
+    $enable_extras = false;
+} else {
+    $enable_extras = true;
+}
 ?>
 
 <!DOCTYPE html>
@@ -852,9 +860,9 @@ $enable_extras = $is_extras_version || (isset($_GET['extras']) && $_GET['extras'
 </style>
 </head>
 <body>
-    <?php if ($enable_extras): ?>
-        <div style="background: #fef3c7; color: #92400e; padding: 7px 12px; font-size: 0.85rem; text-align: center; font-weight: 600; border-bottom: 1px solid #fde68a;">
-            🍕 Versión con botones de Extras activados &nbsp;·&nbsp; <a href="index.php" style="color: #b45309; text-decoration: underline;">Ver versión clásica</a>
+    <?php if (!empty($show_classic_version_notice)): ?>
+        <div style="background: #e0f2fe; color: #0369a1; padding: 7px 12px; font-size: 0.85rem; text-align: center; font-weight: 600; border-bottom: 1px solid #bae6fd;">
+            ℹ️ Estás viendo la versión clásica de la carta (sin extras) &nbsp;·&nbsp; <a href="index.php" style="color: #0284c7; text-decoration: underline;">Ir a la versión con extras</a>
         </div>
     <?php endif; ?>
     <section class="section">
@@ -1030,6 +1038,35 @@ $enable_extras = $is_extras_version || (isset($_GET['extras']) && $_GET['extras'
         let currentSubproductItem = null;
         let currentDependentItem = null;
 
+        function selectVariant(pill) {
+            const picker = pill.closest('.variant-picker');
+            if (!picker) return;
+            picker.querySelectorAll('.variant-pill').forEach(p => p.classList.remove('active'));
+            pill.classList.add('active');
+
+            const variantPrice = parseFloat(pill.dataset.variantPrice) || 0;
+            const desc = pill.dataset.variantDesc || '';
+
+            const descEl = picker.querySelector('.variant-desc');
+            if (descEl) descEl.textContent = desc;
+
+            const card = pill.closest('.pizza-item');
+            let extrasTotal = 0;
+            if (card) {
+                const activePills = card.querySelectorAll('.extra-pill.active');
+                activePills.forEach(ep => {
+                    extrasTotal += parseFloat(ep.dataset.extraPrice) || 0;
+                });
+            }
+
+            const finalPrice = variantPrice + extrasTotal;
+            const priceEl = picker.querySelector('.variant-current-price') || card?.querySelector('.item-price');
+            if (priceEl) {
+                priceEl.dataset.price = finalPrice;
+                priceEl.textContent = finalPrice.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            }
+        }
+
         function toggleItemExtra(btn, ev) {
             if (ev) {
                 ev.stopPropagation();
@@ -1044,7 +1081,12 @@ $enable_extras = $is_extras_version || (isset($_GET['extras']) && $_GET['extras'
             const card = btn.closest('.pizza-item');
             if (!card) return;
 
-            const basePrice = parseFloat(card.dataset.itemPrice) || 0;
+            // Base price: si tiene variante activa (ej. Fugazzeta), usar precio de la variante; si no, del item
+            const activeVariant = card.querySelector('.variant-pill.active') || card.querySelector('.variant-pill');
+            const basePrice = activeVariant
+                ? (parseFloat(activeVariant.dataset.variantPrice) || 0)
+                : (parseFloat(card.dataset.itemPrice) || 0);
+
             const activePills = card.querySelectorAll('.extra-pill.active');
             let extrasTotal = 0;
             activePills.forEach(pill => {
@@ -1052,7 +1094,7 @@ $enable_extras = $is_extras_version || (isset($_GET['extras']) && $_GET['extras'
             });
 
             const finalPrice = basePrice + extrasTotal;
-            const priceSpan = card.querySelector('.item-price');
+            const priceSpan = card.querySelector('.variant-current-price') || card.querySelector('.item-price');
             if (priceSpan) {
                 priceSpan.textContent = finalPrice.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             }
@@ -1061,7 +1103,21 @@ $enable_extras = $is_extras_version || (isset($_GET['extras']) && $_GET['extras'
         function addItemWithExtras(card, isVegan = false) {
             const baseName = card.dataset.itemName;
             const itemId = card.dataset.itemId;
-            const basePrice = parseFloat(card.dataset.itemPrice) || 0;
+
+            // Si la tarjeta tiene variantes (ej. Fugazzeta común / queso azul)
+            const activeVariant = card.querySelector('.variant-pill.active') || card.querySelector('.variant-pill');
+            let basePrice = 0;
+            let itemDisplayName = baseName;
+            let variantId = null;
+
+            if (activeVariant) {
+                basePrice = parseFloat(activeVariant.dataset.variantPrice) || 0;
+                const vName = activeVariant.dataset.variantName;
+                variantId = activeVariant.dataset.variantId;
+                itemDisplayName = `${baseName} - ${vName}`;
+            } else {
+                basePrice = parseFloat(card.dataset.itemPrice) || 0;
+            }
 
             const activePills = card.querySelectorAll('.extra-pill.active');
             const selectedExtras = [];
@@ -1073,14 +1129,14 @@ $enable_extras = $is_extras_version || (isset($_GET['extras']) && $_GET['extras'
                 extrasTotal += extraPrice;
             });
 
-            let displayName = isVegan ? `${baseName} (Vegana)` : baseName;
+            let displayName = isVegan ? `${itemDisplayName} (Vegana)` : itemDisplayName;
             if (selectedExtras.length > 0) {
                 displayName += ` (+ ${selectedExtras.join(', + ')})`;
             }
 
             const finalPrice = basePrice + extrasTotal;
 
-            addToCart(displayName, finalPrice, itemId, isVegan);
+            addToCart(displayName, finalPrice, itemId, isVegan, [], null, variantId ? 'v' + variantId : null);
 
             const toast = card.querySelector('.added-toast');
             if (toast) {
@@ -1093,7 +1149,7 @@ $enable_extras = $is_extras_version || (isset($_GET['extras']) && $_GET['extras'
                 const plusSpan = pill.querySelector('.extra-plus');
                 if (plusSpan) plusSpan.textContent = '+';
             });
-            const priceSpan = card.querySelector('.item-price');
+            const priceSpan = card.querySelector('.variant-current-price') || card.querySelector('.item-price');
             if (priceSpan) {
                 priceSpan.textContent = basePrice.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             }
