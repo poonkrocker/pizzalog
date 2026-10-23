@@ -180,9 +180,15 @@ export function RecipeStudioPage() {
       if (index !== i) return row;
       const next = { ...row, ...patch };
       if (patch.component_type && patch.component_type !== row.component_type) {
-        const first = patch.component_type === 'supply' ? supplies[0] : recipes.find((r) => r.recipe_type === 'subrecipe');
-        next.component_id = first?.id ?? 0;
-        next.unit = patch.component_type === 'supply' ? (supplies[0]?.unit || 'kg') : (first?.yield_unit || 'kg');
+        if (patch.component_type === 'supply') {
+          const firstSupply = supplies[0];
+          next.component_id = firstSupply?.id ?? 0;
+          next.unit = firstSupply?.unit || 'kg';
+        } else {
+          const firstRecipe = recipes.find((r) => r.recipe_type === 'subrecipe');
+          next.component_id = firstRecipe?.id ?? 0;
+          next.unit = firstRecipe?.yield_unit || 'kg';
+        }
       }
       return next;
     }));
