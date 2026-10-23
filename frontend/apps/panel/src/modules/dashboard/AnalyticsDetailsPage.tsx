@@ -54,7 +54,7 @@ export function AnalyticsDetailsPage() {
     if (heatPreset === 'all') return cells;
     return cells.filter(c => heatPreset === 'midday'
       ? c.weekday >= 1 && c.weekday <= 4 && c.hour >= 11 && c.hour < 16
-      : [3,4,5,6].includes(c.weekday) && (c.hour >= 20 || c.hour < 2));
+      : (c.hour >= 20 && [3,4,5,6].includes(c.weekday)) || (c.hour < 2 && [4,5,6,0].includes(c.weekday)));
   }, [cells, heatPreset]);
   const heatLookup = useMemo(() => new Map(heatCells.map(c => [`${c.weekday}-${c.hour}`, c])), [heatCells]);
   const categories = useMemo<Array<{ name: string; product: (typeof products)[number] }>>(() => {
