@@ -148,7 +148,7 @@ class AnalyticsController
                 AND si.product_name NOT LIKE "Cobro compartido%"
                 AND s.created_at BETWEEN ? AND ?
               GROUP BY COALESCE(c.id, 0), COALESCE(c.name, "Sin categoría"),
-                       COALESCE(CAST(si.product_id AS CHAR), si.product_name)
+                       COALESCE(CAST(si.product_id AS CHAR), si.product_name), si.product_id
               ORDER BY category_id, units DESC, revenue DESC'
         );
         $stmt->execute([$bid, $fromDt, $toDt]);
