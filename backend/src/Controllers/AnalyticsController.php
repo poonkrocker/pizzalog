@@ -21,6 +21,7 @@ class AnalyticsController
     public function summary(Request $req): void
     {
         [$bid, $fromDt, $toDt, $from, $to] = $this->ctx($req);
+        $timeFilter = $this->timeFilterSql($req, 's.created_at');
         $pdo = Database::pdo();
 
         $stmt = $pdo->prepare(
@@ -28,9 +29,9 @@ class AnalyticsController
                     COALESCE(SUM(total), 0)    AS revenue,
                     COALESCE(SUM(discount), 0) AS discounts,
                     COALESCE(AVG(total), 0)    AS avg_ticket
-               FROM sales
-              WHERE business_id = ? AND status = "completed"
-                AND created_at BETWEEN ? AND ?'
+               FROM sales s
+              WHERE s.business_id = ? AND s.status = "completed"
+                AND s.created_at BETWEEN ? AND ?' . $timeFilter . ''
         );
         $stmt->execute([$bid, $fromDt, $toDt]);
         $s = $stmt->fetch();
@@ -43,17 +44,17 @@ class AnalyticsController
                JOIN sales s ON s.id = si.sale_id
               WHERE s.business_id = ? AND s.status = "completed"
                 AND si.parent_sale_item_id IS NULL
-                AND s.created_at BETWEEN ? AND ?'
+                AND s.created_at BETWEEN ? AND ?' . $timeFilter . ''
         );
         $stmt->execute([$bid, $fromDt, $toDt]);
         $units = (float) $stmt->fetchColumn();
 
         // Desglose por canal y separación delivery vs mostrador.
         $stmt = $pdo->prepare(
-            'SELECT channel, COUNT(*) AS c, COALESCE(SUM(total), 0) AS r
-               FROM sales
-              WHERE business_id = ? AND status = "completed"
-                AND created_at BETWEEN ? AND ?
+            'SELECT s.channel, COUNT(*) AS c, COALESCE(SUM(s.total), 0) AS r
+               FROM sales s
+              WHERE s.business_id = ? AND s.status = "completed"
+                AND s.created_at BETWEEN ? AND ?' . $timeFilter . '
               GROUP BY channel'
         );
         $stmt->execute([$bid, $fromDt, $toDt]);
@@ -96,6 +97,7 @@ class AnalyticsController
     public function topProducts(Request $req): void
     {
         [$bid, $fromDt, $toDt] = $this->ctx($req);
+        $timeFilter = $this->timeFilterSql($req, 's.created_at');
         $limit = min(max((int) ($req->query['limit'] ?? 10), 1), 100);
 
         $stmt = Database::pdo()->prepare(
@@ -110,7 +112,7 @@ class AnalyticsController
           LEFT JOIN categories c ON c.id = p.category_id
               WHERE s.business_id = ? AND s.status = "completed"
                 AND si.product_name NOT LIKE "Cobro compartido%"
-                AND s.created_at BETWEEN ? AND ?
+                AND s.created_at BETWEEN ? AND ?' . $timeFilter . '
               GROUP BY COALESCE(CAST(si.product_id AS CHAR), si.product_name)
               ORDER BY units DESC
               LIMIT ' . $limit
@@ -133,6 +135,7 @@ class AnalyticsController
     public function categoryLeaders(Request $req): void
     {
         [$bid, $fromDt, $toDt] = $this->ctx($req);
+        $timeFilter = $this->timeFilterSql($req, 's.created_at');
         $stmt = Database::pdo()->prepare(
             'SELECT COALESCE(c.id, 0) AS category_id,
                     COALESCE(c.name, "Sin categoría") AS category_name,
@@ -146,7 +149,7 @@ class AnalyticsController
           LEFT JOIN categories c ON c.id = p.category_id
               WHERE s.business_id = ? AND s.status = "completed"
                 AND si.product_name NOT LIKE "Cobro compartido%"
-                AND s.created_at BETWEEN ? AND ?
+                AND s.created_at BETWEEN ? AND ?' . $timeFilter . '
               GROUP BY COALESCE(c.id, 0), COALESCE(c.name, "Sin categoría"),
                        COALESCE(CAST(si.product_id AS CHAR), si.product_name), si.product_id
               ORDER BY category_id, units DESC, revenue DESC'
@@ -178,6 +181,7 @@ class AnalyticsController
     public function topCategories(Request $req): void
     {
         [$bid, $fromDt, $toDt] = $this->ctx($req);
+        $timeFilter = $this->timeFilterSql($req, 's.created_at');
         $limit = min(max((int) ($req->query['limit'] ?? 20), 1), 100);
 
         $stmt = Database::pdo()->prepare(
@@ -192,7 +196,7 @@ class AnalyticsController
           LEFT JOIN categories c ON c.id = p.category_id
               WHERE s.business_id = ? AND s.status = "completed"
                 AND si.product_name NOT LIKE "Cobro compartido%"
-                AND s.created_at BETWEEN ? AND ?
+                AND s.created_at BETWEEN ? AND ?' . $timeFilter . '
               GROUP BY COALESCE(c.id, 0), COALESCE(c.name, "Sin categoría")
               ORDER BY units DESC, revenue DESC
               LIMIT ' . $limit
@@ -216,6 +220,7 @@ class AnalyticsController
     public function productMargins(Request $req): void
     {
         [$bid, $fromDt, $toDt] = $this->ctx($req);
+        $timeFilter = $this->timeFilterSql($req, 's.created_at');
 
         $stmt = Database::pdo()->prepare(
             'SELECT si.product_id,
@@ -229,7 +234,7 @@ class AnalyticsController
                JOIN products p ON p.id = si.product_id
               WHERE s.business_id = ? AND s.status = "completed"
                 AND si.parent_sale_item_id IS NULL
-                AND s.created_at BETWEEN ? AND ?
+                AND s.created_at BETWEEN ? AND ?' . $timeFilter . '
               GROUP BY si.product_id, p.cost
               ORDER BY profit DESC'
         );
@@ -278,6 +283,7 @@ class AnalyticsController
     public function ingredients(Request $req): void
     {
         [$bid, $fromDt, $toDt] = $this->ctx($req);
+        $timeFilter = $this->timeFilterSql($req, 's.created_at');
         $limit = min(max((int) ($req->query['limit'] ?? 20), 1), 100);
         $pdo = Database::pdo();
         $excludeSql = $this->excludeBasicPizzaIngredientsSql('i');
@@ -292,7 +298,7 @@ class AnalyticsController
                JOIN ingredients i ON i.id = pi.ingredient_id
               WHERE s.business_id = ? AND s.status = "completed"
                 AND si.product_name NOT LIKE "Cobro compartido%"
-                AND s.created_at BETWEEN ? AND ?'
+                AND s.created_at BETWEEN ? AND ?' . $timeFilter . ''
               . $excludeSql .
             ' GROUP BY i.id, i.name, i.category
               ORDER BY units DESC
@@ -315,7 +321,7 @@ class AnalyticsController
                JOIN ingredients i ON i.id = pi.ingredient_id
               WHERE s.business_id = ? AND s.status = "completed"
                 AND si.product_name NOT LIKE "Cobro compartido%"
-                AND s.created_at BETWEEN ? AND ?'
+                AND s.created_at BETWEEN ? AND ?' . $timeFilter . ''
               . $excludeSql .
             ' GROUP BY i.category
               ORDER BY units DESC'
@@ -342,6 +348,7 @@ class AnalyticsController
     public function winningCombinations(Request $req): void
     {
         [$bid, $fromDt, $toDt] = $this->ctx($req);
+        $timeFilter = $this->timeFilterSql($req, 's.created_at');
         $pdo = Database::pdo();
 
         // 1) Combinaciones de productos comprados juntos en el mismo ticket/pedido
@@ -363,7 +370,7 @@ class AnalyticsController
                  LEFT JOIN products p ON p.id = si.product_id
                  LEFT JOIN categories cat ON cat.id = p.category_id
                      WHERE s.business_id = ? AND s.status = "completed"
-                       AND s.created_at BETWEEN ? AND ?
+                       AND s.created_at BETWEEN ? AND ?' . $timeFilter . '
                        AND si.parent_sale_item_id IS NULL
                        AND si.product_id IS NOT NULL
                      GROUP BY si.sale_id, si.product_id
@@ -378,7 +385,7 @@ class AnalyticsController
                  LEFT JOIN products p ON p.id = si.product_id
                  LEFT JOIN categories cat ON cat.id = p.category_id
                      WHERE s.business_id = ? AND s.status = "completed"
-                       AND s.created_at BETWEEN ? AND ?
+                       AND s.created_at BETWEEN ? AND ?' . $timeFilter . '
                        AND si.parent_sale_item_id IS NULL
                        AND si.product_id IS NOT NULL
                      GROUP BY si.sale_id, si.product_id
@@ -424,7 +431,7 @@ class AnalyticsController
              JOIN ingredients i1 ON i1.id = pi1.ingredient_id
              JOIN ingredients i2 ON i2.id = pi2.ingredient_id
              WHERE s.business_id = ? AND s.status = "completed"
-               AND s.created_at BETWEEN ? AND ?'
+               AND s.created_at BETWEEN ? AND ?' . $timeFilter . ''
              . $excludeI1
              . $excludeI2 .
             ' GROUP BY i1_id, i2_id
@@ -453,7 +460,7 @@ class AnalyticsController
                       FROM sale_items si
                       JOIN sales s ON s.id = si.sale_id
                      WHERE s.business_id = ? AND s.status = "completed"
-                       AND s.created_at BETWEEN ? AND ?
+                       AND s.created_at BETWEEN ? AND ?' . $timeFilter . '
                        AND si.parent_sale_item_id IS NULL AND si.product_id IS NOT NULL
                      GROUP BY si.sale_id, si.product_id
                ) a
@@ -462,7 +469,7 @@ class AnalyticsController
                       FROM sale_items si
                       JOIN sales s ON s.id = si.sale_id
                      WHERE s.business_id = ? AND s.status = "completed"
-                       AND s.created_at BETWEEN ? AND ?
+                       AND s.created_at BETWEEN ? AND ?' . $timeFilter . '
                        AND si.parent_sale_item_id IS NULL AND si.product_id IS NOT NULL
                      GROUP BY si.sale_id, si.product_id
                ) b ON b.sale_id = a.sale_id AND b.product_id > a.product_id
@@ -471,7 +478,7 @@ class AnalyticsController
                       FROM sale_items si
                       JOIN sales s ON s.id = si.sale_id
                      WHERE s.business_id = ? AND s.status = "completed"
-                       AND s.created_at BETWEEN ? AND ?
+                       AND s.created_at BETWEEN ? AND ?' . $timeFilter . '
                        AND si.parent_sale_item_id IS NULL AND si.product_id IS NOT NULL
                      GROUP BY si.sale_id, si.product_id
                ) c ON c.sale_id = b.sale_id AND c.product_id > b.product_id'
@@ -573,12 +580,13 @@ class AnalyticsController
     public function timeHeatmap(Request $req): void
     {
         [$bid, $fromDt, $toDt] = $this->ctx($req);
+        $timeFilter = $this->timeFilterSql($req, 'created_at');
         $stmt = Database::pdo()->prepare(
             'SELECT DAYOFWEEK(created_at) AS weekday, HOUR(created_at) AS hour,
                     COUNT(*) AS sales_count, COALESCE(SUM(total), 0) AS revenue
                FROM sales
               WHERE business_id = ? AND status = "completed"
-                AND created_at BETWEEN ? AND ?
+                AND created_at BETWEEN ? AND ?' . $timeFilter . '
               GROUP BY DAYOFWEEK(created_at), HOUR(created_at)
               ORDER BY weekday, hour'
         );
@@ -598,6 +606,7 @@ class AnalyticsController
     public function salesOverTime(Request $req): void
     {
         [$bid, $fromDt, $toDt] = $this->ctx($req);
+        $timeFilter = $this->timeFilterSql($req, 'created_at');
 
         $stmt = Database::pdo()->prepare(
             'SELECT DATE(created_at) AS day,
@@ -605,7 +614,7 @@ class AnalyticsController
                     SUM(total)       AS revenue
                FROM sales
               WHERE business_id = ? AND status = "completed"
-                AND created_at BETWEEN ? AND ?
+                AND created_at BETWEEN ? AND ?' . $timeFilter . '
               GROUP BY DATE(created_at)
               ORDER BY day'
         );
@@ -619,6 +628,24 @@ class AnalyticsController
     }
 
     // -----------------------------------------------------------------
+
+    /**
+     * Filtro horario común para todas las métricas.
+     * Mediodía: martes-viernes 11:00–15:59.
+     * Noche: jueves-domingo desde las 20:00 y madrugada hasta las 01:59
+     * del día siguiente, incluyendo el cruce de medianoche.
+     */
+    private function timeFilterSql(Request $req, string $column): string
+    {
+        $preset = (string)($req->query['time_preset'] ?? 'all');
+        if ($preset === 'midday') {
+            return " AND DAYOFWEEK($column) IN (3, 4, 5, 6) AND HOUR($column) >= 11 AND HOUR($column) < 16";
+        }
+        if ($preset === 'night') {
+            return " AND ((HOUR($column) >= 20 AND DAYOFWEEK($column) IN (5, 6, 7, 1)) OR (HOUR($column) < 2 AND DAYOFWEEK($column) IN (6, 7, 1, 2)))";
+        }
+        return '';
+    }
 
     /**
      * Contexto común: negocio + rango del período.

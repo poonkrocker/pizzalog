@@ -29,11 +29,11 @@ export function AnalyticsDetailsPage() {
   const [to, setTo] = useState(dateNow());
   const [heatPreset, setHeatPreset] = useState<'all' | 'midday' | 'night'>('all');
   const [preferencesSaveError, setPreferencesSaveError] = useState(false);
-  const query: AnalyticsQuery = useMemo(() => ({ from, to, limit: 100 }), [from, to]);
+  const query: AnalyticsQuery = useMemo(() => ({ from, to, limit: 100, time_preset: heatPreset }), [from, to, heatPreset]);
   const previous = useMemo(() => {
     const length = Math.max(1, Math.round((new Date(to + 'T12:00:00').getTime() - new Date(from + 'T12:00:00').getTime()) / 86400000) + 1);
-    return { from: addDays(from, -length), to: addDays(from, -1) };
-  }, [from, to]);
+    return { from: addDays(from, -length), to: addDays(from, -1), time_preset: heatPreset };
+  }, [from, to, heatPreset]);
 
   const preferencesQ = useQuery({ queryKey: ['analytics','time-preferences'], queryFn: () => api.analytics.timePreferences().then(r => r.preferences) });
   useEffect(() => {

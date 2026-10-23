@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { formatARS, type AnalyticsQuery } from '@pizzalog/shared';
 import { useAuth } from '@/lib/auth';
 import { Field, Input, Loading, PageHeader, Select } from '@/ui';
@@ -47,10 +48,17 @@ function ingredientCategoryLabel(cat: string): { label: string; icon: string; bg
 }
 
 export function DashboardPage() {
-  const { user } = useAuth();
+  const { user, api } = useAuth();
   const [preset, setPreset] = useState<Preset>('7days');
   const [from, setFrom] = useState(daysAgoStr(6));
   const [to, setTo] = useState(todayStr());
+  const [timePreset, setTimePreset] = useState<'all' | 'midday' | 'night'>('all');
+  const timePreferences = useQuery({ queryKey: ['analytics', 'time-preferences'], queryFn: () => api.analytics.timePreferences().then((r) => r.preferences) });
+  useEffect(() => { if (timePreferences.data?.selected_preset) setTimePreset(timePreferences.data.selected_preset); }, [timePreferences.data?.selected_preset]);
+  const changeTimePreset = (next: 'all' | 'midday' | 'night') => {
+    setTimePreset(next);
+    void api.analytics.saveTimePreferences({ selected_preset: next }).catch(() => undefined);
+  };
 
   const handlePresetChange = (p: Preset) => {
     setPreset(p);
@@ -76,7 +84,7 @@ export function DashboardPage() {
     }
   };
 
-  const query: AnalyticsQuery = useMemo(() => ({ from, to }), [from, to]);
+  const query: AnalyticsQuery = useMemo(() => ({ from, to, time_preset: timePreset }), [from, to, timePreset]);
 
   const summary = useAnalyticsSummary(query);
   const topProducts = useTopProducts({ ...query, limit: 100 });
@@ -332,6 +340,12 @@ export function DashboardPage() {
           >
             Personalizado
           </button>
+        </div>
+
+        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
+          {([{ id: 'all', label: 'Todo el horario' }, { id: 'midday', label: 'Mediodía' }, { id: 'night', label: 'Noche' }] as const).map((p) => (
+            <button key={p.id} type="button" onClick={() => changeTimePreset(p.id)} style={{ padding: '0.4rem 0.7rem', borderRadius: '6px', border: '1px solid #ddd', background: timePreset === p.id ? 'var(--c-accent, #e63946)' : '#f0f0f0', color: timePreset === p.id ? '#fff' : '#333', fontWeight: timePreset === p.id ? 700 : 400, cursor: 'pointer', fontSize: '0.85rem' }}>{p.label}</button>
+          ))}
         </div>
 
         {preset === 'custom' && (
