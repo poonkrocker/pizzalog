@@ -1,0 +1,47 @@
+name: Validate analytics PR
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "backend/src/Controllers/AnalyticsController.php"
+      - "backend/public/index.php"
+      - "frontend/apps/panel/**"
+      - "frontend/packages/shared/**"
+      - "frontend/pnpm-lock.yaml"
+      - "frontend/package.json"
+      - "frontend/pnpm-workspace.yaml"
+      - ".github/workflows/validate-analytics.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  panel-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+      - name: Build panel
+        working-directory: frontend
+        run: pnpm --filter @pizzalog/panel build
+
+  php-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint changed PHP sources
+        run: |
+          php -l backend/src/Controllers/AnalyticsController.php
+          php -l backend/public/index.php
