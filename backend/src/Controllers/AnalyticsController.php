@@ -127,6 +127,50 @@ class AnalyticsController
     }
 
     /**
+     * GET /analytics/category-leaders — producto más vendido en cada categoría.
+     * No limita el catálogo a los primeros N productos globales.
+     */
+    public function categoryLeaders(Request $req): void
+    {
+        [$bid, $fromDt, $toDt] = $this->ctx($req);
+        $stmt = Database::pdo()->prepare(
+            'SELECT COALESCE(c.id, 0) AS category_id,
+                    COALESCE(c.name, "Sin categoría") AS category_name,
+                    si.product_id,
+                    MAX(COALESCE(p.name, si.product_name)) AS product_name,
+                    SUM(si.quantity) AS units,
+                    SUM(si.line_total) AS revenue
+               FROM sale_items si
+               JOIN sales s ON s.id = si.sale_id
+          LEFT JOIN products p ON p.id = si.product_id
+          LEFT JOIN categories c ON c.id = p.category_id
+              WHERE s.business_id = ? AND s.status = "completed"
+                AND si.product_name NOT LIKE "Cobro compartido%"
+                AND s.created_at BETWEEN ? AND ?
+              GROUP BY COALESCE(c.id, 0), COALESCE(c.name, "Sin categoría"),
+                       COALESCE(CAST(si.product_id AS CHAR), si.product_name)
+              ORDER BY category_id, units DESC, revenue DESC'
+        );
+        $stmt->execute([$bid, $fromDt, $toDt]);
+        $leaders = [];
+        foreach ($stmt->fetchAll() as $r) {
+            $categoryId = (int)$r['category_id'];
+            if (isset($leaders[$categoryId])) {
+                continue;
+            }
+            $leaders[$categoryId] = [
+                'category_id' => $categoryId,
+                'category_name' => $r['category_name'],
+                'product_id' => $r['product_id'] !== null ? (int)$r['product_id'] : null,
+                'product_name' => $r['product_name'],
+                'units' => (float)$r['units'],
+                'revenue' => (float)$r['revenue'],
+            ];
+        }
+        Response::ok(['leaders' => array_values($leaders)]);
+    }
+
+    /**
      * GET /analytics/top-categories?from=YYYY-MM-DD&to=YYYY-MM-DD
      * Ranking por categoría (p. ej. cervezas), respetando unidades históricas
      * aunque el product_id no haya podido vincularse al catálogo.
