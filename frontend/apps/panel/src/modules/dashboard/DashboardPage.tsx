@@ -7,6 +7,7 @@ import {
   useAnalyticsSummary,
   useSalesOverTime,
   useTopProducts,
+  useTopCategories,
   useWinningCombinations,
 } from './hooks';
 import { Link } from 'react-router-dom';
@@ -76,12 +77,14 @@ export function DashboardPage() {
 
   const summary = useAnalyticsSummary(query);
   const topProducts = useTopProducts({ ...query, limit: 6 });
+  const topCategories = useTopCategories({ ...query, limit: 10 });
   const salesOverTime = useSalesOverTime(query);
   const ingredientsQuery = useAnalyticsIngredients(query);
   const combinationsQuery = useWinningCombinations(query);
 
   const s = summary.data;
   const products = topProducts.data ?? [];
+  const categories = topCategories.data ?? [];
   const points = salesOverTime.data ?? [];
   const ingredients = ingredientsQuery.data?.ingredients ?? [];
   const ingCategories = ingredientsQuery.data?.by_category ?? [];
@@ -563,6 +566,59 @@ export function DashboardPage() {
                 ))}
               </div>
             )}
+          </div>
+
+          {/* Ranking por categoría para identificar, por ejemplo, el tipo de cerveza más vendido */}
+          <div
+            style={{
+              background: 'var(--c-surface, #fff)',
+              border: '1px solid var(--c-border, #ddd)',
+              borderRadius: '8px',
+              padding: '1.25rem',
+              marginBottom: '2rem',
+            }}
+          >
+            <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.1rem' }}>🍺 Ventas por categoría</h3>
+            {topCategories.isLoading ? (
+              <p style={{ color: '#888', fontSize: '0.9rem' }}>Calculando categorías…</p>
+            ) : categories.length === 0 ? (
+              <p style={{ color: '#888', fontStyle: 'italic', fontSize: '0.9rem' }}>
+                No hay categorías con ventas en el período seleccionado.
+              </p>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem' }}>
+                {categories.map((cat, idx) => (
+                  <div
+                    key={cat.category_id}
+                    style={{
+                      border: '1px solid #eee',
+                      borderRadius: '6px',
+                      padding: '0.75rem 1rem',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      background: idx === 0 ? '#fffdf0' : 'transparent',
+                      gap: '1rem',
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontSize: '0.75rem', color: '#888', fontWeight: 700 }}>#{idx + 1}</div>
+                      <strong style={{ fontSize: '0.9rem' }}>{cat.category_name}</strong>
+                      <div style={{ fontSize: '0.8rem', color: '#666' }}>{cat.sales_count} tickets</div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontWeight: 800 }}>{cat.units} unid.</div>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--c-accent, #e63946)', fontWeight: 700 }}>
+                        {formatARS(cat.revenue)}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p style={{ color: '#888', fontSize: '0.78rem', margin: '0.85rem 0 0' }}>
+              Los productos históricos sin vincular al catálogo aparecen como “Sin categoría”; así podés detectar qué nombres falta normalizar.
+            </p>
           </div>
 
           {/* Sección de Ingredientes Más Vendidos y Combinaciones de Toppings */}
