@@ -556,6 +556,8 @@ export interface ProductCombination {
   p2_id: number;
   p1_name: string;
   p2_name: string;
+  p1_category_name?: string | null;
+  p2_category_name?: string | null;
   pair_orders: number;
   total_revenue: number;
 }
