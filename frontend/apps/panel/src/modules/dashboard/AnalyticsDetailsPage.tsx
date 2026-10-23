@@ -85,6 +85,7 @@ export function AnalyticsDetailsPage() {
       <label style={{display:'grid',gap:'.3rem',fontSize:'.82rem'}}>Desde<Input type="date" value={from} onChange={e=>setFrom(e.target.value)} /></label>
       <label style={{display:'grid',gap:'.3rem',fontSize:'.82rem'}}>Hasta<Input type="date" value={to} onChange={e=>setTo(e.target.value)} /></label>
       <button onClick={()=>{setFrom(dateDaysAgo(6));setTo(dateNow());}} style={{padding:'.55rem .8rem',borderRadius:6,border:'1px solid #ddd',background:'#fff',cursor:'pointer'}}>7 días</button>
+      <button onClick={()=>{setFrom(dateDaysAgo(89));setTo(dateNow());}} style={{padding:'.55rem .8rem',borderRadius:6,border:'1px solid #ddd',background:'#fff',cursor:'pointer'}}>90 días</button>
       <button onClick={()=>{const d=new Date();setFrom(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`);setTo(dateNow());}} style={{padding:'.55rem .8rem',borderRadius:6,border:'1px solid #ddd',background:'#fff',cursor:'pointer'}}>Este mes</button>
       <span style={muted}>Comparación: {previous.from} a {previous.to}</span>
     </div>

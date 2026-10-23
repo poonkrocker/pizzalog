@@ -346,34 +346,52 @@ class AnalyticsController
 
         // 1) Combinaciones de productos comprados juntos en el mismo ticket/pedido
         $stmtProd = $pdo->prepare(
-            'SELECT 
-                LEAST(si1.product_id, si2.product_id) AS p1_id,
-                GREATEST(si1.product_id, si2.product_id) AS p2_id,
-                MAX(CASE WHEN si1.product_id <= si2.product_id THEN COALESCE(p1.name, si1.product_name) ELSE COALESCE(p2.name, si2.product_name) END) AS p1_name,
-                MAX(CASE WHEN si1.product_id <= si2.product_id THEN COALESCE(p2.name, si2.product_name) ELSE COALESCE(p1.name, si1.product_name) END) AS p2_name,
-                MAX(CASE WHEN si1.product_id <= si2.product_id THEN COALESCE(c1.name, "") ELSE COALESCE(c2.name, "") END) AS p1_category_name,
-                MAX(CASE WHEN si1.product_id <= si2.product_id THEN COALESCE(c2.name, "") ELSE COALESCE(c1.name, "") END) AS p2_category_name,
-                COUNT(DISTINCT s.id) AS pair_orders,
-                SUM(si1.line_total + si2.line_total) AS total_revenue
-             FROM sale_items si1
-             JOIN sale_items si2 ON si1.sale_id = si2.sale_id AND si1.id < si2.id
-             JOIN sales s ON s.id = si1.sale_id
-             LEFT JOIN products p1 ON p1.id = si1.product_id
-             LEFT JOIN products p2 ON p2.id = si2.product_id
-             LEFT JOIN categories c1 ON c1.id = p1.category_id
-             LEFT JOIN categories c2 ON c2.id = p2.category_id
-             WHERE s.business_id = ? AND s.status = "completed"
-               AND s.created_at BETWEEN ? AND ?
-               AND si1.product_id IS NOT NULL AND si2.product_id IS NOT NULL
-               AND si1.product_id != si2.product_id
-             GROUP BY p1_id, p2_id
-             ORDER BY (
-                 (LOWER(COALESCE(c1.name, "")) LIKE '%pizza%' OR LOWER(COALESCE(c1.name, "")) LIKE '%pizzer%')
-                 AND (LOWER(COALESCE(c2.name, "")) LIKE '%pizza%' OR LOWER(COALESCE(c2.name, "")) LIKE '%pizzer%')
-             ) DESC, pair_orders DESC, total_revenue DESC
-             LIMIT 10'
+            'SELECT a.product_id AS p1_id, b.product_id AS p2_id,
+                    MAX(a.product_name) AS p1_name,
+                    MAX(b.product_name) AS p2_name,
+                    MAX(a.category_name) AS p1_category_name,
+                    MAX(b.category_name) AS p2_category_name,
+                    COUNT(*) AS pair_orders,
+                    SUM(a.line_revenue + b.line_revenue) AS total_revenue
+               FROM (
+                    SELECT si.sale_id, si.product_id,
+                           MAX(COALESCE(p.name, si.product_name)) AS product_name,
+                           MAX(COALESCE(cat.name, "")) AS category_name,
+                           SUM(si.line_total) AS line_revenue
+                      FROM sale_items si
+                      JOIN sales s ON s.id = si.sale_id
+                 LEFT JOIN products p ON p.id = si.product_id
+                 LEFT JOIN categories cat ON cat.id = p.category_id
+                     WHERE s.business_id = ? AND s.status = "completed"
+                       AND s.created_at BETWEEN ? AND ?
+                       AND si.parent_sale_item_id IS NULL
+                       AND si.product_id IS NOT NULL
+                     GROUP BY si.sale_id, si.product_id
+               ) a
+               JOIN (
+                    SELECT si.sale_id, si.product_id,
+                           MAX(COALESCE(p.name, si.product_name)) AS product_name,
+                           MAX(COALESCE(cat.name, "")) AS category_name,
+                           SUM(si.line_total) AS line_revenue
+                      FROM sale_items si
+                      JOIN sales s ON s.id = si.sale_id
+                 LEFT JOIN products p ON p.id = si.product_id
+                 LEFT JOIN categories cat ON cat.id = p.category_id
+                     WHERE s.business_id = ? AND s.status = "completed"
+                       AND s.created_at BETWEEN ? AND ?
+                       AND si.parent_sale_item_id IS NULL
+                       AND si.product_id IS NOT NULL
+                     GROUP BY si.sale_id, si.product_id
+               ) b ON b.sale_id = a.sale_id AND b.product_id > a.product_id
+              GROUP BY a.product_id, b.product_id
+             HAVING COUNT(*) > 1
+              ORDER BY (
+                 (LOWER(COALESCE(p1_category_name, "")) LIKE "%pizza%" OR LOWER(COALESCE(p1_category_name, "")) LIKE "%pizzer%")
+                 AND (LOWER(COALESCE(p2_category_name, "")) LIKE "%pizza%" OR LOWER(COALESCE(p2_category_name, "")) LIKE "%pizzer%")
+              ) DESC, pair_orders DESC, total_revenue DESC
+              LIMIT 10'
         );
-        $stmtProd->execute([$bid, $fromDt, $toDt]);
+        $stmtProd->execute([$bid, $fromDt, $toDt, $bid, $fromDt, $toDt]);
         $productCombinations = array_map(static fn(array $r): array => [
             'p1_id'         => (int) $r['p1_id'],
             'p2_id'         => (int) $r['p2_id'],
@@ -474,6 +492,8 @@ class AnalyticsController
             (count($b['sales']) <=> count($a['sales'])) ?: ($b['revenue'] <=> $a['revenue'])
         );
         $productTriples = [];
+        // Mostrar solo tríos que se repiten en al menos dos tickets distintos.
+        $trioStats = array_filter($trioStats, static fn(array $trio): bool => count($trio['sales']) > 1);
         foreach (array_slice($trioStats, 0, 12) as $trio) {
             $ids = $trio['ids'];
             $namesStmt = $pdo->prepare('SELECT id, name FROM products WHERE id IN (?, ?, ?) AND business_id = ?');
