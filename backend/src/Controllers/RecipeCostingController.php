@@ -50,11 +50,69 @@ class RecipeCostingController
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
     }
 
+    /**
+     * Importa al estudio de recetas los productos que ya tenían composición
+     * en product_ingredients (incluidas las recetas cargadas desde Excel).
+     * Se ejecuta de forma idempotente: nunca reemplaza recetas ya editadas en el estudio.
+     */
+    private function importExistingProductRecipes(\\PDO $pdo, int $bid): void
+    {
+        $products = $pdo->prepare("SELECT p.id,p.name,p.price
+            FROM products p
+            WHERE p.business_id=? AND p.is_active=1
+              AND NOT EXISTS (
+                SELECT 1 FROM recipe_studio_recipes rs
+                WHERE rs.business_id=p.business_id AND rs.linked_product_id=p.id AND rs.is_active=1
+              )
+            ORDER BY p.id");
+        $products->execute([$bid]);
+        $findSupply = $pdo->prepare("SELECT id,unit FROM supplies WHERE business_id=? AND name=? LIMIT 1");
+        $createSupply = $pdo->prepare("INSERT INTO supplies (business_id,name,category,unit,cost,is_active)
+            VALUES (?,?,?,?,0,1) ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id)");
+        $activateSupply = $pdo->prepare("UPDATE supplies SET is_active=1 WHERE id=? AND business_id=?");
+        $insertRecipe = $pdo->prepare("INSERT INTO recipe_studio_recipes
+            (business_id,linked_product_id,name,recipe_type,yield_quantity,yield_unit,price,target_food_cost_pct,is_active)
+            VALUES (?,?,?,'product',1,'u',?,30,1)");
+        $legacyComponents = $pdo->prepare("SELECT pi.ingredient_id,pi.quantity,pi.unit,i.name AS ingredient_name,i.category AS ingredient_category
+            FROM product_ingredients pi
+            INNER JOIN ingredients i ON i.id=pi.ingredient_id AND i.business_id=?
+            WHERE pi.product_id=? ORDER BY i.name");
+        $insertComponent = $pdo->prepare("INSERT INTO recipe_studio_components
+            (business_id,recipe_id,component_type,supply_id,component_recipe_id,quantity,unit,sort_order)
+            VALUES (?,?,'supply',?,NULL,?,?,?)");
+        foreach ($products->fetchAll(\\PDO::FETCH_ASSOC) as $product) {
+            $insertRecipe->execute([$bid,(int)$product['id'],(string)$product['name'],(float)$product['price']]);
+            $recipeId = (int)$pdo->lastInsertId();
+            $legacyComponents->execute([$bid,(int)$product['id']]);
+            $order = 0;
+            foreach ($legacyComponents->fetchAll(\\PDO::FETCH_ASSOC) as $component) {
+                $ingredientName = trim((string)$component['ingredient_name']);
+                if ($ingredientName === '') continue;
+                $findSupply->execute([$bid,$ingredientName]);
+                $supply = $findSupply->fetch(\\PDO::FETCH_ASSOC);
+                if (!$supply) {
+                    $unit = trim((string)($component['unit'] ?? '')) ?: 'u';
+                    $category = trim((string)($component['ingredient_category'] ?? '')) ?: 'Otros';
+                    $createSupply->execute([$bid,$ingredientName,$category,$unit]);
+                    $findSupply->execute([$bid,$ingredientName]);
+                    $supply = $findSupply->fetch(\\PDO::FETCH_ASSOC);
+                }
+                if (!$supply) continue;
+                $supplyId = (int)$supply['id'];
+                $activateSupply->execute([$supplyId,$bid]);
+                $unit = trim((string)($component['unit'] ?? '')) ?: (string)($supply['unit'] ?? 'u');
+                $quantity = $component['quantity'] !== null ? max(0.0001,(float)$component['quantity']) : 1.0;
+                $insertComponent->execute([$bid,$recipeId,$supplyId,$quantity,$unit,$order++]);
+            }
+        }
+    }
+
     public function recipesIndex(Request $req): void
     {
         $bid = (int)$req->auth['business_id'];
         $pdo = Database::pdo();
         $this->ensureTables($pdo);
+        $this->importExistingProductRecipes($pdo, $bid);
         $stmt = $pdo->prepare("SELECT id, name, recipe_type, linked_product_id, yield_quantity, yield_unit, price, target_food_cost_pct
           FROM recipe_studio_recipes WHERE business_id = ? AND is_active = 1 ORDER BY recipe_type, name");
         $stmt->execute([$bid]);
