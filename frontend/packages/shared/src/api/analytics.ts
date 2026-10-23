@@ -29,6 +29,8 @@ export function analyticsApi(client: ApiClient) {
       client.get<{ summary: AnalyticsSummary }>(`/analytics/summary${queryStr(params)}`),
     topProducts: (params?: AnalyticsQuery) =>
       client.get<{ products: AnalyticsTopProduct[] }>(`/analytics/top-products${queryStr(params)}`),
+    topCategories: (params?: AnalyticsQuery) =>
+      client.get<{ categories: Array<{ category_id: number; category_name: string; sales_count: number; units: number; revenue: number }> }>(`/analytics/top-categories${queryStr(params)}`),
     salesOverTime: (params?: AnalyticsQuery) =>
       client.get<{ points: AnalyticsSalesPoint[] }>(`/analytics/sales-over-time${queryStr(params)}`),
     productMargins: (params?: AnalyticsQuery) =>
