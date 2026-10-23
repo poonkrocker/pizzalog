@@ -124,6 +124,44 @@ class AnalyticsController
     }
 
     /**
+     * GET /analytics/top-categories?from=YYYY-MM-DD&to=YYYY-MM-DD
+     * Ranking por categoría (p. ej. cervezas), respetando unidades históricas
+     * aunque el product_id no haya podido vincularse al catálogo.
+     */
+    public function topCategories(Request $req): void
+    {
+        [$bid, $fromDt, $toDt] = $this->ctx($req);
+        $limit = min(max((int) ($req->query['limit'] ?? 20), 1), 100);
+
+        $stmt = Database::pdo()->prepare(
+            'SELECT COALESCE(c.id, 0) AS category_id,
+                    COALESCE(c.name, "Sin categoría") AS category_name,
+                    COUNT(DISTINCT si.sale_id) AS sales_count,
+                    SUM(si.quantity) AS units,
+                    SUM(si.line_total) AS revenue
+               FROM sale_items si
+               JOIN sales s ON s.id = si.sale_id
+          LEFT JOIN products p ON p.id = si.product_id
+          LEFT JOIN categories c ON c.id = p.category_id
+              WHERE s.business_id = ? AND s.status = "completed"
+                AND si.product_name NOT LIKE "Cobro compartido%"
+                AND s.created_at BETWEEN ? AND ?
+              GROUP BY COALESCE(c.id, 0), COALESCE(c.name, "Sin categoría")
+              ORDER BY units DESC, revenue DESC
+              LIMIT ' . $limit
+        );
+        $stmt->execute([$bid, $fromDt, $toDt]);
+
+        Response::ok(['categories' => array_map(static fn(array $r): array => [
+            'category_id' => (int) $r['category_id'],
+            'category_name' => $r['category_name'],
+            'sales_count' => (int) $r['sales_count'],
+            'units' => (float) $r['units'],
+            'revenue' => (float) $r['revenue'],
+        ], $stmt->fetchAll())]);
+    }
+
+    /**
      * GET /analytics/product-margins
      * Qué genera más GANANCIA (no lo mismo que lo más vendido).
      * profit = facturado − (costo actual × unidades vendidas).
