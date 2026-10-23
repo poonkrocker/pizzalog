@@ -375,19 +375,37 @@ class AnalyticsController
         // 3) Tríos de productos por ticket. Normalizamos los ids en PHP para
         // agrupar los tríos independientemente del orden de las líneas.
         $stmtTriples = $pdo->prepare(
-            'SELECT si1.product_id AS id1, si2.product_id AS id2, si3.product_id AS id3,
-                    s.id AS sale_id, si1.line_total + si2.line_total + si3.line_total AS trio_revenue
-               FROM sale_items si1
-               JOIN sale_items si2 ON si2.sale_id = si1.sale_id AND si1.id < si2.id
-               JOIN sale_items si3 ON si3.sale_id = si1.sale_id AND si2.id < si3.id
-               JOIN sales s ON s.id = si1.sale_id
-              WHERE s.business_id = ? AND s.status = "completed"
-                AND s.created_at BETWEEN ? AND ?
-                AND si1.parent_sale_item_id IS NULL AND si2.parent_sale_item_id IS NULL AND si3.parent_sale_item_id IS NULL
-                AND si1.product_id IS NOT NULL AND si2.product_id IS NOT NULL AND si3.product_id IS NOT NULL
-                AND si1.product_id != si2.product_id AND si1.product_id != si3.product_id AND si2.product_id != si3.product_id'
+            'SELECT a.sale_id, a.product_id AS id1, b.product_id AS id2, c.product_id AS id3,
+                    a.line_revenue + b.line_revenue + c.line_revenue AS trio_revenue
+               FROM (
+                    SELECT si.sale_id, si.product_id, SUM(si.line_total) AS line_revenue
+                      FROM sale_items si
+                      JOIN sales s ON s.id = si.sale_id
+                     WHERE s.business_id = ? AND s.status = "completed"
+                       AND s.created_at BETWEEN ? AND ?
+                       AND si.parent_sale_item_id IS NULL AND si.product_id IS NOT NULL
+                     GROUP BY si.sale_id, si.product_id
+               ) a
+               JOIN (
+                    SELECT si.sale_id, si.product_id, SUM(si.line_total) AS line_revenue
+                      FROM sale_items si
+                      JOIN sales s ON s.id = si.sale_id
+                     WHERE s.business_id = ? AND s.status = "completed"
+                       AND s.created_at BETWEEN ? AND ?
+                       AND si.parent_sale_item_id IS NULL AND si.product_id IS NOT NULL
+                     GROUP BY si.sale_id, si.product_id
+               ) b ON b.sale_id = a.sale_id AND b.product_id > a.product_id
+               JOIN (
+                    SELECT si.sale_id, si.product_id, SUM(si.line_total) AS line_revenue
+                      FROM sale_items si
+                      JOIN sales s ON s.id = si.sale_id
+                     WHERE s.business_id = ? AND s.status = "completed"
+                       AND s.created_at BETWEEN ? AND ?
+                       AND si.parent_sale_item_id IS NULL AND si.product_id IS NOT NULL
+                     GROUP BY si.sale_id, si.product_id
+               ) c ON c.sale_id = b.sale_id AND c.product_id > b.product_id'
         );
-        $stmtTriples->execute([$bid, $fromDt, $toDt]);
+        $stmtTriples->execute([$bid, $fromDt, $toDt, $bid, $fromDt, $toDt, $bid, $fromDt, $toDt]);
         $trioStats = [];
         foreach ($stmtTriples->fetchAll() as $r) {
             $ids = [(int)$r['id1'], (int)$r['id2'], (int)$r['id3']];
