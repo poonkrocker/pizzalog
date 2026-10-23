@@ -70,7 +70,7 @@ class RecipeCostingController
             $r['id']=(int)$r['id']; $r['price']=(float)$r['price']; return $r;
         }, $productsStmt->fetchAll(\PDO::FETCH_ASSOC));
         $allComponents = $pdo->prepare("SELECT c.recipe_id, c.component_type, c.supply_id, c.component_recipe_id, c.quantity, c.unit,
-          s.name AS supply_name, COALESCE(s.cost,0) AS supply_cost, r.name AS recipe_name
+          s.name AS supply_name, s.unit AS supply_unit, COALESCE(s.cost,0) AS supply_cost, r.name AS recipe_name
           FROM recipe_studio_components c
           LEFT JOIN supplies s ON s.id=c.supply_id AND s.business_id=c.business_id
           LEFT JOIN recipe_studio_recipes r ON r.id=c.component_recipe_id AND r.business_id=c.business_id
@@ -89,10 +89,14 @@ class RecipeCostingController
             if(in_array($id,$path,true)) return 0.0;
             $path[]=$id; $sum=0.0;
             foreach($byRecipe[$id] ?? [] as $c) {
-                $unitCost = $c['component_type']==='supply' ? (float)$c['supply_cost'] : $calc((int)$c['component_recipe_id'],$path);
                 $child = $c['component_type']==='recipe' ? ($byId[(int)$c['component_recipe_id']] ?? null) : null;
-                $yield = $child ? max(0.0001,(float)$child['yield_quantity']) : 1.0;
-                $sum += (float)$c['quantity'] * ($c['component_type']==='recipe' ? $unitCost/$yield : $unitCost);
+                $unitCost = $c['component_type']==='supply'
+                    ? (float)$c['supply_cost']
+                    : ($child ? $calc((int)$c['component_recipe_id'],$path) / max(0.0001,(float)$child['yield_quantity']) : 0.0);
+                $targetUnit = $c['component_type']==='supply' ? (string)($c['unit'] ?? 'kg') : (string)($c['unit'] ?? ($child['yield_unit'] ?? 'kg'));
+                $costUnit = $c['component_type']==='supply' ? (string)($c['supply_unit'] ?? $targetUnit) : (string)($child['yield_unit'] ?? $targetUnit);
+                $qty = $this->convertQuantity((float)$c['quantity'], $targetUnit, $costUnit);
+                $sum += $qty * $unitCost;
             }
             return $costCache[$id]=round($sum,2);
         };
@@ -109,9 +113,11 @@ class RecipeCostingController
             $r['components']=array_map(static function(array $c) use ($byId,$calc): array {
                 $type=$c['component_type']; $child=$type==='recipe'?($byId[(int)$c['component_recipe_id']]??null):null;
                 $unitCost=$type==='supply'?(float)$c['supply_cost']:($child?round($calc((int)$child['id'])/max(.0001,(float)$child['yield_quantity']),2):0.0);
+                $costUnit=$type==='supply'?(string)($c['supply_unit']??$c['unit']):(string)($child['yield_unit']??$c['unit']);
+                $qtyForCost=$this->convertQuantity((float)$c['quantity'],(string)$c['unit'],$costUnit);
                 return ['component_type'=>$type,'component_id'=>$type==='supply'?(int)$c['supply_id']:(int)$c['component_recipe_id'],
                   'name'=>$type==='supply'?$c['supply_name']:($child['name']??$c['recipe_name']??'Subreceta'),
-                  'quantity'=>(float)$c['quantity'],'unit'=>$c['unit'],'unit_cost'=>$unitCost,'total_cost'=>round((float)$c['quantity']*$unitCost,2)];
+                  'quantity'=>(float)$c['quantity'],'unit'=>$c['unit'],'unit_cost'=>$unitCost,'total_cost'=>round($qtyForCost*$unitCost,2)];
             },$byRecipe[$id]??[]);
             $formatted[]=$r;
         }
@@ -165,7 +171,8 @@ class RecipeCostingController
                 $ins->execute([$bid,$rid,$ct,$sid,$child,$qty,$unit,(int)$i]);
             }
             if($linked) {
-                $pdo->prepare('UPDATE products SET name=?, price=? WHERE id=? AND business_id=?')->execute([$name,$price,$linked,$bid]);
+                $unitCost = round($this->calculateBatchCost($pdo, $bid, $rid, []) / $yield, 2);
+                $pdo->prepare('UPDATE products SET name=?, price=?, cost=? WHERE id=? AND business_id=?')->execute([$name,$price,$unitCost,$linked,$bid]);
             }
             $pdo->commit();
             Response::ok(['success'=>true,'id'=>$rid]);
@@ -173,6 +180,49 @@ class RecipeCostingController
             if($pdo->inTransaction())$pdo->rollBack();
             Response::error('No se pudo guardar la receta: '.$e->getMessage(),422);
         }
+    }
+
+    private function convertQuantity(float $quantity, string $from, string $to): float
+    {
+        $from = strtolower(trim($from)); $to = strtolower(trim($to));
+        if ($from === $to) return $quantity;
+        $groups = [
+            ['kg'=>1.0,'g'=>0.001],
+            ['l'=>1.0,'lt'=>1.0,'litro'=>1.0,'litros'=>1.0,'cc'=>0.001,'ml'=>0.001],
+        ];
+        foreach ($groups as $group) {
+            if (isset($group[$from]) && isset($group[$to])) return $quantity * $group[$from] / $group[$to];
+        }
+        // For units without a valid conversion, avoid silently inventing a ratio.
+        return $quantity;
+    }
+
+    private function calculateBatchCost(\PDO $pdo, int $bid, int $recipeId, array $path): float
+    {
+        if (in_array($recipeId, $path, true)) throw new \RuntimeException('Se detectó un ciclo en las subrecetas.');
+        $path[] = $recipeId;
+        $stmt = $pdo->prepare('SELECT id, yield_quantity, yield_unit FROM recipe_studio_recipes WHERE id=? AND business_id=? AND is_active=1');
+        $stmt->execute([$recipeId, $bid]); $recipe = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if (!$recipe) throw new \RuntimeException('No se encontró una subreceta activa.');
+        $stmt = $pdo->prepare("SELECT c.component_type,c.quantity,c.unit,c.supply_id,c.component_recipe_id,
+          s.unit AS supply_unit,COALESCE(s.cost,0) AS supply_cost,r.yield_quantity AS child_yield,r.yield_unit AS child_unit
+          FROM recipe_studio_components c
+          LEFT JOIN supplies s ON s.id=c.supply_id AND s.business_id=c.business_id
+          LEFT JOIN recipe_studio_recipes r ON r.id=c.component_recipe_id AND r.business_id=c.business_id
+          WHERE c.business_id=? AND c.recipe_id=? ORDER BY c.sort_order,c.id");
+        $stmt->execute([$bid,$recipeId]); $sum=0.0;
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $item) {
+            if ($item['component_type']==='supply') {
+                $costUnit=(string)($item['supply_unit']??$item['unit']); $unitCost=(float)$item['supply_cost'];
+            } else {
+                $childId=(int)$item['component_recipe_id'];
+                $childBatch=$this->calculateBatchCost($pdo,$bid,$childId,$path);
+                $costUnit=(string)($item['child_unit']??$item['unit']);
+                $unitCost=$childBatch/max(.0001,(float)$item['child_yield']);
+            }
+            $sum += $this->convertQuantity((float)$item['quantity'],(string)$item['unit'],$costUnit)*$unitCost;
+        }
+        return round($sum,2);
     }
 
     private function dependsOn(\PDO $pdo,int $bid,int $current,int $target,array $seen): bool
@@ -194,7 +244,7 @@ class RecipeCostingController
         $factor=['monthly'=>1,'weekly'=>52/12,'daily'=>365/12,'yearly'=>1/12];$total=0.0;
         foreach($q->fetchAll(\PDO::FETCH_ASSOC) as $r){
             $r['id']=(int)$r['id'];$r['quantity']=(float)$r['quantity'];$r['amount']=(float)$r['amount'];
-            $r['monthly_total']=round($r['quantity']*$r['amount']*$factor[$r['period']]??1,2);
+            $r['monthly_total']=round($r['quantity']*$r['amount']*($factor[$r['period']] ?? 1),2);
             $total+=$r['monthly_total'];$items[]=$r;
         }
         Response::ok(['items'=>$items,'monthly_total'=>round($total,2)]);
