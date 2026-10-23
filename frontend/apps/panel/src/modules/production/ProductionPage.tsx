@@ -105,6 +105,7 @@ export function ProductionPage() {
       <div
         style={{
           display: 'flex',
+          flexWrap: 'wrap',
           gap: '0.5rem',
           borderBottom: '2px solid var(--c-border, #ddd)',
           marginBottom: '1.5rem',
