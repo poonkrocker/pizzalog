@@ -372,39 +372,39 @@ class AnalyticsController
             'occurrences'  => (float) $r['occurrences'],
         ], $stmtIng->fetchAll());
 
-        // 3) Tríos de productos dentro de un mismo ticket. Se usa el id de línea
-        // para no duplicar combinaciones y se excluyen líneas hijas de combos.
+        // 3) Tríos de productos por ticket. Normalizamos los ids en PHP para
+        // agrupar los tríos independientemente del orden de las líneas.
         $stmtTriples = $pdo->prepare(
-            'SELECT
-                LEAST(si1.product_id, si2.product_id, si3.product_id) AS p1_id,
-                (si1.product_id + si2.product_id + si3.product_id
-                  - LEAST(si1.product_id, si2.product_id, si3.product_id)
-                  - GREATEST(si1.product_id, si2.product_id, si3.product_id)) AS p2_id,
-                GREATEST(si1.product_id, si2.product_id, si3.product_id) AS p3_id,
-                COUNT(DISTINCT s.id) AS triple_orders,
-                SUM(si1.line_total + si2.line_total + si3.line_total) AS total_revenue
-             FROM sale_items si1
-             JOIN sale_items si2 ON si2.sale_id = si1.sale_id AND si1.id < si2.id
-             JOIN sale_items si3 ON si3.sale_id = si1.sale_id AND si2.id < si3.id
-             JOIN sales s ON s.id = si1.sale_id
-             WHERE s.business_id = ? AND s.status = "completed"
-               AND s.created_at BETWEEN ? AND ?
-               AND si1.parent_sale_item_id IS NULL
-               AND si2.parent_sale_item_id IS NULL
-               AND si3.parent_sale_item_id IS NULL
-               AND si1.product_id IS NOT NULL AND si2.product_id IS NOT NULL AND si3.product_id IS NOT NULL
-               AND si1.product_id != si2.product_id
-               AND si1.product_id != si3.product_id
-               AND si2.product_id != si3.product_id
-             GROUP BY p1_id, p2_id, p3_id
-             ORDER BY triple_orders DESC, total_revenue DESC
-             LIMIT 12'
+            'SELECT si1.product_id AS id1, si2.product_id AS id2, si3.product_id AS id3,
+                    s.id AS sale_id, si1.line_total + si2.line_total + si3.line_total AS trio_revenue
+               FROM sale_items si1
+               JOIN sale_items si2 ON si2.sale_id = si1.sale_id AND si1.id < si2.id
+               JOIN sale_items si3 ON si3.sale_id = si1.sale_id AND si2.id < si3.id
+               JOIN sales s ON s.id = si1.sale_id
+              WHERE s.business_id = ? AND s.status = "completed"
+                AND s.created_at BETWEEN ? AND ?
+                AND si1.parent_sale_item_id IS NULL AND si2.parent_sale_item_id IS NULL AND si3.parent_sale_item_id IS NULL
+                AND si1.product_id IS NOT NULL AND si2.product_id IS NOT NULL AND si3.product_id IS NOT NULL
+                AND si1.product_id != si2.product_id AND si1.product_id != si3.product_id AND si2.product_id != si3.product_id'
         );
         $stmtTriples->execute([$bid, $fromDt, $toDt]);
-        $productTriples = [];
+        $trioStats = [];
         foreach ($stmtTriples->fetchAll() as $r) {
-            $ids = [(int)$r['p1_id'], (int)$r['p2_id'], (int)$r['p3_id']];
+            $ids = [(int)$r['id1'], (int)$r['id2'], (int)$r['id3']];
             sort($ids);
+            $key = implode(':', $ids);
+            if (!isset($trioStats[$key])) {
+                $trioStats[$key] = ['ids' => $ids, 'sales' => [], 'revenue' => 0.0];
+            }
+            $trioStats[$key]['sales'][(int)$r['sale_id']] = true;
+            $trioStats[$key]['revenue'] += (float)$r['trio_revenue'];
+        }
+        uasort($trioStats, static fn(array $a, array $b): int =>
+            (count($b['sales']) <=> count($a['sales'])) ?: ($b['revenue'] <=> $a['revenue'])
+        );
+        $productTriples = [];
+        foreach (array_slice($trioStats, 0, 12) as $trio) {
+            $ids = $trio['ids'];
             $namesStmt = $pdo->prepare('SELECT id, name FROM products WHERE id IN (?, ?, ?) AND business_id = ?');
             $namesStmt->execute([$ids[0], $ids[1], $ids[2], $bid]);
             $names = [];
@@ -414,8 +414,8 @@ class AnalyticsController
                 'p1_name' => $names[$ids[0]] ?? 'Producto',
                 'p2_name' => $names[$ids[1]] ?? 'Producto',
                 'p3_name' => $names[$ids[2]] ?? 'Producto',
-                'triple_orders' => (int)$r['triple_orders'],
-                'total_revenue' => (float)$r['total_revenue'],
+                'triple_orders' => count($trio['sales']),
+                'total_revenue' => (float)$trio['revenue'],
             ];
         }
 
