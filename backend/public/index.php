@@ -96,6 +96,7 @@ $router->post('/sales/{id}/cancel', [SaleController::class, 'cancel'], [$auth, $
 // --- Analytics (admin/manager o empleado con permiso) -----------------
 $router->get('/analytics/summary', [AnalyticsController::class, 'summary'], [$auth, $manage]);
 $router->get('/analytics/top-products', [AnalyticsController::class, 'topProducts'], [$auth, $manage]);
+$router->get('/analytics/category-leaders', [AnalyticsController::class, 'categoryLeaders'], [$auth, $manage]);
 $router->get('/analytics/top-categories', [AnalyticsController::class, 'topCategories'], [$auth, $manage]);
 $router->get('/analytics/product-margins', [AnalyticsController::class, 'productMargins'], [$auth, $manage]);
 $router->get('/analytics/ingredients', [AnalyticsController::class, 'ingredients'], [$auth, $manage]);
