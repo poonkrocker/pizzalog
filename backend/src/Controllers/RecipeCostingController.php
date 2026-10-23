@@ -55,7 +55,7 @@ class RecipeCostingController
      * en product_ingredients (incluidas las recetas cargadas desde Excel).
      * Se ejecuta de forma idempotente: nunca reemplaza recetas ya editadas en el estudio.
      */
-    private function importExistingProductRecipes(\\PDO $pdo, int $bid): void
+    private function importExistingProductRecipes(\PDO $pdo, int $bid): void
     {
         $products = $pdo->prepare("SELECT p.id,p.name,p.price
             FROM products p
@@ -80,22 +80,22 @@ class RecipeCostingController
         $insertComponent = $pdo->prepare("INSERT INTO recipe_studio_components
             (business_id,recipe_id,component_type,supply_id,component_recipe_id,quantity,unit,sort_order)
             VALUES (?,?,'supply',?,NULL,?,?,?)");
-        foreach ($products->fetchAll(\\PDO::FETCH_ASSOC) as $product) {
+        foreach ($products->fetchAll(\PDO::FETCH_ASSOC) as $product) {
             $insertRecipe->execute([$bid,(int)$product['id'],(string)$product['name'],(float)$product['price']]);
             $recipeId = (int)$pdo->lastInsertId();
             $legacyComponents->execute([$bid,(int)$product['id']]);
             $order = 0;
-            foreach ($legacyComponents->fetchAll(\\PDO::FETCH_ASSOC) as $component) {
+            foreach ($legacyComponents->fetchAll(\PDO::FETCH_ASSOC) as $component) {
                 $ingredientName = trim((string)$component['ingredient_name']);
                 if ($ingredientName === '') continue;
                 $findSupply->execute([$bid,$ingredientName]);
-                $supply = $findSupply->fetch(\\PDO::FETCH_ASSOC);
+                $supply = $findSupply->fetch(\PDO::FETCH_ASSOC);
                 if (!$supply) {
                     $unit = trim((string)($component['unit'] ?? '')) ?: 'u';
                     $category = trim((string)($component['ingredient_category'] ?? '')) ?: 'Otros';
                     $createSupply->execute([$bid,$ingredientName,$category,$unit]);
                     $findSupply->execute([$bid,$ingredientName]);
-                    $supply = $findSupply->fetch(\\PDO::FETCH_ASSOC);
+                    $supply = $findSupply->fetch(\PDO::FETCH_ASSOC);
                 }
                 if (!$supply) continue;
                 $supplyId = (int)$supply['id'];
