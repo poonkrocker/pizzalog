@@ -49,7 +49,6 @@ export function AnalyticsDetailsPage() {
   const combos = combosQ.data?.product_combinations ?? [];
   const triples = combosQ.data?.product_triples ?? [];
   const cells = heatQ.data ?? [];
-  const maxUnits = Math.max(1, ...products.map(p => p.units));
   const maxRevenue = Math.max(1, ...cells.map(c => c.revenue));
   const heatCells = useMemo(() => {
     if (heatPreset === 'all') return cells;
