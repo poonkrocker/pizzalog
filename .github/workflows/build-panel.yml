@@ -1,0 +1,60 @@
+name: Build and publish panel assets
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "frontend/apps/panel/**"
+      - "frontend/packages/shared/**"
+      - "frontend/pnpm-lock.yaml"
+      - "frontend/package.json"
+      - "frontend/pnpm-workspace.yaml"
+      - ".github/workflows/build-panel.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-panel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Build panel
+        working-directory: frontend
+        run: pnpm --filter @pizzalog/panel build
+
+      - name: Publish compiled panel to app/
+        run: |
+          test -f frontend/apps/panel/dist/index.html
+          cp -a frontend/apps/panel/dist/. app/
+          git add app
+          if git diff --cached --quiet; then
+            echo "No compiled panel changes to publish."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "build(panel): publish compiled frontend"
+            git push origin HEAD:main
+          fi
