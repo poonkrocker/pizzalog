@@ -323,7 +323,10 @@ class AnalyticsController
                AND si1.product_id IS NOT NULL AND si2.product_id IS NOT NULL
                AND si1.product_id != si2.product_id
              GROUP BY p1_id, p2_id
-             ORDER BY pair_orders DESC, total_revenue DESC
+             ORDER BY (
+                 (LOWER(COALESCE(c1.name, '')) LIKE '%pizza%' OR LOWER(COALESCE(c1.name, '')) LIKE '%pizzer%')
+                 AND (LOWER(COALESCE(c2.name, '')) LIKE '%pizza%' OR LOWER(COALESCE(c2.name, '')) LIKE '%pizzer%')
+             ) DESC, pair_orders DESC, total_revenue DESC
              LIMIT 10'
         );
         $stmtProd->execute([$bid, $fromDt, $toDt]);
