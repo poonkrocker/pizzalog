@@ -63,7 +63,7 @@ export function AnalyticsDetailsPage() {
       const name = p.category_name || 'Sin categoría';
       map.set(name, [...(map.get(name) ?? []), p]);
     });
-    return [...map.entries()].map(([name, list]) => ({ name, product: [...list].sort((a,b) => b.units-a.units)[0] })).filter((entry) => entry.product !== undefined).sort((a,b) => b.product.units-a.product.units);
+    return [...map.entries()].map(([name, list]) => { const ranked = [...list].sort((a,b) => b.units-a.units); const product = ranked[0]; return product ? { name, product } : null; }).filter((entry): entry is { name: string; product: (typeof products)[number] } => entry !== null).sort((a,b) => b.product.units-a.product.units);
   }, [products]);
   const goodMargins = margins.filter(p => p.has_cost && p.margin_pct !== null);
   const avgMargin = goodMargins.length ? goodMargins.reduce((sum,p)=>sum+(p.margin_pct ?? 0),0)/goodMargins.length : 0;
