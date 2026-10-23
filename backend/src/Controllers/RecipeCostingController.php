@@ -110,7 +110,7 @@ class RecipeCostingController
             $r['batch_cost']=$cost; $r['unit_cost']=round($unitCost,2);
             $r['suggested_price']=$r['recipe_type']==='product' ? (float)(ceil(($unitCost/$target)/100)*100) : 0.0;
             $r['food_cost_pct']=$price>0?round($unitCost/$price*100,1):0.0;
-            $r['components']=array_map(static function(array $c) use ($byId,$calc): array {
+            $r['components']=array_map(function(array $c) use ($byId,$calc): array {
                 $type=$c['component_type']; $child=$type==='recipe'?($byId[(int)$c['component_recipe_id']]??null):null;
                 $unitCost=$type==='supply'?(float)$c['supply_cost']:($child?round($calc((int)$child['id'])/max(.0001,(float)$child['yield_quantity']),2):0.0);
                 $costUnit=$type==='supply'?(string)($c['supply_unit']??$c['unit']):(string)($child['yield_unit']??$c['unit']);
