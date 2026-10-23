@@ -44,5 +44,9 @@ export function analyticsApi(client: ApiClient) {
       client.get<AnalyticsWinningCombinations>(`/analytics/winning-combinations${queryStr(params)}`),
     timeHeatmap: (params?: AnalyticsQuery) =>
       client.get<{ cells: AnalyticsTimeHeatmapCell[] }>(`/analytics/time-heatmap${queryStr(params)}`),
+    timePreferences: () =>
+      client.get<{ preferences: { selected_preset: 'all' | 'midday' | 'night'; presets: Record<string, { weekdays: number[]; start_hour: number; end_hour: number }> } }>('/analytics/time-preferences'),
+    saveTimePreferences: (preferences: { selected_preset: 'all' | 'midday' | 'night' }) =>
+      client.put<{ preferences: { selected_preset: 'all' | 'midday' | 'night'; presets: Record<string, { weekdays: number[]; start_hour: number; end_hour: number }> } }>('/analytics/time-preferences', { preferences }),
   };
 }
