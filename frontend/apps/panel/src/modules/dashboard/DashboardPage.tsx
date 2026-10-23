@@ -47,7 +47,7 @@ function ingredientCategoryLabel(cat: string): { label: string; icon: string; bg
 }
 
 export function DashboardPage() {
-  const { user } = useAuth();
+  const { user, api } = useAuth();
   const [preset, setPreset] = useState<Preset>('7days');
   const [from, setFrom] = useState(daysAgoStr(6));
   const [to, setTo] = useState(todayStr());
