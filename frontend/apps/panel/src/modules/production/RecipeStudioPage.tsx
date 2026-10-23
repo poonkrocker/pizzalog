@@ -52,6 +52,18 @@ const secondaryButton: React.CSSProperties = {
   background: 'var(--c-surface, #fff)', color: 'var(--c-text, #222)', fontWeight: 600, cursor: 'pointer',
 };
 
+function quantityInUnit(quantity: number, from: string, to: string): number {
+  const f = from.trim().toLowerCase();
+  const t = to.trim().toLowerCase();
+  if (f === t) return quantity;
+  const groups: Record<string, number>[] = [
+    { kg: 1, g: 0.001 },
+    { l: 1, lt: 1, litro: 1, litros: 1, cc: 0.001, ml: 0.001 },
+  ];
+  for (const group of groups) if (group[f] !== undefined && group[t] !== undefined) return quantity * group[f] / group[t];
+  return quantity;
+}
+
 function freshComponent(): ComponentRow {
   return { component_type: 'supply', component_id: 0, quantity: 0.1, unit: 'kg' };
 }
@@ -88,7 +100,6 @@ export function RecipeStudioPage() {
   const recipes = recipesQuery.data?.recipes ?? [];
   const supplies = recipesQuery.data?.supplies ?? [];
   const products = recipesQuery.data?.products ?? [];
-  const currentRecipe = recipes.find((r) => r.id === editingId) ?? null;
 
   const saveRecipe = useMutation({
     mutationFn: (body: SaveStudioRecipeInput) => api.production.saveStudioRecipe(body),
@@ -140,8 +151,13 @@ export function RecipeStudioPage() {
     for (const r of recipes) map.set(`recipe:${r.id}`, r.unit_cost);
     return map;
   }, [supplies, recipes]);
-  const computedBatchCost = components.reduce((sum, c) =>
-    sum + Math.max(0, c.quantity || 0) * (componentCostMap.get(`${c.component_type}:${c.component_id}`) ?? 0), 0);
+  const computedBatchCost = components.reduce((sum, c) => {
+    const selectedSupply = c.component_type === 'supply' ? supplies.find((s) => s.id === c.component_id) : null;
+    const selectedRecipe = c.component_type === 'recipe' ? recipes.find((r) => r.id === c.component_id) : null;
+    const costUnit = selectedSupply?.unit ?? selectedRecipe?.yield_unit ?? c.unit;
+    const quantity = quantityInUnit(Math.max(0, c.quantity || 0), c.unit, costUnit);
+    return sum + quantity * (componentCostMap.get(`${c.component_type}:${c.component_id}`) ?? 0);
+  }, 0);
   const computedUnitCost = computedBatchCost / Math.max(0.0001, yieldQuantity);
   const suggestedPrice = recipeType === 'product' && computedUnitCost > 0
     ? Math.ceil((computedUnitCost / (Math.max(1, Math.min(100, targetPct)) / 100)) / 100) * 100 : 0;
@@ -286,6 +302,8 @@ export function RecipeStudioPage() {
                     ? supplies.map((s) => ({ id: s.id, name: s.name, unit: s.unit, cost: s.cost }))
                     : recipes.filter((r) => r.recipe_type === 'subrecipe' && r.id !== editingId).map((r) => ({ id: r.id, name: r.name, unit: r.yield_unit, cost: r.unit_cost }));
                   const unitCost = componentCostMap.get(`${c.component_type}:${c.component_id}`) ?? 0;
+                  const costUnit = componentList.find((v) => v.id === c.component_id)?.unit ?? c.unit;
+                  const displayedSubtotal = quantityInUnit(c.quantity, c.unit, costUnit) * unitCost;
                   return <div key={index} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 145px), 1fr))', gap: '.5rem', alignItems: 'end', padding: '.65rem', border: '1px solid var(--c-border, #ddd)', borderRadius: 7 }}>
                     <Field label="Tipo"><select value={c.component_type} onChange={(e) => changeComponent(index, { component_type: e.target.value as 'supply' | 'recipe' })} style={controlStyle}><option value="supply">Ingrediente / insumo</option><option value="recipe">Subreceta</option></select></Field>
                     <Field label={c.component_type === 'supply' ? 'Ingrediente' : 'Preparación'}>
@@ -296,7 +314,7 @@ export function RecipeStudioPage() {
                     </Field>
                     <Field label="Cantidad"><Input type="number" min="0" step="0.001" value={c.quantity} onChange={(e) => changeComponent(index, { quantity: Math.max(0, Number(e.target.value) || 0) })} /></Field>
                     <Field label="Unidad"><select value={c.unit} onChange={(e) => changeComponent(index, { unit: e.target.value })} style={controlStyle}>{units.map((u) => <option key={u} value={u}>{u}</option>)}</select></Field>
-                    <div style={{ padding: '.5rem 0', fontWeight: 700 }}>Subtotal: {formatARS(c.quantity * unitCost)}</div>
+                    <div style={{ padding: '.5rem 0', fontWeight: 700 }}>Subtotal: {formatARS(displayedSubtotal)}</div>
                     <button type="button" aria-label="Quitar componente" style={{ ...secondaryButton, color: '#b91c1c' }} onClick={() => setComponents((prev) => prev.filter((_, i) => i !== index))}>Quitar</button>
                   </div>;
                 })}
