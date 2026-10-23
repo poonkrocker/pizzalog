@@ -368,8 +368,8 @@ class AnalyticsController
                AND si1.product_id != si2.product_id
              GROUP BY p1_id, p2_id
              ORDER BY (
-                 (LOWER(COALESCE(c1.name, "")) LIKE '%pizza%' OR LOWER(COALESCE(c1.name, "")) LIKE '%pizzer%')
-                 AND (LOWER(COALESCE(c2.name, "")) LIKE '%pizza%' OR LOWER(COALESCE(c2.name, "")) LIKE '%pizzer%')
+                 (LOWER(COALESCE(p1_category_name, "")) LIKE '%pizza%' OR LOWER(COALESCE(p1_category_name, "")) LIKE '%pizzer%')
+                 AND (LOWER(COALESCE(p2_category_name, "")) LIKE '%pizza%' OR LOWER(COALESCE(p2_category_name, "")) LIKE '%pizzer%')
              ) DESC, pair_orders DESC, total_revenue DESC
              LIMIT 10'
         );
