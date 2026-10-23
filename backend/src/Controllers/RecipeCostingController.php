@@ -182,12 +182,96 @@ class RecipeCostingController
                 $linkedYield = max(0.0001, (float)$linkedRow['yield_quantity']);
                 $linkedUnitCost = round($this->calculateBatchCost($pdo, $bid, $linkedRecipeId, []) / $linkedYield, 2);
                 $updateProduct->execute([$linkedRow['name'], (float)$linkedRow['price'], $linkedUnitCost, $linkedProduct, $bid]);
+                $this->syncLinkedProductIngredients($pdo, $bid, $linkedProduct, $linkedRecipeId, $linkedYield);
             }
             $pdo->commit();
             Response::ok(['success'=>true,'id'=>$rid]);
         } catch(\Throwable $e) {
             if($pdo->inTransaction())$pdo->rollBack();
             Response::error('No se pudo guardar la receta: '.$e->getMessage(),422);
+        }
+    }
+
+    /**
+     * Expande una receta con sus subrecetas hasta llegar a insumos comprables.
+     * El multiplicador permite normalizar todos los gramajes al rendimiento vendible.
+     */
+    private function flattenRecipeComponents(\PDO $pdo, int $bid, int $recipeId, float $multiplier, array $path): array
+    {
+        if (in_array($recipeId, $path, true)) throw new \RuntimeException('Se detectó un ciclo al expandir la receta.');
+        $path[] = $recipeId;
+        $stmt = $pdo->prepare("SELECT c.component_type,c.quantity,c.unit,c.supply_id,c.component_recipe_id,
+            s.name AS supply_name,s.category AS supply_category,s.unit AS supply_unit,
+            r.yield_quantity AS child_yield,r.yield_unit AS child_unit
+            FROM recipe_studio_components c
+            LEFT JOIN supplies s ON s.id=c.supply_id AND s.business_id=c.business_id
+            LEFT JOIN recipe_studio_recipes r ON r.id=c.component_recipe_id AND r.business_id=c.business_id
+            WHERE c.business_id=? AND c.recipe_id=? ORDER BY c.sort_order,c.id");
+        $stmt->execute([$bid, $recipeId]);
+        $flat = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $component) {
+            $quantity = (float)$component['quantity'];
+            if ($component['component_type'] === 'supply') {
+                $supplyId = (int)$component['supply_id'];
+                $unit = (string)($component['supply_unit'] ?? $component['unit']);
+                $converted = $this->convertQuantity($quantity, (string)$component['unit'], $unit) * $multiplier;
+                if (!isset($flat[$supplyId])) {
+                    $flat[$supplyId] = [
+                        'supply_id' => $supplyId,
+                        'name' => (string)$component['supply_name'],
+                        'category' => (string)($component['supply_category'] ?? ''),
+                        'quantity' => 0.0,
+                        'unit' => $unit,
+                    ];
+                }
+                $flat[$supplyId]['quantity'] += $converted;
+            } else {
+                $childId = (int)$component['component_recipe_id'];
+                $childUnit = (string)($component['child_unit'] ?? $component['unit']);
+                $converted = $this->convertQuantity($quantity, (string)$component['unit'], $childUnit);
+                $childYield = max(0.0001, (float)$component['child_yield']);
+                $childFlat = $this->flattenRecipeComponents($pdo, $bid, $childId, $multiplier * ($converted / $childYield), $path);
+                foreach ($childFlat as $supplyId => $line) {
+                    if (!isset($flat[$supplyId])) $flat[$supplyId] = $line;
+                    else $flat[$supplyId]['quantity'] += $line['quantity'];
+                }
+            }
+        }
+        foreach ($flat as &$line) $line['quantity'] = round((float)$line['quantity'], 6);
+        unset($line);
+        return $flat;
+    }
+
+    private function mapIngredientCategory(string $supplyCategory): string
+    {
+        $c = mb_strtolower($supplyCategory);
+        if (str_contains($c, 'masa') || str_contains($c, 'harina')) return 'masa';
+        if (str_contains($c, 'salsa')) return 'salsa';
+        if (str_contains($c, 'queso') || str_contains($c, 'lácteo') || str_contains($c, 'lacteo')) return 'queso';
+        if (str_contains($c, 'fiambre') || str_contains($c, 'embutido')) return 'fiambre';
+        if (str_contains($c, 'verdul') || str_contains($c, 'vegetal')) return 'vegetal';
+        if (str_contains($c, 'fruta')) return 'fruta';
+        if (str_contains($c, 'condimento') || str_contains($c, 'especia')) return 'condimento';
+        return 'otro';
+    }
+
+    private function syncLinkedProductIngredients(\PDO $pdo, int $bid, int $productId, int $recipeId, float $yield): void
+    {
+        $flat = $this->flattenRecipeComponents($pdo, $bid, $recipeId, 1 / max(0.0001, $yield), []);
+        $pdo->prepare('DELETE FROM product_ingredients WHERE product_id=?')->execute([$productId]);
+        $findIngredient = $pdo->prepare('SELECT id FROM ingredients WHERE business_id=? AND name=? LIMIT 1');
+        $insertIngredient = $pdo->prepare('INSERT INTO ingredients (business_id,name,category,is_active) VALUES (?,?,?,1)');
+        $insertLink = $pdo->prepare('INSERT INTO product_ingredients (product_id,ingredient_id,quantity,unit) VALUES (?,?,?,?)
+            ON DUPLICATE KEY UPDATE quantity=VALUES(quantity),unit=VALUES(unit)');
+        foreach ($flat as $line) {
+            if ($line['quantity'] <= 0) continue;
+            $findIngredient->execute([$bid, $line['name']]);
+            $ingredientId = $findIngredient->fetchColumn();
+            if (!$ingredientId) {
+                $insertIngredient->execute([$bid, $line['name'], $this->mapIngredientCategory((string)$line['category'])]);
+                $ingredientId = (int)$pdo->lastInsertId();
+            }
+            $insertLink->execute([$productId, (int)$ingredientId, $line['quantity'], $line['unit']]);
         }
     }
 
