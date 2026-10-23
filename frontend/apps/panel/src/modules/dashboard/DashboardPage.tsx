@@ -76,7 +76,7 @@ export function DashboardPage() {
   const query: AnalyticsQuery = useMemo(() => ({ from, to }), [from, to]);
 
   const summary = useAnalyticsSummary(query);
-  const topProducts = useTopProducts({ ...query, limit: 6 });
+  const topProducts = useTopProducts({ ...query, limit: 100 });
   const topCategories = useTopCategories({ ...query, limit: 10 });
   const salesOverTime = useSalesOverTime(query);
   const ingredientsQuery = useAnalyticsIngredients(query);
@@ -84,6 +84,10 @@ export function DashboardPage() {
 
   const s = summary.data;
   const products = topProducts.data ?? [];
+  const displayProducts = products.slice(0, 6);
+  const pizzaProducts = products.filter((p) =>
+    /pizza|pizzer/i.test(p.category_name ?? '') || /^pizza\s/i.test(p.name),
+  ).slice(0, 6);
   const categories = topCategories.data ?? [];
   const points = salesOverTime.data ?? [];
   const ingredients = ingredientsQuery.data?.ingredients ?? [];
@@ -539,7 +543,7 @@ export function DashboardPage() {
               </p>
             ) : (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '1rem' }}>
-                {products.map((p, idx) => (
+                {displayProducts.map((p, idx) => (
                   <div
                     key={p.name + idx}
                     style={{
@@ -562,6 +566,39 @@ export function DashboardPage() {
                     <div style={{ textAlign: 'right', fontWeight: 700, color: 'var(--c-accent, #e63946)' }}>
                       {formatARS(p.revenue)}
                     </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Ranking específico de pizzas */}
+          <div
+            style={{
+              background: 'var(--c-surface, #fff)',
+              border: '1px solid var(--c-border, #ddd)',
+              borderRadius: '8px',
+              padding: '1.25rem',
+              marginBottom: '2rem',
+            }}
+          >
+            <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.1rem' }}>🍕 Pizzas más vendidas</h3>
+            {topProducts.isLoading ? (
+              <p style={{ color: '#888', fontSize: '0.9rem' }}>Calculando ranking…</p>
+            ) : pizzaProducts.length === 0 ? (
+              <p style={{ color: '#888', fontStyle: 'italic', fontSize: '0.9rem' }}>
+                No se identificaron pizzas por categoría o nombre en este período. Revisá que los productos estén asociados a una categoría de pizza.
+              </p>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem' }}>
+                {pizzaProducts.map((p, idx) => (
+                  <div key={p.product_id ?? p.name} style={{ border: '1px solid #eee', borderRadius: '6px', padding: '0.75rem 1rem', display: 'flex', justifyContent: 'space-between', gap: '1rem', background: idx === 0 ? '#fffdf0' : 'transparent' }}>
+                    <div>
+                      <div style={{ fontSize: '0.75rem', color: '#888', fontWeight: 700 }}>#{idx + 1}</div>
+                      <strong style={{ fontSize: '0.9rem' }}>{p.name}</strong>
+                      <div style={{ fontSize: '0.8rem', color: '#666' }}>{p.units} unidades</div>
+                    </div>
+                    <strong style={{ color: 'var(--c-accent, #e63946)', whiteSpace: 'nowrap' }}>{formatARS(p.revenue)}</strong>
                   </div>
                 ))}
               </div>
