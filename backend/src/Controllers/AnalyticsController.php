@@ -307,6 +307,8 @@ class AnalyticsController
                 GREATEST(si1.product_id, si2.product_id) AS p2_id,
                 MAX(CASE WHEN si1.product_id <= si2.product_id THEN COALESCE(p1.name, si1.product_name) ELSE COALESCE(p2.name, si2.product_name) END) AS p1_name,
                 MAX(CASE WHEN si1.product_id <= si2.product_id THEN COALESCE(p2.name, si2.product_name) ELSE COALESCE(p1.name, si1.product_name) END) AS p2_name,
+                MAX(CASE WHEN si1.product_id <= si2.product_id THEN COALESCE(c1.name, '') ELSE COALESCE(c2.name, '') END) AS p1_category_name,
+                MAX(CASE WHEN si1.product_id <= si2.product_id THEN COALESCE(c2.name, '') ELSE COALESCE(c1.name, '') END) AS p2_category_name,
                 COUNT(DISTINCT s.id) AS pair_orders,
                 SUM(si1.line_total + si2.line_total) AS total_revenue
              FROM sale_items si1
@@ -314,6 +316,8 @@ class AnalyticsController
              JOIN sales s ON s.id = si1.sale_id
              LEFT JOIN products p1 ON p1.id = si1.product_id
              LEFT JOIN products p2 ON p2.id = si2.product_id
+             LEFT JOIN categories c1 ON c1.id = p1.category_id
+             LEFT JOIN categories c2 ON c2.id = p2.category_id
              WHERE s.business_id = ? AND s.status = "completed"
                AND s.created_at BETWEEN ? AND ?
                AND si1.product_id IS NOT NULL AND si2.product_id IS NOT NULL
@@ -328,6 +332,8 @@ class AnalyticsController
             'p2_id'         => (int) $r['p2_id'],
             'p1_name'       => $r['p1_name'] ?? 'Producto 1',
             'p2_name'       => $r['p2_name'] ?? 'Producto 2',
+            'p1_category_name' => $r['p1_category_name'] ?? '',
+            'p2_category_name' => $r['p2_category_name'] ?? '',
             'pair_orders'   => (int) $r['pair_orders'],
             'total_revenue' => (float) $r['total_revenue'],
         ], $stmtProd->fetchAll());
