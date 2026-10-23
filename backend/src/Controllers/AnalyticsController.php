@@ -101,11 +101,13 @@ class AnalyticsController
         $stmt = Database::pdo()->prepare(
             'SELECT si.product_id,
                     MAX(COALESCE(p.name, si.product_name)) AS name,
+                    MAX(c.name) AS category_name,
                     SUM(si.quantity)   AS units,
                     SUM(si.line_total) AS revenue
                FROM sale_items si
                JOIN sales s ON s.id = si.sale_id
           LEFT JOIN products p ON p.id = si.product_id
+          LEFT JOIN categories c ON c.id = p.category_id
               WHERE s.business_id = ? AND s.status = "completed"
                 AND si.product_name NOT LIKE "Cobro compartido%"
                 AND s.created_at BETWEEN ? AND ?
@@ -118,6 +120,7 @@ class AnalyticsController
         Response::ok(['products' => array_map(static fn(array $r): array => [
             'product_id' => $r['product_id'] !== null ? (int) $r['product_id'] : null,
             'name'       => $r['name'],
+            'category_name' => $r['category_name'],
             'units'      => (float) $r['units'],
             'revenue'    => (float) $r['revenue'],
         ], $stmt->fetchAll())]);
