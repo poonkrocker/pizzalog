@@ -57,13 +57,18 @@ export function AnalyticsDetailsPage() {
       : [3,4,5,6].includes(c.weekday) && (c.hour >= 20 || c.hour < 2));
   }, [cells, heatPreset]);
   const heatLookup = useMemo(() => new Map(heatCells.map(c => [`${c.weekday}-${c.hour}`, c])), [heatCells]);
-  const categories = useMemo(() => {
+  const categories = useMemo<Array<{ name: string; product: (typeof products)[number] }>>(() => {
     const map = new Map<string, typeof products>();
     products.forEach(p => {
       const name = p.category_name || 'Sin categoría';
       map.set(name, [...(map.get(name) ?? []), p]);
     });
-    return [...map.entries()].map(([name, list]) => { const ranked = [...list].sort((a,b) => b.units-a.units); const product = ranked[0]; return product ? { name, product } : null; }).filter((entry): entry is { name: string; product: (typeof products)[number] } => entry !== null).sort((a,b) => b.product.units-a.product.units);
+    const ranked: Array<{ name: string; product: (typeof products)[number] }> = [];
+    for (const [name, list] of map.entries()) {
+      const product = [...list].sort((a, b) => b.units - a.units)[0];
+      if (product) ranked.push({ name, product });
+    }
+    return ranked.sort((a, b) => b.product.units - a.product.units);
   }, [products]);
   const goodMargins = margins.filter(p => p.has_cost && p.margin_pct !== null);
   const avgMargin = goodMargins.length ? goodMargins.reduce((sum,p)=>sum+(p.margin_pct ?? 0),0)/goodMargins.length : 0;
