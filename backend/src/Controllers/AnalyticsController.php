@@ -220,7 +220,9 @@ class AnalyticsController
                  AND LOWER({$alias}.name) NOT LIKE '%salsa%'
                  AND LOWER({$alias}.name) NOT LIKE '%pomodoro%'
                  AND LOWER({$alias}.name) NOT LIKE '%muzza%'
-                 AND LOWER({$alias}.name) NOT LIKE '%mozzarella%' ";
+                 AND LOWER({$alias}.name) NOT LIKE '%mozzarella%' 
+                 AND LOWER({$alias}.name) NOT LIKE '%albahaca%'
+                 AND LOWER({$alias}.name) NOT LIKE '%basil%' ";
     }
 
     /**
