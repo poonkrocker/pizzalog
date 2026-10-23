@@ -127,6 +127,50 @@ class AnalyticsController
     }
 
     /**
+     * GET /analytics/category-leaders — producto más vendido en cada categoría.
+     * No limita el catálogo a los primeros N productos globales.
+     */
+    public function categoryLeaders(Request $req): void
+    {
+        [$bid, $fromDt, $toDt] = $this->ctx($req);
+        $stmt = Database::pdo()->prepare(
+            'SELECT COALESCE(c.id, 0) AS category_id,
+                    COALESCE(c.name, "Sin categoría") AS category_name,
+                    si.product_id,
+                    MAX(COALESCE(p.name, si.product_name)) AS product_name,
+                    SUM(si.quantity) AS units,
+                    SUM(si.line_total) AS revenue
+               FROM sale_items si
+               JOIN sales s ON s.id = si.sale_id
+          LEFT JOIN products p ON p.id = si.product_id
+          LEFT JOIN categories c ON c.id = p.category_id
+              WHERE s.business_id = ? AND s.status = "completed"
+                AND si.product_name NOT LIKE "Cobro compartido%"
+                AND s.created_at BETWEEN ? AND ?
+              GROUP BY COALESCE(c.id, 0), COALESCE(c.name, "Sin categoría"),
+                       COALESCE(CAST(si.product_id AS CHAR), si.product_name), si.product_id
+              ORDER BY category_id, units DESC, revenue DESC'
+        );
+        $stmt->execute([$bid, $fromDt, $toDt]);
+        $leaders = [];
+        foreach ($stmt->fetchAll() as $r) {
+            $categoryId = (int)$r['category_id'];
+            if (isset($leaders[$categoryId])) {
+                continue;
+            }
+            $leaders[$categoryId] = [
+                'category_id' => $categoryId,
+                'category_name' => $r['category_name'],
+                'product_id' => $r['product_id'] !== null ? (int)$r['product_id'] : null,
+                'product_name' => $r['product_name'],
+                'units' => (float)$r['units'],
+                'revenue' => (float)$r['revenue'],
+            ];
+        }
+        Response::ok(['leaders' => array_values($leaders)]);
+    }
+
+    /**
      * GET /analytics/top-categories?from=YYYY-MM-DD&to=YYYY-MM-DD
      * Ranking por categoría (p. ej. cervezas), respetando unidades históricas
      * aunque el product_id no haya podido vincularse al catálogo.
@@ -220,7 +264,9 @@ class AnalyticsController
                  AND LOWER({$alias}.name) NOT LIKE '%salsa%'
                  AND LOWER({$alias}.name) NOT LIKE '%pomodoro%'
                  AND LOWER({$alias}.name) NOT LIKE '%muzza%'
-                 AND LOWER({$alias}.name) NOT LIKE '%mozzarella%' ";
+                 AND LOWER({$alias}.name) NOT LIKE '%mozzarella%' 
+                 AND LOWER({$alias}.name) NOT LIKE '%albahaca%'
+                 AND LOWER({$alias}.name) NOT LIKE '%basil%' ";
     }
 
     /**
@@ -305,6 +351,8 @@ class AnalyticsController
                 GREATEST(si1.product_id, si2.product_id) AS p2_id,
                 MAX(CASE WHEN si1.product_id <= si2.product_id THEN COALESCE(p1.name, si1.product_name) ELSE COALESCE(p2.name, si2.product_name) END) AS p1_name,
                 MAX(CASE WHEN si1.product_id <= si2.product_id THEN COALESCE(p2.name, si2.product_name) ELSE COALESCE(p1.name, si1.product_name) END) AS p2_name,
+                MAX(CASE WHEN si1.product_id <= si2.product_id THEN COALESCE(c1.name, "") ELSE COALESCE(c2.name, "") END) AS p1_category_name,
+                MAX(CASE WHEN si1.product_id <= si2.product_id THEN COALESCE(c2.name, "") ELSE COALESCE(c1.name, "") END) AS p2_category_name,
                 COUNT(DISTINCT s.id) AS pair_orders,
                 SUM(si1.line_total + si2.line_total) AS total_revenue
              FROM sale_items si1
@@ -312,12 +360,17 @@ class AnalyticsController
              JOIN sales s ON s.id = si1.sale_id
              LEFT JOIN products p1 ON p1.id = si1.product_id
              LEFT JOIN products p2 ON p2.id = si2.product_id
+             LEFT JOIN categories c1 ON c1.id = p1.category_id
+             LEFT JOIN categories c2 ON c2.id = p2.category_id
              WHERE s.business_id = ? AND s.status = "completed"
                AND s.created_at BETWEEN ? AND ?
                AND si1.product_id IS NOT NULL AND si2.product_id IS NOT NULL
                AND si1.product_id != si2.product_id
              GROUP BY p1_id, p2_id
-             ORDER BY pair_orders DESC, total_revenue DESC
+             ORDER BY (
+                 (LOWER(COALESCE(c1.name, "")) LIKE '%pizza%' OR LOWER(COALESCE(c1.name, "")) LIKE '%pizzer%')
+                 AND (LOWER(COALESCE(c2.name, "")) LIKE '%pizza%' OR LOWER(COALESCE(c2.name, "")) LIKE '%pizzer%')
+             ) DESC, pair_orders DESC, total_revenue DESC
              LIMIT 10'
         );
         $stmtProd->execute([$bid, $fromDt, $toDt]);
@@ -326,6 +379,8 @@ class AnalyticsController
             'p2_id'         => (int) $r['p2_id'],
             'p1_name'       => $r['p1_name'] ?? 'Producto 1',
             'p2_name'       => $r['p2_name'] ?? 'Producto 2',
+            'p1_category_name' => $r['p1_category_name'] ?? '',
+            'p2_category_name' => $r['p2_category_name'] ?? '',
             'pair_orders'   => (int) $r['pair_orders'],
             'total_revenue' => (float) $r['total_revenue'],
         ], $stmtProd->fetchAll());
@@ -370,10 +425,150 @@ class AnalyticsController
             'occurrences'  => (float) $r['occurrences'],
         ], $stmtIng->fetchAll());
 
+        // 3) Tríos de productos por ticket. Normalizamos los ids en PHP para
+        // agrupar los tríos independientemente del orden de las líneas.
+        $stmtTriples = $pdo->prepare(
+            'SELECT a.sale_id, a.product_id AS id1, b.product_id AS id2, c.product_id AS id3,
+                    a.line_revenue + b.line_revenue + c.line_revenue AS trio_revenue
+               FROM (
+                    SELECT si.sale_id, si.product_id, SUM(si.line_total) AS line_revenue
+                      FROM sale_items si
+                      JOIN sales s ON s.id = si.sale_id
+                     WHERE s.business_id = ? AND s.status = "completed"
+                       AND s.created_at BETWEEN ? AND ?
+                       AND si.parent_sale_item_id IS NULL AND si.product_id IS NOT NULL
+                     GROUP BY si.sale_id, si.product_id
+               ) a
+               JOIN (
+                    SELECT si.sale_id, si.product_id, SUM(si.line_total) AS line_revenue
+                      FROM sale_items si
+                      JOIN sales s ON s.id = si.sale_id
+                     WHERE s.business_id = ? AND s.status = "completed"
+                       AND s.created_at BETWEEN ? AND ?
+                       AND si.parent_sale_item_id IS NULL AND si.product_id IS NOT NULL
+                     GROUP BY si.sale_id, si.product_id
+               ) b ON b.sale_id = a.sale_id AND b.product_id > a.product_id
+               JOIN (
+                    SELECT si.sale_id, si.product_id, SUM(si.line_total) AS line_revenue
+                      FROM sale_items si
+                      JOIN sales s ON s.id = si.sale_id
+                     WHERE s.business_id = ? AND s.status = "completed"
+                       AND s.created_at BETWEEN ? AND ?
+                       AND si.parent_sale_item_id IS NULL AND si.product_id IS NOT NULL
+                     GROUP BY si.sale_id, si.product_id
+               ) c ON c.sale_id = b.sale_id AND c.product_id > b.product_id'
+        );
+        $stmtTriples->execute([$bid, $fromDt, $toDt, $bid, $fromDt, $toDt, $bid, $fromDt, $toDt]);
+        $trioStats = [];
+        foreach ($stmtTriples->fetchAll() as $r) {
+            $ids = [(int)$r['id1'], (int)$r['id2'], (int)$r['id3']];
+            sort($ids);
+            $key = implode(':', $ids);
+            if (!isset($trioStats[$key])) {
+                $trioStats[$key] = ['ids' => $ids, 'sales' => [], 'revenue' => 0.0];
+            }
+            $trioStats[$key]['sales'][(int)$r['sale_id']] = true;
+            $trioStats[$key]['revenue'] += (float)$r['trio_revenue'];
+        }
+        uasort($trioStats, static fn(array $a, array $b): int =>
+            (count($b['sales']) <=> count($a['sales'])) ?: ($b['revenue'] <=> $a['revenue'])
+        );
+        $productTriples = [];
+        foreach (array_slice($trioStats, 0, 12) as $trio) {
+            $ids = $trio['ids'];
+            $namesStmt = $pdo->prepare('SELECT id, name FROM products WHERE id IN (?, ?, ?) AND business_id = ?');
+            $namesStmt->execute([$ids[0], $ids[1], $ids[2], $bid]);
+            $names = [];
+            foreach ($namesStmt->fetchAll() as $n) $names[(int)$n['id']] = $n['name'];
+            $productTriples[] = [
+                'p1_id' => $ids[0], 'p2_id' => $ids[1], 'p3_id' => $ids[2],
+                'p1_name' => $names[$ids[0]] ?? 'Producto',
+                'p2_name' => $names[$ids[1]] ?? 'Producto',
+                'p3_name' => $names[$ids[2]] ?? 'Producto',
+                'triple_orders' => count($trio['sales']),
+                'total_revenue' => (float)$trio['revenue'],
+            ];
+        }
+
         Response::ok([
             'product_combinations'    => $productCombinations,
+            'product_triples'         => $productTriples,
             'ingredient_combinations' => $ingredientCombinations,
         ]);
+    }
+
+ 
+    /**
+     * Preferencias analíticas por negocio: presets de horarios y selección actual.
+     * La tabla se administra mediante migration_026_analytics_preferences.sql.
+     */
+    public function timePreferences(Request $req): void
+    {
+        $bid = (int)$req->auth['business_id'];
+        $stmt = Database::pdo()->prepare('SELECT settings_json FROM analytics_preferences WHERE business_id = ? LIMIT 1');
+        $stmt->execute([$bid]);
+        $raw = $stmt->fetchColumn();
+        $defaults = [
+            'selected_preset' => 'all',
+            'presets' => [
+                'midday' => ['weekdays' => [1, 2, 3, 4], 'start_hour' => 11, 'end_hour' => 16],
+                'night' => ['weekdays' => [3, 4, 5, 6], 'start_hour' => 20, 'end_hour' => 2],
+            ],
+        ];
+        $saved = is_string($raw) ? json_decode($raw, true) : null;
+        Response::ok(['preferences' => is_array($saved) ? array_replace_recursive($defaults, $saved) : $defaults]);
+    }
+
+    public function saveTimePreferences(Request $req): void
+    {
+        $bid = (int)$req->auth['business_id'];
+        $raw = $req->input('preferences');
+        if (!is_array($raw)) {
+            Response::error('Las preferencias analíticas son inválidas.', 422);
+        }
+        $selected = (string)($raw['selected_preset'] ?? 'all');
+        if (!in_array($selected, ['all', 'midday', 'night'], true)) {
+            Response::error('Preset de horario inválido.', 422);
+        }
+        $defaults = [
+            'selected_preset' => $selected,
+            'presets' => [
+                'midday' => ['weekdays' => [1, 2, 3, 4], 'start_hour' => 11, 'end_hour' => 16],
+                'night' => ['weekdays' => [3, 4, 5, 6], 'start_hour' => 20, 'end_hour' => 2],
+            ],
+        ];
+        $json = json_encode($defaults, JSON_UNESCAPED_UNICODE);
+        $stmt = Database::pdo()->prepare(
+            'INSERT INTO analytics_preferences (business_id, settings_json) VALUES (?, ?)
+             ON DUPLICATE KEY UPDATE settings_json = VALUES(settings_json)'
+        );
+        $stmt->execute([$bid, $json]);
+        Response::ok(['preferences' => $defaults]);
+    }
+
+    /**
+     * GET /analytics/time-heatmap — distribución de ventas por día y hora local.
+     * DAYOFWEEK de MySQL: 1 domingo ... 7 sábado.
+     */
+    public function timeHeatmap(Request $req): void
+    {
+        [$bid, $fromDt, $toDt] = $this->ctx($req);
+        $stmt = Database::pdo()->prepare(
+            'SELECT DAYOFWEEK(created_at) AS weekday, HOUR(created_at) AS hour,
+                    COUNT(*) AS sales_count, COALESCE(SUM(total), 0) AS revenue
+               FROM sales
+              WHERE business_id = ? AND status = "completed"
+                AND created_at BETWEEN ? AND ?
+              GROUP BY DAYOFWEEK(created_at), HOUR(created_at)
+              ORDER BY weekday, hour'
+        );
+        $stmt->execute([$bid, $fromDt, $toDt]);
+        Response::ok(['cells' => array_map(static fn(array $r): array => [
+            'weekday' => ((int)$r['weekday'] + 5) % 7,
+            'hour' => (int)$r['hour'],
+            'sales_count' => (int)$r['sales_count'],
+            'revenue' => (float)$r['revenue'],
+        ], $stmt->fetchAll())]);
     }
 
     /**

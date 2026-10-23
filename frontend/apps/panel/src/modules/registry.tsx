@@ -1,6 +1,7 @@
 import type { Role, User } from '@pizzalog/shared';
 import type { ModuleDef } from './types';
 import { DashboardPage } from './dashboard/DashboardPage';
+import { AnalyticsDetailsPage } from './dashboard/AnalyticsDetailsPage';
 import { OrdersPage } from './orders/OrdersPage';
 import { DriversPage } from './drivers/DriversPage';
 import { ProductsPage } from './products/ProductsPage';
@@ -24,6 +25,14 @@ export const modules: ModuleDef[] = [
     roles: ['admin', 'manager'],
     element: <DashboardPage />,
     icon: '\u25E7',
+  },
+  {
+    id: 'analytics-details',
+    title: 'Detalles',
+    path: 'detalles',
+    roles: ['admin', 'manager'],
+    element: <AnalyticsDetailsPage />,
+    icon: '📊',
   },
   {
     id: 'orders',
