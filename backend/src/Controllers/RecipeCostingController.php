@@ -244,7 +244,7 @@ class RecipeCostingController
 
     private function mapIngredientCategory(string $supplyCategory): string
     {
-        $c = mb_strtolower($supplyCategory);
+        $c = strtolower($supplyCategory);
         if (str_contains($c, 'masa') || str_contains($c, 'harina')) return 'masa';
         if (str_contains($c, 'salsa')) return 'salsa';
         if (str_contains($c, 'queso') || str_contains($c, 'lácteo') || str_contains($c, 'lacteo')) return 'queso';
