@@ -32,6 +32,8 @@ export function analyticsApi(client: ApiClient) {
       client.get<{ products: AnalyticsTopProduct[] }>(`/analytics/top-products${queryStr(params)}`),
     topCategories: (params?: AnalyticsQuery) =>
       client.get<{ categories: Array<{ category_id: number; category_name: string; sales_count: number; units: number; revenue: number }> }>(`/analytics/top-categories${queryStr(params)}`),
+    categoryLeaders: (params?: AnalyticsQuery) =>
+      client.get<{ leaders: Array<{ category_id: number; category_name: string; product_id: number | null; product_name: string; units: number; revenue: number }> }>(`/analytics/category-leaders${queryStr(params)}`),
     salesOverTime: (params?: AnalyticsQuery) =>
       client.get<{ points: AnalyticsSalesPoint[] }>(`/analytics/sales-over-time${queryStr(params)}`),
     productMargins: (params?: AnalyticsQuery) =>
