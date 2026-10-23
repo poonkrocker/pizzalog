@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   formatARS,
@@ -10,7 +10,7 @@ import {
   type StudioRecipeComponentInput,
 } from '@pizzalog/shared';
 import { useApi } from '@/lib/auth';
-import { Button, Field, Input, Loading } from '@/ui';
+import { Field, Input, Loading } from '@/ui';
 
 type View = 'recipes' | 'costs';
 type ComponentRow = StudioRecipeComponentInput;
@@ -34,7 +34,7 @@ const periodLabels: Record<CostPeriod, string> = {
 };
 const units = ['kg', 'g', 'L', 'cc', 'u', 'porción', 'bandeja'];
 
-const panelStyle: React.CSSProperties = {
+const panelStyle: CSSProperties = {
   background: 'var(--c-surface, #fff)', border: '1px solid var(--c-border, #ddd)',
   borderRadius: 10, padding: '1rem', minWidth: 0,
 };
