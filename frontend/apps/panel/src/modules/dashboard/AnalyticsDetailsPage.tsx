@@ -40,12 +40,10 @@ export function AnalyticsDetailsPage() {
   }, [preferencesQ.data?.selected_preset]);
   const summary = useQuery({ queryKey: ['analytics','details-summary',query], queryFn: () => api.analytics.summary(query).then(r => r.summary) });
   const previousSummary = useQuery({ queryKey: ['analytics','details-summary-previous',previous], queryFn: () => api.analytics.summary(previous).then(r => r.summary) });
-  const productsQ = useQuery({ queryKey: ['analytics','details-products',query], queryFn: () => api.analytics.topProducts(query).then(r => r.products) });
   const categoryLeadersQ = useQuery({ queryKey: ['analytics','category-leaders',query], queryFn: () => api.analytics.categoryLeaders(query).then(r => r.leaders) });
   const marginsQ = useQuery({ queryKey: ['analytics','details-margins',query], queryFn: () => api.analytics.productMargins(query).then(r => r.products as Array<{product_id:number;name:string;unit_cost:number;units:number;revenue:number;profit:number;margin_pct:number|null;has_cost:boolean}>) });
   const combosQ = useQuery({ queryKey: ['analytics','details-combos',query], queryFn: () => api.analytics.winningCombinations(query) });
   const heatQ = useQuery({ queryKey: ['analytics','details-heatmap',query], queryFn: () => api.analytics.timeHeatmap(query).then(r => r.cells) });
-  const products = productsQ.data ?? [];
   const margins = marginsQ.data ?? [];
   const combos = combosQ.data?.product_combinations ?? [];
   const rankedCombos = useMemo(() => [...combos].sort((a, b) => {
@@ -66,7 +64,7 @@ export function AnalyticsDetailsPage() {
   const categories = categoryLeadersQ.data ?? [];
   const goodMargins = margins.filter(p => p.has_cost && p.margin_pct !== null);
   const avgMargin = goodMargins.length ? goodMargins.reduce((sum,p)=>sum+(p.margin_pct ?? 0),0)/goodMargins.length : 0;
-  const sortedUnits = [...products].sort((a,b)=>a.units-b.units);
+  const sortedUnits = [...margins].sort((a,b)=>a.units-b.units);
   const medianUnits = sortedUnits.length ? (sortedUnits[Math.floor(sortedUnits.length/2)]?.units ?? 0) : 0;
   const trend = (current: number, prior: number) => prior > 0 ? ((current-prior)/prior)*100 : current > 0 ? null : 0;
   const moneyTrend = trend(summary.data?.revenue ?? 0, previousSummary.data?.revenue ?? 0);
@@ -89,8 +87,8 @@ export function AnalyticsDetailsPage() {
       <button onClick={()=>{const d=new Date();setFrom(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`);setTo(dateNow());}} style={{padding:'.55rem .8rem',borderRadius:6,border:'1px solid #ddd',background:'#fff',cursor:'pointer'}}>Este mes</button>
       <span style={muted}>Comparación: {previous.from} a {previous.to}</span>
     </div>
-    {(summary.isLoading || productsQ.isLoading || categoryLeadersQ.isLoading || marginsQ.isLoading) && <Loading message="Analizando ventas y rentabilidad..." />}
-    {(summary.isError || previousSummary.isError || productsQ.isError || categoryLeadersQ.isError || marginsQ.isError || combosQ.isError || heatQ.isError || preferencesQ.isError) && <div role="alert" style={{ ...card, color: '#a12622', marginBottom: '1rem' }}>No se pudieron cargar todas las métricas. Revisá la conexión y volvé a intentar. Algunos paneles pueden quedar incompletos.</div>}
+    {(summary.isLoading || categoryLeadersQ.isLoading || marginsQ.isLoading) && <Loading message="Analizando ventas y rentabilidad..." />}
+    {(summary.isError || previousSummary.isError || categoryLeadersQ.isError || marginsQ.isError || combosQ.isError || heatQ.isError || preferencesQ.isError) && <div role="alert" style={{ ...card, color: '#a12622', marginBottom: '1rem' }}>No se pudieron cargar todas las métricas. Revisá la conexión y volvé a intentar. Algunos paneles pueden quedar incompletos.</div>}
     <div style={grid}>
       <div style={card}><div style={muted}>Facturación vs. período anterior</div><div style={{fontSize:'1.6rem',fontWeight:800}}>{formatARS(summary.data?.revenue ?? 0)}</div><strong style={{color: moneyTrend === null ? '#777' : moneyTrend >= 0 ? '#16803d' : '#c62828'}}>{moneyTrend === null ? 'Sin base comparable' : `${moneyTrend >= 0 ? '+' : ''}${moneyTrend.toFixed(1)}%`}</strong></div>
       <div style={card}><div style={muted}>Ticket promedio vs. período anterior</div><div style={{fontSize:'1.6rem',fontWeight:800}}>{formatARS(summary.data?.avg_ticket ?? 0)}</div><strong style={{color: ticketTrend === null ? '#777' : ticketTrend >= 0 ? '#16803d' : '#c62828'}}>{ticketTrend === null ? 'Sin base comparable' : `${ticketTrend >= 0 ? '+' : ''}${ticketTrend.toFixed(1)}%`}</strong></div>
@@ -100,7 +98,7 @@ export function AnalyticsDetailsPage() {
     <div style={grid}>
       <div style={card}>
         <h3 style={{marginTop:0}}>Producto más vendido por categoría</h3>
-        {categories.length ? categories.map(c=><div key={c.category_name} style={{display:'flex',justifyContent:'space-between',gap:'.75rem',padding:'.55rem 0',borderBottom:'1px solid #eee'}}><div><div style={{fontWeight:700}}>{c.name}</div><div style={muted}>{c.product_name}</div></div><strong>{c.units} u.</strong></div>) : <p style={muted}>No hay productos para este período.</p>}
+        {categories.length ? categories.map(c=><div key={c.category_name} style={{display:'flex',justifyContent:'space-between',gap:'.75rem',padding:'.55rem 0',borderBottom:'1px solid #eee'}}><div><div style={{fontWeight:700}}>{c.category_name}</div><div style={muted}>{c.product_name}</div></div><strong>{c.units} u.</strong></div>) : <p style={muted}>No hay productos para este período.</p>}
       </div>
       <div style={card}>
         <h3 style={{marginTop:0}}>Rentabilidad por producto</h3><p style={muted}>Estimación con el costo actual del catálogo; no representa necesariamente el costo histórico de cada venta.</p>
