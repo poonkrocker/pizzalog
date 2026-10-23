@@ -688,7 +688,7 @@ export function DashboardPage() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                   {ingredients.slice(0, 8).map((ing, idx) => {
                     const badge = ingredientCategoryLabel(ing.category);
-                    const pct = Math.round((ing.units / maxIngredientUnits) * 100);
+                    const pct = Math.min(100, Math.max(1, Math.round((ing.units / maxIngredientUnits) * 100)));
                     return (
                       <div key={ing.id || ing.name} style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.88rem' }}>
