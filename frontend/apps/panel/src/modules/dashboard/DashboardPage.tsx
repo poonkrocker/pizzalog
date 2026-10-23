@@ -31,7 +31,7 @@ function firstOfYearStr(): string {
   return `${new Date().getFullYear()}-01-01`;
 }
 
-type Preset = 'today' | '7days' | 'month' | 'year' | 'all' | 'custom';
+type Preset = 'today' | '7days' | '90days' | 'month' | 'year' | 'all' | 'custom';
 
 function ingredientCategoryLabel(cat: string): { label: string; icon: string; bg: string } {
   switch (cat) {
@@ -60,6 +60,9 @@ export function DashboardPage() {
       setTo(t);
     } else if (p === '7days') {
       setFrom(daysAgoStr(6));
+      setTo(todayStr());
+    } else if (p === '90days') {
+      setFrom(daysAgoStr(89));
       setTo(todayStr());
     } else if (p === 'month') {
       setFrom(firstOfMonthStr());
@@ -248,6 +251,22 @@ export function DashboardPage() {
             }}
           >
             Últimos 7 días
+          </button>
+          <button
+            type="button"
+            onClick={() => handlePresetChange('90days')}
+            style={{
+              padding: '0.4rem 0.8rem',
+              borderRadius: '6px',
+              border: 'none',
+              background: preset === '90days' ? 'var(--c-accent, #e63946)' : '#f0f0f0',
+              color: preset === '90days' ? '#fff' : '#333',
+              fontWeight: preset === '90days' ? 700 : 400,
+              cursor: 'pointer',
+              fontSize: '0.85rem',
+            }}
+          >
+            90 días
           </button>
           <button
             type="button"
