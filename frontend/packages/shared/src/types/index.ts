@@ -571,8 +571,27 @@ export interface IngredientCombination {
   occurrences: number;
 }
 
+export interface ProductTriple {
+  p1_id: number;
+  p2_id: number;
+  p3_id: number;
+  p1_name: string;
+  p2_name: string;
+  p3_name: string;
+  triple_orders: number;
+  total_revenue: number;
+}
+
+export interface AnalyticsTimeHeatmapCell {
+  weekday: number; // 0 = lunes ... 6 = domingo
+  hour: number;
+  sales_count: number;
+  revenue: number;
+}
+
 export interface AnalyticsWinningCombinations {
   product_combinations: ProductCombination[];
+  product_triples?: ProductTriple[];
   ingredient_combinations: IngredientCombination[];
 }
 
