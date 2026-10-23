@@ -12,6 +12,7 @@ export interface AnalyticsQuery {
   from?: string;
   to?: string;
   limit?: number;
+  time_preset?: 'all' | 'midday' | 'night';
 }
 
 export function analyticsApi(client: ApiClient) {
