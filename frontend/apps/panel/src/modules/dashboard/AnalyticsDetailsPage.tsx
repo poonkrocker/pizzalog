@@ -88,6 +88,7 @@ export function AnalyticsDetailsPage() {
       <span style={muted}>Comparación: {previous.from} a {previous.to}</span>
     </div>
     {(summary.isLoading || productsQ.isLoading || marginsQ.isLoading) && <Loading message="Analizando ventas y rentabilidad..." />}
+    {(summary.isError || previousSummary.isError || productsQ.isError || marginsQ.isError || combosQ.isError || heatQ.isError || preferencesQ.isError) && <div role="alert" style={{ ...card, color: '#a12622', marginBottom: '1rem' }}>No se pudieron cargar todas las métricas. Revisá la conexión y volvé a intentar. Algunos paneles pueden quedar incompletos.</div>}
     <div style={grid}>
       <div style={card}><div style={muted}>Facturación vs. período anterior</div><div style={{fontSize:'1.6rem',fontWeight:800}}>{formatARS(summary.data?.revenue ?? 0)}</div><strong style={{color: moneyTrend === null ? '#777' : moneyTrend >= 0 ? '#16803d' : '#c62828'}}>{moneyTrend === null ? 'Sin base comparable' : `${moneyTrend >= 0 ? '+' : ''}${moneyTrend.toFixed(1)}%`}</strong></div>
       <div style={card}><div style={muted}>Ticket promedio vs. período anterior</div><div style={{fontSize:'1.6rem',fontWeight:800}}>{formatARS(summary.data?.avg_ticket ?? 0)}</div><strong style={{color: ticketTrend === null ? '#777' : ticketTrend >= 0 ? '#16803d' : '#c62828'}}>{ticketTrend === null ? 'Sin base comparable' : `${ticketTrend >= 0 ? '+' : ''}${ticketTrend.toFixed(1)}%`}</strong></div>
