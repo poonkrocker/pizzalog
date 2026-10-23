@@ -93,7 +93,6 @@ export function DashboardPage() {
   const ingredients = ingredientsQuery.data?.ingredients ?? [];
   const ingCategories = ingredientsQuery.data?.by_category ?? [];
   const productCombos = combinationsQuery.data?.product_combinations ?? [];
-  const ingredientCombos = combinationsQuery.data?.ingredient_combinations ?? [];
 
   // Agrupar serie temporal por mes si supera los 45 puntos (ej. año completo o histórico 2022–2026)
   const chartPoints = useMemo(() => {
@@ -708,7 +707,7 @@ export function DashboardPage() {
                             {ing.name}
                           </span>
                           <span style={{ color: '#555', fontWeight: 700 }}>
-                            {ing.units} <span style={{ fontSize: '0.75rem', fontWeight: 400, color: '#888' }}>unid ({ing.sales_count} ventas)</span>
+                            Índice {pct}/100 <span style={{ fontSize: '0.75rem', fontWeight: 400, color: '#888' }}>de interés</span>
                           </span>
                         </div>
                         <div style={{ width: '100%', height: '6px', background: '#f0f0f0', borderRadius: '3px', overflow: 'hidden' }}>
@@ -729,51 +728,7 @@ export function DashboardPage() {
               )}
             </div>
 
-            {/* 2) Combinaciones Favoritas de Ingredientes */}
-            <div
-              style={{
-                background: 'var(--c-surface, #fff)',
-                border: '1px solid var(--c-border, #ddd)',
-                borderRadius: '8px',
-                padding: '1.25rem',
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                <h3 style={{ margin: 0, fontSize: '1.1rem' }}>✨ Toppings & Sabores Ganadores</h3>
-                <span style={{ fontSize: '0.8rem', color: '#777' }}>Co-ocurrencia en ventas</span>
-              </div>
 
-              {ingredientCombos.length === 0 ? (
-                <p style={{ color: '#888', fontStyle: 'italic', fontSize: '0.9rem' }}>
-                  Sin combinaciones de ingredientes registradas aún en el período.
-                </p>
-              ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.6rem' }}>
-                  {ingredientCombos.slice(0, 8).map((ic, idx) => (
-                    <div
-                      key={`${ic.i1_id}-${ic.i2_id}`}
-                      style={{
-                        padding: '0.6rem 0.8rem',
-                        background: '#fafafa',
-                        border: '1px solid #eee',
-                        borderRadius: '6px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        justifyContent: 'space-between',
-                      }}
-                    >
-                      <div style={{ fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.3rem', color: '#2b2d42' }}>
-                        {ic.i1_name} <span style={{ color: 'var(--c-accent, #e63946)', fontWeight: 800 }}>+</span> {ic.i2_name}
-                      </div>
-                      <div style={{ fontSize: '0.75rem', color: '#666', display: 'flex', justifyContent: 'space-between' }}>
-                        <span>🔥 {ic.occurrences} pizzas</span>
-                        <span>{ic.orders_count} pedidos</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
           </div>
 
           {/* Sección de Combinaciones Ganadoras de Productos (Cross-Selling) */}
