@@ -10,6 +10,10 @@ import type {
   SaveStudioRecipeInput,
   BusinessCostsResponse,
   BusinessCostInput,
+  RecipeStudioResponse,
+  SaveStudioRecipeInput,
+  BusinessCostsResponse,
+  BusinessCostInput,
 } from '../types';
 
 export interface DoughCalculateParams {
@@ -43,6 +47,12 @@ export function productionApi(client: ApiClient) {
         '/production/recipes',
         body,
       ),
+    recipeStudio: () => client.get<RecipeStudioResponse>('/production/recipe-studio'),
+    saveStudioRecipe: (body: SaveStudioRecipeInput) =>
+      client.post<{ success: boolean; id: number }>('/production/recipe-studio/recipes', body),
+    businessCosts: () => client.get<BusinessCostsResponse>('/production/business-costs'),
+    saveBusinessCosts: (body: { items: BusinessCostInput[] }) =>
+      client.put<{ success: boolean }>('/production/business-costs', body),
     recipeStudio: () => client.get<RecipeStudioResponse>('/production/recipe-studio'),
     saveStudioRecipe: (body: SaveStudioRecipeInput) =>
       client.post<{ success: boolean; id: number }>('/production/recipe-studio/recipes', body),
