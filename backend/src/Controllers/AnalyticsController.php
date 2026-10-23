@@ -429,22 +429,10 @@ class AnalyticsController
  
     /**
      * Preferencias analíticas por negocio: presets de horarios y selección actual.
-     * La tabla se crea de forma idempotente para instalaciones existentes.
+     * La tabla se administra mediante migration_026_analytics_preferences.sql.
      */
-    private function ensureAnalyticsPreferences(): void
-    {
-        Database::pdo()->exec(
-            'CREATE TABLE IF NOT EXISTS analytics_preferences (
-                business_id INT NOT NULL PRIMARY KEY,
-                settings_json JSON NOT NULL,
-                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
-        );
-    }
-
     public function timePreferences(Request $req): void
     {
-        $this->ensureAnalyticsPreferences();
         $bid = (int)$req->auth['business_id'];
         $stmt = Database::pdo()->prepare('SELECT settings_json FROM analytics_preferences WHERE business_id = ? LIMIT 1');
         $stmt->execute([$bid]);
@@ -462,7 +450,6 @@ class AnalyticsController
 
     public function saveTimePreferences(Request $req): void
     {
-        $this->ensureAnalyticsPreferences();
         $bid = (int)$req->auth['business_id'];
         $raw = $req->input('preferences');
         if (!is_array($raw)) {
