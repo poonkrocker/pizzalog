@@ -170,9 +170,18 @@ class RecipeCostingController
                 $unit=trim((string)($c['unit']??'kg'))?:'kg';
                 $ins->execute([$bid,$rid,$ct,$sid,$child,$qty,$unit,(int)$i]);
             }
-            if($linked) {
-                $unitCost = round($this->calculateBatchCost($pdo, $bid, $rid, []) / $yield, 2);
-                $pdo->prepare('UPDATE products SET name=?, price=?, cost=? WHERE id=? AND business_id=?')->execute([$name,$price,$unitCost,$linked,$bid]);
+            // Recalcular todos los productos vinculados; así un cambio en una subreceta
+            // también actualiza los productos finales que dependen de ella.
+            $linkedRecipes = $pdo->prepare('SELECT id, linked_product_id, name, price, yield_quantity
+                FROM recipe_studio_recipes WHERE business_id=? AND is_active=1 AND recipe_type=\'product\' AND linked_product_id IS NOT NULL');
+            $linkedRecipes->execute([$bid]);
+            $updateProduct = $pdo->prepare('UPDATE products SET name=?, price=?, cost=? WHERE id=? AND business_id=?');
+            foreach ($linkedRecipes->fetchAll(\PDO::FETCH_ASSOC) as $linkedRow) {
+                $linkedRecipeId = (int)$linkedRow['id'];
+                $linkedProduct = (int)$linkedRow['linked_product_id'];
+                $linkedYield = max(0.0001, (float)$linkedRow['yield_quantity']);
+                $linkedUnitCost = round($this->calculateBatchCost($pdo, $bid, $linkedRecipeId, []) / $linkedYield, 2);
+                $updateProduct->execute([$linkedRow['name'], (float)$linkedRow['price'], $linkedUnitCost, $linkedProduct, $bid]);
             }
             $pdo->commit();
             Response::ok(['success'=>true,'id'=>$rid]);
