@@ -1,3 +1,4 @@
+import type { ApiClient } from './client';
 import type {
   CostMarginsResponse,
   DoughCalculation,
