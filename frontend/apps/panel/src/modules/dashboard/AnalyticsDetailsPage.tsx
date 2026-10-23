@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { formatARS, type AnalyticsQuery } from '@pizzalog/shared';
 import { useApi } from '@/lib/auth';
@@ -34,6 +34,10 @@ export function AnalyticsDetailsPage() {
     return { from: addDays(from, -length), to: addDays(from, -1) };
   }, [from, to]);
 
+  const preferencesQ = useQuery({ queryKey: ['analytics','time-preferences'], queryFn: () => api.analytics.timePreferences().then(r => r.preferences) });
+  useEffect(() => {
+    if (preferencesQ.data?.selected_preset) setHeatPreset(preferencesQ.data.selected_preset);
+  }, [preferencesQ.data?.selected_preset]);
   const summary = useQuery({ queryKey: ['analytics','details-summary',query], queryFn: () => api.analytics.summary(query).then(r => r.summary) });
   const previousSummary = useQuery({ queryKey: ['analytics','details-summary-previous',previous], queryFn: () => api.analytics.summary(previous).then(r => r.summary) });
   const productsQ = useQuery({ queryKey: ['analytics','details-products',query], queryFn: () => api.analytics.topProducts(query).then(r => r.products) });
@@ -122,7 +126,7 @@ export function AnalyticsDetailsPage() {
       <div style={card}>
         <h3 style={{marginTop:0}}>Mapa de calor: día y hora</h3>
         <div style={{display:'flex',gap:'.4rem',flexWrap:'wrap',marginBottom:'.75rem'}}>
-          {([{id:'all',label:'Todo el horario'},{id:'midday',label:'Mediodía · mar–vie 11–16'},{id:'night',label:'Noche · jue–dom 20–02'}] as const).map(p=><button key={p.id} onClick={()=>setHeatPreset(p.id)} style={{border:'1px solid #ddd',borderRadius:6,padding:'.4rem .55rem',background:heatPreset===p.id?'var(--c-accent, #e63946)':'#fff',color:heatPreset===p.id?'#fff':'#333',cursor:'pointer',fontSize:'.78rem'}}>{p.label}</button>)}
+          {([{id:'all',label:'Todo el horario'},{id:'midday',label:'Mediodía · mar–vie 11–16'},{id:'night',label:'Noche · jue–dom 20–02'}] as const).map(p=><button key={p.id} onClick={()=>{setHeatPreset(p.id); api.analytics.saveTimePreferences({selected_preset:p.id}).catch(()=>undefined);}} style={{border:'1px solid #ddd',borderRadius:6,padding:'.4rem .55rem',background:heatPreset===p.id?'var(--c-accent, #e63946)':'#fff',color:heatPreset===p.id?'#fff':'#333',cursor:'pointer',fontSize:'.78rem'}}>{p.label}</button>)}
         </div>
         <div style={{overflowX:'auto'}}>
           <div style={{display:'grid',gridTemplateColumns:'34px repeat(24, minmax(17px, 1fr))',gap:2,minWidth:540}}>
