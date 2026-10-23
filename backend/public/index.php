@@ -100,6 +100,7 @@ $router->get('/analytics/top-categories', [AnalyticsController::class, 'topCateg
 $router->get('/analytics/product-margins', [AnalyticsController::class, 'productMargins'], [$auth, $manage]);
 $router->get('/analytics/ingredients', [AnalyticsController::class, 'ingredients'], [$auth, $manage]);
 $router->get('/analytics/winning-combinations', [AnalyticsController::class, 'winningCombinations'], [$auth, $manage]);
+$router->get('/analytics/time-heatmap', [AnalyticsController::class, 'timeHeatmap'], [$auth, $manage]);
 $router->get('/analytics/sales-over-time', [AnalyticsController::class, 'salesOverTime'], [$auth, $manage]);
 
 // --- Producción / Masas / Escandallos (Calculadora) -------------------
