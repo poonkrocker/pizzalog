@@ -47,6 +47,11 @@ export function AnalyticsDetailsPage() {
   const products = productsQ.data ?? [];
   const margins = marginsQ.data ?? [];
   const combos = combosQ.data?.product_combinations ?? [];
+  const rankedCombos = useMemo(() => [...combos].sort((a, b) => {
+    const aPizzaPair = /pizza|pizzer/i.test(a.p1_category_name ?? '') && /pizza|pizzer/i.test(a.p2_category_name ?? '');
+    const bPizzaPair = /pizza|pizzer/i.test(b.p1_category_name ?? '') && /pizza|pizzer/i.test(b.p2_category_name ?? '');
+    return Number(bPizzaPair) - Number(aPizzaPair) || b.pair_orders - a.pair_orders;
+  }), [combos]);
   const triples = combosQ.data?.product_triples ?? [];
   const cells = heatQ.data ?? [];
   const maxRevenue = Math.max(1, ...cells.map(c => c.revenue));
@@ -126,8 +131,8 @@ export function AnalyticsDetailsPage() {
         </div>
       </div>
       <div style={card}>
-        <h3 style={{marginTop:0}}>Combinaciones de 2 productos</h3>
-        {combos.slice(0,8).map((p,i)=><div key={`${p.p1_id}-${p.p2_id}`} style={{padding:'.55rem 0',borderBottom:'1px solid #eee'}}><strong>{p.p1_name} + {p.p2_name}</strong><div style={muted}>{p.pair_orders} pedidos · Facturación asociada {formatARS(p.total_revenue)}</div></div>)}
+        <h3 style={{marginTop:0}}>Combinaciones de 2 productos</h3><p style={muted}>Se priorizan los pares de pizzas; después, los acompañamientos más frecuentes.</p>
+        {rankedCombos.slice(0,8).map((p)=><div key={`${p.p1_id}-${p.p2_id}`} style={{padding:'.55rem 0',borderBottom:'1px solid #eee'}}><strong>{p.p1_name} + {p.p2_name}</strong><div style={muted}>{p.pair_orders} pedidos · Facturación asociada {formatARS(p.total_revenue)}</div></div>)}
         {!combos.length && <p style={muted}>Todavía no hay combinaciones en este período.</p>}
       </div>
     </div>
