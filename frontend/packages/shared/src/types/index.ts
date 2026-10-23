@@ -532,6 +532,7 @@ export interface AnalyticsSummary {
 export interface AnalyticsTopProduct {
   product_id: number | null;
   name: string;
+  category_name?: string | null;
   units: number;
   revenue: number;
 }
