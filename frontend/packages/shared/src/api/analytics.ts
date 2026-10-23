@@ -5,6 +5,7 @@ import type {
   AnalyticsSummary,
   AnalyticsTopProduct,
   AnalyticsWinningCombinations,
+  AnalyticsTimeHeatmapCell,
 } from '../types';
 
 export interface AnalyticsQuery {
@@ -41,5 +42,7 @@ export function analyticsApi(client: ApiClient) {
       ),
     winningCombinations: (params?: AnalyticsQuery) =>
       client.get<AnalyticsWinningCombinations>(`/analytics/winning-combinations${queryStr(params)}`),
+    timeHeatmap: (params?: AnalyticsQuery) =>
+      client.get<{ cells: AnalyticsTimeHeatmapCell[] }>(`/analytics/time-heatmap${queryStr(params)}`),
   };
 }
