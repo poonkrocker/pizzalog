@@ -63,11 +63,12 @@ export function AnalyticsDetailsPage() {
       const name = p.category_name || 'Sin categoría';
       map.set(name, [...(map.get(name) ?? []), p]);
     });
-    return [...map.entries()].map(([name, list]) => ({ name, product: [...list].sort((a,b) => b.units-a.units)[0] })).sort((a,b) => b.product.units-a.product.units);
+    return [...map.entries()].map(([name, list]) => ({ name, product: [...list].sort((a,b) => b.units-a.units)[0] })).filter((entry) => entry.product !== undefined).sort((a,b) => b.product.units-a.product.units);
   }, [products]);
   const goodMargins = margins.filter(p => p.has_cost && p.margin_pct !== null);
   const avgMargin = goodMargins.length ? goodMargins.reduce((sum,p)=>sum+(p.margin_pct ?? 0),0)/goodMargins.length : 0;
-  const medianUnits = products.length ? [...products].sort((a,b)=>a.units-b.units)[Math.floor(products.length/2)].units : 0;
+  const sortedUnits = [...products].sort((a,b)=>a.units-b.units);
+  const medianUnits = sortedUnits.length ? (sortedUnits[Math.floor(sortedUnits.length/2)]?.units ?? 0) : 0;
   const trend = (current: number, prior: number) => prior > 0 ? ((current-prior)/prior)*100 : current > 0 ? null : 0;
   const moneyTrend = trend(summary.data?.revenue ?? 0, previousSummary.data?.revenue ?? 0);
   const ticketTrend = trend(summary.data?.avg_ticket ?? 0, previousSummary.data?.avg_ticket ?? 0);
