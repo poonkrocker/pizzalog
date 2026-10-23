@@ -372,10 +372,84 @@ class AnalyticsController
             'occurrences'  => (float) $r['occurrences'],
         ], $stmtIng->fetchAll());
 
+        // 3) Tríos de productos dentro de un mismo ticket. Se usa el id de línea
+        // para no duplicar combinaciones y se excluyen líneas hijas de combos.
+        $stmtTriples = $pdo->prepare(
+            'SELECT
+                LEAST(si1.product_id, si2.product_id, si3.product_id) AS p1_id,
+                (si1.product_id + si2.product_id + si3.product_id
+                  - LEAST(si1.product_id, si2.product_id, si3.product_id)
+                  - GREATEST(si1.product_id, si2.product_id, si3.product_id)) AS p2_id,
+                GREATEST(si1.product_id, si2.product_id, si3.product_id) AS p3_id,
+                COUNT(DISTINCT s.id) AS triple_orders,
+                SUM(si1.line_total + si2.line_total + si3.line_total) AS total_revenue
+             FROM sale_items si1
+             JOIN sale_items si2 ON si2.sale_id = si1.sale_id AND si1.id < si2.id
+             JOIN sale_items si3 ON si3.sale_id = si1.sale_id AND si2.id < si3.id
+             JOIN sales s ON s.id = si1.sale_id
+             WHERE s.business_id = ? AND s.status = "completed"
+               AND s.created_at BETWEEN ? AND ?
+               AND si1.parent_sale_item_id IS NULL
+               AND si2.parent_sale_item_id IS NULL
+               AND si3.parent_sale_item_id IS NULL
+               AND si1.product_id IS NOT NULL AND si2.product_id IS NOT NULL AND si3.product_id IS NOT NULL
+               AND si1.product_id != si2.product_id
+               AND si1.product_id != si3.product_id
+               AND si2.product_id != si3.product_id
+             GROUP BY p1_id, p2_id, p3_id
+             ORDER BY triple_orders DESC, total_revenue DESC
+             LIMIT 12'
+        );
+        $stmtTriples->execute([$bid, $fromDt, $toDt]);
+        $productTriples = [];
+        foreach ($stmtTriples->fetchAll() as $r) {
+            $ids = [(int)$r['p1_id'], (int)$r['p2_id'], (int)$r['p3_id']];
+            sort($ids);
+            $namesStmt = $pdo->prepare('SELECT id, name FROM products WHERE id IN (?, ?, ?) AND business_id = ?');
+            $namesStmt->execute([$ids[0], $ids[1], $ids[2], $bid]);
+            $names = [];
+            foreach ($namesStmt->fetchAll() as $n) $names[(int)$n['id']] = $n['name'];
+            $productTriples[] = [
+                'p1_id' => $ids[0], 'p2_id' => $ids[1], 'p3_id' => $ids[2],
+                'p1_name' => $names[$ids[0]] ?? 'Producto',
+                'p2_name' => $names[$ids[1]] ?? 'Producto',
+                'p3_name' => $names[$ids[2]] ?? 'Producto',
+                'triple_orders' => (int)$r['triple_orders'],
+                'total_revenue' => (float)$r['total_revenue'],
+            ];
+        }
+
         Response::ok([
             'product_combinations'    => $productCombinations,
+            'product_triples'         => $productTriples,
             'ingredient_combinations' => $ingredientCombinations,
         ]);
+    }
+
+ 
+    /**
+     * GET /analytics/time-heatmap — distribución de ventas por día y hora local.
+     * DAYOFWEEK de MySQL: 1 domingo ... 7 sábado.
+     */
+    public function timeHeatmap(Request $req): void
+    {
+        [$bid, $fromDt, $toDt] = $this->ctx($req);
+        $stmt = Database::pdo()->prepare(
+            'SELECT DAYOFWEEK(created_at) AS weekday, HOUR(created_at) AS hour,
+                    COUNT(*) AS sales_count, COALESCE(SUM(total), 0) AS revenue
+               FROM sales
+              WHERE business_id = ? AND status = "completed"
+                AND created_at BETWEEN ? AND ?
+              GROUP BY DAYOFWEEK(created_at), HOUR(created_at)
+              ORDER BY weekday, hour'
+        );
+        $stmt->execute([$bid, $fromDt, $toDt]);
+        Response::ok(['cells' => array_map(static fn(array $r): array => [
+            'weekday' => ((int)$r['weekday'] + 5) % 7,
+            'hour' => (int)$r['hour'],
+            'sales_count' => (int)$r['sales_count'],
+            'revenue' => (float)$r['revenue'],
+        ], $stmt->fetchAll())]);
     }
 
     /**
