@@ -77,6 +77,14 @@ export function AnalyticsDetailsPage() {
   const trend = (current: number, prior: number) => prior > 0 ? ((current-prior)/prior)*100 : current > 0 ? null : 0;
   const moneyTrend = trend(summary.data?.revenue ?? 0, previousSummary.data?.revenue ?? 0);
   const ticketTrend = trend(summary.data?.avg_ticket ?? 0, previousSummary.data?.avg_ticket ?? 0);
+  const salesTrend = trend(summary.data?.sales_count ?? 0, previousSummary.data?.sales_count ?? 0);
+  const currentItemsPerTicket = (summary.data?.sales_count ?? 0) > 0
+    ? (summary.data?.units_sold ?? 0) / (summary.data?.sales_count ?? 1)
+    : 0;
+  const previousItemsPerTicket = (previousSummary.data?.sales_count ?? 0) > 0
+    ? (previousSummary.data?.units_sold ?? 0) / (previousSummary.data?.sales_count ?? 1)
+    : 0;
+  const itemsPerTicketTrend = trend(currentItemsPerTicket, previousItemsPerTicket);
 
   return <section>
     <PageHeader eyebrow="Analítica" title="Detalles de rendimiento" description="Rentabilidad, evolución, combinaciones y horarios de venta para tomar decisiones con datos." />
@@ -92,7 +100,8 @@ export function AnalyticsDetailsPage() {
     <div style={grid}>
       <div style={card}><div style={muted}>Facturación vs. período anterior</div><div style={{fontSize:'1.6rem',fontWeight:800}}>{formatARS(summary.data?.revenue ?? 0)}</div><strong style={{color: moneyTrend === null ? '#777' : moneyTrend >= 0 ? '#16803d' : '#c62828'}}>{moneyTrend === null ? 'Sin base comparable' : `${moneyTrend >= 0 ? '+' : ''}${moneyTrend.toFixed(1)}%`}</strong></div>
       <div style={card}><div style={muted}>Ticket promedio vs. período anterior</div><div style={{fontSize:'1.6rem',fontWeight:800}}>{formatARS(summary.data?.avg_ticket ?? 0)}</div><strong style={{color: ticketTrend === null ? '#777' : ticketTrend >= 0 ? '#16803d' : '#c62828'}}>{ticketTrend === null ? 'Sin base comparable' : `${ticketTrend >= 0 ? '+' : ''}${ticketTrend.toFixed(1)}%`}</strong></div>
-      <div style={card}><div style={muted}>Ventas completadas</div><div style={{fontSize:'1.6rem',fontWeight:800}}>{summary.data?.sales_count ?? '—'}</div><div style={muted}>Unidades vendidas: {summary.data?.units_sold ?? '—'}</div></div>
+      <div style={card}><div style={muted}>Ventas completadas</div><div style={{fontSize:'1.6rem',fontWeight:800}}>{summary.data?.sales_count ?? '—'}</div><strong style={{color: salesTrend === null ? '#777' : salesTrend >= 0 ? '#16803d' : '#c62828'}}>{salesTrend === null ? 'Sin base comparable' : `${salesTrend >= 0 ? '+' : ''}${salesTrend.toFixed(1)}% vs. período anterior`}</strong><div style={muted}>Unidades vendidas: {summary.data?.units_sold ?? '—'}</div></div>
+      <div style={card}><div style={muted}>Artículos por ticket</div><div style={{fontSize:'1.6rem',fontWeight:800}}>{currentItemsPerTicket.toFixed(2)}</div><strong style={{color: itemsPerTicketTrend === null ? '#777' : itemsPerTicketTrend >= 0 ? '#16803d' : '#c62828'}}>{itemsPerTicketTrend === null ? 'Sin base comparable' : `${itemsPerTicketTrend >= 0 ? '+' : ''}${itemsPerTicketTrend.toFixed(1)}% vs. período anterior`}</strong><div style={muted}>Unidades contabilizadas / ventas completadas</div></div>
     </div>
     <div style={grid}>
       <div style={card}>
