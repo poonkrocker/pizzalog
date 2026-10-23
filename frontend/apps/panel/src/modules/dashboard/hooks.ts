@@ -42,3 +42,11 @@ export function useWinningCombinations(params: AnalyticsQuery) {
   });
 }
 
+
+export function useTopCategories(params: AnalyticsQuery) {
+  const api = useApi();
+  return useQuery({
+    queryKey: ['analytics', 'top-categories', params],
+    queryFn: () => api.analytics.topCategories(params).then((r) => r.categories),
+  });
+}
