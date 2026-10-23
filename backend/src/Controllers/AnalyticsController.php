@@ -428,6 +428,67 @@ class AnalyticsController
 
  
     /**
+     * Preferencias analíticas por negocio: presets de horarios y selección actual.
+     * La tabla se crea de forma idempotente para instalaciones existentes.
+     */
+    private function ensureAnalyticsPreferences(): void
+    {
+        Database::pdo()->exec(
+            'CREATE TABLE IF NOT EXISTS analytics_preferences (
+                business_id INT NOT NULL PRIMARY KEY,
+                settings_json JSON NOT NULL,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+        );
+    }
+
+    public function timePreferences(Request $req): void
+    {
+        $this->ensureAnalyticsPreferences();
+        $bid = (int)$req->auth['business_id'];
+        $stmt = Database::pdo()->prepare('SELECT settings_json FROM analytics_preferences WHERE business_id = ? LIMIT 1');
+        $stmt->execute([$bid]);
+        $raw = $stmt->fetchColumn();
+        $defaults = [
+            'selected_preset' => 'all',
+            'presets' => [
+                'midday' => ['weekdays' => [1, 2, 3, 4], 'start_hour' => 11, 'end_hour' => 16],
+                'night' => ['weekdays' => [3, 4, 5, 6], 'start_hour' => 20, 'end_hour' => 2],
+            ],
+        ];
+        $saved = is_string($raw) ? json_decode($raw, true) : null;
+        Response::ok(['preferences' => is_array($saved) ? array_replace_recursive($defaults, $saved) : $defaults]);
+    }
+
+    public function saveTimePreferences(Request $req): void
+    {
+        $this->ensureAnalyticsPreferences();
+        $bid = (int)$req->auth['business_id'];
+        $raw = $req->input('preferences');
+        if (!is_array($raw)) {
+            Response::error('Las preferencias analíticas son inválidas.', 422);
+        }
+        $selected = (string)($raw['selected_preset'] ?? 'all');
+        if (!in_array($selected, ['all', 'midday', 'night'], true)) {
+            Response::error('Preset de horario inválido.', 422);
+        }
+        $defaults = [
+            'selected_preset' => $selected,
+            'presets' => [
+                'midday' => ['weekdays' => [1, 2, 3, 4], 'start_hour' => 11, 'end_hour' => 16],
+                'night' => ['weekdays' => [3, 4, 5, 6], 'start_hour' => 20, 'end_hour' => 2],
+            ],
+        ];
+        $json = json_encode($defaults, JSON_UNESCAPED_UNICODE);
+        $stmt = Database::pdo()->prepare(
+            'INSERT INTO analytics_preferences (business_id, settings_json) VALUES (?, ?)
+             ON DUPLICATE KEY UPDATE settings_json = VALUES(settings_json)'
+        );
+        $stmt->execute([$bid, $json]);
+        Response::ok(['preferences' => $defaults]);
+    }
+
+    /**
      * GET /analytics/time-heatmap — distribución de ventas por día y hora local.
      * DAYOFWEEK de MySQL: 1 domingo ... 7 sábado.
      */
