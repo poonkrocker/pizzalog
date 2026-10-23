@@ -351,7 +351,7 @@ class AnalyticsController
                 GREATEST(si1.product_id, si2.product_id) AS p2_id,
                 MAX(CASE WHEN si1.product_id <= si2.product_id THEN COALESCE(p1.name, si1.product_name) ELSE COALESCE(p2.name, si2.product_name) END) AS p1_name,
                 MAX(CASE WHEN si1.product_id <= si2.product_id THEN COALESCE(p2.name, si2.product_name) ELSE COALESCE(p1.name, si1.product_name) END) AS p2_name,
-                MAX(CASE WHEN si1.product_id <= si2.product_id THEN COALESCE(c1.name, '') ELSE COALESCE(c2.name, '') END) AS p1_category_name,
+                MAX(CASE WHEN si1.product_id <= si2.product_id THEN COALESCE(c1.name, "") ELSE COALESCE(c2.name, "") END) AS p1_category_name,
                 MAX(CASE WHEN si1.product_id <= si2.product_id THEN COALESCE(c2.name, '') ELSE COALESCE(c1.name, '') END) AS p2_category_name,
                 COUNT(DISTINCT s.id) AS pair_orders,
                 SUM(si1.line_total + si2.line_total) AS total_revenue
