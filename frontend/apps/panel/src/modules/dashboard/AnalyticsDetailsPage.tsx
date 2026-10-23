@@ -28,6 +28,7 @@ export function AnalyticsDetailsPage() {
   const [from, setFrom] = useState(dateDaysAgo(29));
   const [to, setTo] = useState(dateNow());
   const [heatPreset, setHeatPreset] = useState<'all' | 'midday' | 'night'>('all');
+  const [preferencesSaveError, setPreferencesSaveError] = useState(false);
   const query: AnalyticsQuery = useMemo(() => ({ from, to, limit: 100 }), [from, to]);
   const previous = useMemo(() => {
     const length = Math.max(1, Math.round((new Date(to + 'T12:00:00').getTime() - new Date(from + 'T12:00:00').getTime()) / 86400000) + 1);
@@ -133,8 +134,9 @@ export function AnalyticsDetailsPage() {
       <div style={card}>
         <h3 style={{marginTop:0}}>Mapa de calor: día y hora</h3>
         <div style={{display:'flex',gap:'.4rem',flexWrap:'wrap',marginBottom:'.75rem'}}>
-          {([{id:'all',label:'Todo el horario'},{id:'midday',label:'Mediodía · mar–vie 11–16'},{id:'night',label:'Noche · jue–dom 20–02'}] as const).map(p=><button key={p.id} onClick={()=>{setHeatPreset(p.id); api.analytics.saveTimePreferences({selected_preset:p.id}).catch(()=>undefined);}} style={{border:'1px solid #ddd',borderRadius:6,padding:'.4rem .55rem',background:heatPreset===p.id?'var(--c-accent, #e63946)':'#fff',color:heatPreset===p.id?'#fff':'#333',cursor:'pointer',fontSize:'.78rem'}}>{p.label}</button>)}
+          {([{id:'all',label:'Todo el horario'},{id:'midday',label:'Mediodía · mar–vie 11–16'},{id:'night',label:'Noche · jue–dom 20–02'}] as const).map(p=><button key={p.id} onClick={()=>{setHeatPreset(p.id); setPreferencesSaveError(false); void api.analytics.saveTimePreferences({selected_preset:p.id}).catch(()=>setPreferencesSaveError(true));}} style={{border:'1px solid #ddd',borderRadius:6,padding:'.4rem .55rem',background:heatPreset===p.id?'var(--c-accent, #e63946)':'#fff',color:heatPreset===p.id?'#fff':'#333',cursor:'pointer',fontSize:'.78rem'}}>{p.label}</button>)}
         </div>
+        {preferencesSaveError && <p role="alert" style={{...muted,color:'#a12622'}}>No se pudo guardar la preferencia en el servidor. El filtro funciona en esta sesión, pero no quedó guardado.</p>}
         <div style={{overflowX:'auto'}}>
           <div style={{display:'grid',gridTemplateColumns:'34px repeat(24, minmax(17px, 1fr))',gap:2,minWidth:540}}>
             <div />
