@@ -780,6 +780,74 @@ export interface SimulationProduct {
   simulated_food_cost: number;
 }
 
+export type StudioRecipeType = 'product' | 'subrecipe';
+export type StudioComponentType = 'supply' | 'recipe';
+export interface StudioRecipeComponentInput {
+  component_type: StudioComponentType;
+  component_id: number;
+  quantity: number;
+  unit: string;
+}
+export interface SaveStudioRecipeInput {
+  id?: number;
+  linked_product_id?: number | null;
+  name: string;
+  recipe_type: StudioRecipeType;
+  yield_quantity: number;
+  yield_unit: string;
+  price: number;
+  target_food_cost_pct: number;
+  components: StudioRecipeComponentInput[];
+}
+export interface StudioRecipeComponent {
+  component_type: StudioComponentType;
+  component_id: number;
+  name: string;
+  quantity: number;
+  unit: string;
+  unit_cost: number;
+  total_cost: number;
+}
+export interface StudioRecipe {
+  id: number;
+  linked_product_id: number | null;
+  name: string;
+  recipe_type: StudioRecipeType;
+  yield_quantity: number;
+  yield_unit: string;
+  price: number;
+  target_food_cost_pct: number;
+  batch_cost: number;
+  unit_cost: number;
+  suggested_price: number;
+  food_cost_pct: number;
+  components: StudioRecipeComponent[];
+}
+export interface StudioProduct { id: number; name: string; price: number; }
+export interface RecipeStudioResponse {
+  recipes: StudioRecipe[];
+  supplies: SupplyItem[];
+  products: StudioProduct[];
+}
+export type BusinessCostCategory = 'employees' | 'rent' | 'utilities' | 'services' | 'taxes' | 'maintenance' | 'software' | 'other';
+export type CostPeriod = 'monthly' | 'weekly' | 'daily' | 'yearly';
+export interface BusinessCostInput {
+  name: string;
+  category: BusinessCostCategory;
+  quantity: number;
+  amount: number;
+  period: CostPeriod;
+  notes?: string;
+}
+export interface BusinessCostItem extends BusinessCostInput {
+  id: number;
+  monthly_total: number;
+}
+export interface BusinessCostsResponse {
+  items: BusinessCostItem[];
+  monthly_total: number;
+}
+
 export interface SimulationResponse {
   simulation: {
     cost_delta_pct: number;

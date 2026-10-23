@@ -4,8 +4,9 @@ import { Button, Field, Input, Loading, PageHeader, Select } from '@/ui';
 import { useCostMargins, useDoughCalculate, useDoughProfiles, useSimulate } from './hooks';
 import { DoughProfileModal } from './DoughProfileModal';
 import { RecipeModal } from './RecipeModal';
+import { RecipeStudioPage } from './RecipeStudioPage';
 
-type Tab = 'masas' | 'escandallos' | 'simulador';
+type Tab = 'masas' | 'escandallos' | 'simulador' | 'recetario';
 
 export function ProductionPage() {
   const [activeTab, setActiveTab] = useState<Tab>('masas');
@@ -104,6 +105,7 @@ export function ProductionPage() {
       <div
         style={{
           display: 'flex',
+          flexWrap: 'wrap',
           gap: '0.5rem',
           borderBottom: '2px solid var(--c-border, #ddd)',
           marginBottom: '1.5rem',
@@ -150,6 +152,25 @@ export function ProductionPage() {
         </button>
         <button
           type="button"
+          onClick={() => setActiveTab('recetario')}
+          style={{
+            padding: '0.6rem 1.2rem',
+            border: 'none',
+            background: 'none',
+            borderBottom: activeTab === 'recetario' ? '3px solid var(--c-accent, #e63946)' : '3px solid transparent',
+            color: activeTab === 'recetario' ? 'var(--c-accent, #e63946)' : '#666',
+            fontWeight: activeTab === 'recetario' ? 800 : 500,
+            fontSize: '0.95rem',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.4rem',
+          }}
+        >
+          🧾 Recetas & Costeo del Negocio
+        </button>
+        <button
+          type="button"
           onClick={() => setActiveTab('simulador')}
           style={{
             padding: '0.6rem 1.2rem',
@@ -168,6 +189,8 @@ export function ProductionPage() {
           📈 Simulador de Precios
         </button>
       </div>
+
+      {activeTab === 'recetario' && <RecipeStudioPage />}
 
       {/* ========================================================================= */}
       {/* TAB 1: AMASADO DEL DÍA */}

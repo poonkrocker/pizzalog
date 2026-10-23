@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - "backend/src/Controllers/AnalyticsController.php"
+      - "backend/src/Controllers/RecipeCostingController.php"
+      - "backend/migrations/**"
       - "backend/public/index.php"
       - "frontend/apps/panel/**"
       - "frontend/packages/shared/**"
@@ -44,4 +46,5 @@ jobs:
       - name: Lint changed PHP sources
         run: |
           php -l backend/src/Controllers/AnalyticsController.php
+          php -l backend/src/Controllers/RecipeCostingController.php
           php -l backend/public/index.php

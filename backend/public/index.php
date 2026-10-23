@@ -28,6 +28,7 @@ use Pizzalog\Controllers\BusinessController;
 use Pizzalog\Controllers\UploadController;
 use Pizzalog\Controllers\ProductController;
 use Pizzalog\Controllers\ProductionController;
+use Pizzalog\Controllers\RecipeCostingController;
 use Pizzalog\Controllers\SaleController;
 use Pizzalog\Controllers\TableAreaController;
 use Pizzalog\Controllers\TableController;
@@ -115,6 +116,10 @@ $router->post('/production/dough-calculate', [ProductionController::class, 'doug
 $router->get('/production/cost-margins', [ProductionController::class, 'costMargins'], [$auth, $manage]);
 $router->post('/production/recipes', [ProductionController::class, 'saveRecipe'], [$auth, $manage]);
 $router->post('/production/simulate', [ProductionController::class, 'simulate'], [$auth, $manage]);
+$router->get('/production/recipe-studio', [RecipeCostingController::class, 'recipesIndex'], [$auth, $manage]);
+$router->post('/production/recipe-studio/recipes', [RecipeCostingController::class, 'recipesSave'], [$auth, $manage]);
+$router->get('/production/business-costs', [RecipeCostingController::class, 'businessCostsGet'], [$auth, $manage]);
+$router->put('/production/business-costs', [RecipeCostingController::class, 'businessCostsSave'], [$auth, $manage]);
 
 // --- Empleados / Usuarios ---------------------------------------------
 $router->get('/users', [UserController::class, 'index'], [$auth, $manage]);
