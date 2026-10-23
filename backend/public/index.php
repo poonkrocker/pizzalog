@@ -101,6 +101,8 @@ $router->get('/analytics/product-margins', [AnalyticsController::class, 'product
 $router->get('/analytics/ingredients', [AnalyticsController::class, 'ingredients'], [$auth, $manage]);
 $router->get('/analytics/winning-combinations', [AnalyticsController::class, 'winningCombinations'], [$auth, $manage]);
 $router->get('/analytics/time-heatmap', [AnalyticsController::class, 'timeHeatmap'], [$auth, $manage]);
+$router->get('/analytics/time-preferences', [AnalyticsController::class, 'timePreferences'], [$auth, $manage]);
+$router->put('/analytics/time-preferences', [AnalyticsController::class, 'saveTimePreferences'], [$auth, $manage]);
 $router->get('/analytics/sales-over-time', [AnalyticsController::class, 'salesOverTime'], [$auth, $manage]);
 
 // --- Producción / Masas / Escandallos (Calculadora) -------------------
