@@ -20,12 +20,31 @@ final class SalesReportController
         [$bid, $fromDt, $toDt, $timeFilter] = $this->ctx($req);
         $pdo = Database::pdo();
 
+        $params = [$bid, $fromDt, $toDt];
+        $whereExtra = '';
+
+        $categoryId = isset($req->query['category_id']) && is_numeric($req->query['category_id']) && (int)$req->query['category_id'] > 0
+            ? (int)$req->query['category_id']
+            : null;
+        if ($categoryId !== null) {
+            $whereExtra .= ' AND p.category_id = ?';
+            $params[] = $categoryId;
+        }
+
+        $productId = isset($req->query['product_id']) && is_numeric($req->query['product_id']) && (int)$req->query['product_id'] > 0
+            ? (int)$req->query['product_id']
+            : null;
+        if ($productId !== null) {
+            $whereExtra .= ' AND si.product_id = ?';
+            $params[] = $productId;
+        }
+
         $sql = "SELECT COALESCE(si.product_id, 0) AS product_id,
                        si.product_name,
-                       COALESCE(c.name, 'Sin categoría') AS category_name,
+                       MAX(COALESCE(c.name, 'Sin categoría')) AS category_name,
                        SUM(si.quantity) AS units,
                        SUM(si.line_total) AS gross_sales,
-                       COALESCE(p.cost, 0) AS unit_cost
+                       MAX(COALESCE(p.cost, 0)) AS unit_cost
                   FROM sale_items si
                   JOIN sales s ON s.id = si.sale_id
              LEFT JOIN products p ON p.id = si.product_id
@@ -33,11 +52,12 @@ final class SalesReportController
                  WHERE s.business_id = ? AND s.status = 'completed'
                    AND s.created_at BETWEEN ? AND ? $timeFilter
                    AND si.product_name NOT LIKE 'Cobro compartido%'
-                 GROUP BY COALESCE(si.product_id, 0), si.product_name, COALESCE(c.name, 'Sin categoría'), COALESCE(p.cost, 0)
+                   $whereExtra
+                 GROUP BY COALESCE(si.product_id, 0), si.product_name
                  ORDER BY gross_sales DESC";
 
         $stmt = $pdo->prepare($sql);
-        $stmt->execute([$bid, $fromDt, $toDt]);
+        $stmt->execute($params);
         $rows = $stmt->fetchAll();
 
         $totalUnits = 0.0;
@@ -92,8 +112,19 @@ final class SalesReportController
         [$bid, $fromDt, $toDt, $timeFilter] = $this->ctx($req);
         $pdo = Database::pdo();
 
+        $params = [$bid, $fromDt, $toDt];
+        $whereExtra = '';
+
+        $categoryId = isset($req->query['category_id']) && is_numeric($req->query['category_id']) && (int)$req->query['category_id'] > 0
+            ? (int)$req->query['category_id']
+            : null;
+        if ($categoryId !== null) {
+            $whereExtra .= ' AND c.id = ?';
+            $params[] = $categoryId;
+        }
+
         $sql = "SELECT COALESCE(c.id, 0) AS category_id,
-                       COALESCE(c.name, 'Sin categoría') AS category_name,
+                       MAX(COALESCE(c.name, 'Sin categoría')) AS category_name,
                        SUM(si.quantity) AS units,
                        SUM(si.line_total) AS gross_sales
                   FROM sale_items si
@@ -103,11 +134,12 @@ final class SalesReportController
                  WHERE s.business_id = ? AND s.status = 'completed'
                    AND s.created_at BETWEEN ? AND ? $timeFilter
                    AND si.product_name NOT LIKE 'Cobro compartido%'
-                 GROUP BY COALESCE(c.id, 0), COALESCE(c.name, 'Sin categoría')
+                   $whereExtra
+                 GROUP BY COALESCE(c.id, 0)
                  ORDER BY gross_sales DESC";
 
         $stmt = $pdo->prepare($sql);
-        $stmt->execute([$bid, $fromDt, $toDt]);
+        $stmt->execute($params);
         $rows = $stmt->fetchAll();
 
         $totalUnits = 0.0;
@@ -128,6 +160,38 @@ final class SalesReportController
             ];
         }, $rows);
 
+        // Desglose de artículos cuando se filtra por categoría específica
+        $items = [];
+        if ($categoryId !== null) {
+            $itemSql = "SELECT COALESCE(si.product_id, 0) AS product_id,
+                               si.product_name,
+                               SUM(si.quantity) AS units,
+                               SUM(si.line_total) AS gross_sales
+                          FROM sale_items si
+                          JOIN sales s ON s.id = si.sale_id
+                     LEFT JOIN products p ON p.id = si.product_id
+                         WHERE s.business_id = ? AND s.status = 'completed'
+                           AND s.created_at BETWEEN ? AND ? $timeFilter
+                           AND p.category_id = ?
+                           AND si.product_name NOT LIKE 'Cobro compartido%'
+                         GROUP BY COALESCE(si.product_id, 0), si.product_name
+                         ORDER BY gross_sales DESC";
+            $itemStmt = $pdo->prepare($itemSql);
+            $itemStmt->execute([$bid, $fromDt, $toDt, $categoryId]);
+            $itemRows = $itemStmt->fetchAll();
+            $catGross = $totalGross;
+            $items = array_map(static function (array $r) use ($catGross): array {
+                $gross = (float)$r['gross_sales'];
+                return [
+                    'product_id'   => (int)$r['product_id'],
+                    'product_name' => (string)$r['product_name'],
+                    'units'        => (float)$r['units'],
+                    'gross_sales'  => $gross,
+                    'share_pct'    => $catGross > 0 ? round(($gross / $catGross) * 100, 1) : 0.0,
+                ];
+            }, $itemRows);
+        }
+
         Response::ok([
             'summary' => [
                 'total_units' => round($totalUnits, 2),
@@ -135,6 +199,7 @@ final class SalesReportController
                 'categories_count' => count($categories),
             ],
             'categories' => $categories,
+            'items' => $items,
         ]);
     }
 
@@ -148,7 +213,7 @@ final class SalesReportController
         $pdo = Database::pdo();
 
         $sql = "SELECT COALESCE(u.id, 0) AS user_id,
-                       COALESCE(u.name, 'Sin asignar / Automático') AS employee_name,
+                       MAX(COALESCE(u.name, 'Sin asignar / Automático')) AS employee_name,
                        COUNT(DISTINCT s.id) AS tickets_count,
                        SUM(s.subtotal) AS gross_sales,
                        SUM(s.discount) AS discounts,
@@ -158,7 +223,7 @@ final class SalesReportController
              LEFT JOIN users u ON u.id = s.user_id
                  WHERE s.business_id = ? AND s.status = 'completed'
                    AND s.created_at BETWEEN ? AND ? $timeFilter
-                 GROUP BY COALESCE(u.id, 0), COALESCE(u.name, 'Sin asignar / Automático')
+                 GROUP BY COALESCE(u.id, 0)
                  ORDER BY net_sales DESC";
 
         $stmt = $pdo->prepare($sql);

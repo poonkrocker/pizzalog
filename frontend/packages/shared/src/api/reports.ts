@@ -7,6 +7,7 @@ export interface SalesReportQuery {
   hour_to?: number;
   search?: string;
   category_id?: number;
+  product_id?: number;
 }
 
 export interface ItemReportRow {
@@ -39,6 +40,14 @@ export interface CategoryReportRow {
   share_pct: number;
 }
 
+export interface CategoryItemRow {
+  product_id: number;
+  product_name: string;
+  units: number;
+  gross_sales: number;
+  share_pct: number;
+}
+
 export interface CategoriesReportResponse {
   summary: {
     total_units: number;
@@ -46,6 +55,7 @@ export interface CategoriesReportResponse {
     categories_count: number;
   };
   categories: CategoryReportRow[];
+  items?: CategoryItemRow[];
 }
 
 export interface EmployeeReportRow {

@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { formatARS } from '@pizzalog/shared';
 import { useApi } from '@/lib/auth';
-import { Loading, PageHeader } from '@/ui';
+import { Loading, PageHeader, Select } from '@/ui';
+import { useCategories } from '../categories/hooks';
+import { useProducts } from '../products/hooks';
 import {
   ReportFilterBar,
   dateDaysAgo,
@@ -25,12 +27,28 @@ export function ItemsReportPage() {
   const [hourFrom, setHourFrom] = useState<number | undefined>(undefined);
   const [hourTo, setHourTo] = useState<number | undefined>(undefined);
   const [search, setSearch] = useState('');
+  const [selectedCategoryId, setSelectedCategoryId] = useState<number | undefined>(undefined);
+  const [selectedProductId, setSelectedProductId] = useState<number | undefined>(undefined);
+
+  const { data: categories = [] } = useCategories();
+  const { data: products = [] } = useProducts();
+
+  // Filtrar productos seleccionables según la categoría elegida
+  const availableProducts = useMemo(() => {
+    let list = [...products];
+    if (selectedCategoryId) {
+      list = list.filter((p) => p.category_id === selectedCategoryId);
+    }
+    return list.sort((a, b) => a.name.localeCompare(b.name));
+  }, [products, selectedCategoryId]);
 
   const query = {
     from,
     to,
     hour_from: hourFrom,
     hour_to: hourTo,
+    category_id: selectedCategoryId,
+    product_id: selectedProductId,
   };
 
   const { data, isLoading, error } = useQuery({
@@ -86,6 +104,93 @@ export function ItemsReportPage() {
         isLoading={isLoading}
       />
 
+      {/* Selectores de Categoría y Artículo */}
+      <div
+        style={{
+          ...card,
+          marginBottom: '1rem',
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: '1rem',
+          alignItems: 'flex-end',
+        }}
+      >
+        <div style={{ flex: '1 1 220px', minWidth: 200 }}>
+          <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: '#475569', marginBottom: '0.35rem' }}>
+            Categoría
+          </label>
+          <Select
+            value={selectedCategoryId !== undefined ? String(selectedCategoryId) : ''}
+            onChange={(e) => {
+              const val = e.target.value ? Number(e.target.value) : undefined;
+              setSelectedCategoryId(val);
+              if (val !== undefined && selectedProductId) {
+                const prod = products.find((p) => p.id === selectedProductId);
+                if (prod && prod.category_id !== val) {
+                  setSelectedProductId(undefined);
+                }
+              }
+            }}
+          >
+            <option value="">Todas las categorías</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </Select>
+        </div>
+
+        <div style={{ flex: '1 1 240px', minWidth: 220 }}>
+          <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: '#475569', marginBottom: '0.35rem' }}>
+            Artículo específico
+          </label>
+          <Select
+            value={selectedProductId !== undefined ? String(selectedProductId) : ''}
+            onChange={(e) => {
+              const val = e.target.value ? Number(e.target.value) : undefined;
+              setSelectedProductId(val);
+              if (val) {
+                const prod = products.find((p) => p.id === val);
+                if (prod && prod.category_id && selectedCategoryId !== prod.category_id) {
+                  setSelectedCategoryId(prod.category_id);
+                }
+              }
+            }}
+          >
+            <option value="">Todos los artículos</option>
+            {availableProducts.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </Select>
+        </div>
+
+        {(selectedCategoryId !== undefined || selectedProductId !== undefined || search) && (
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedCategoryId(undefined);
+              setSelectedProductId(undefined);
+              setSearch('');
+            }}
+            style={{
+              padding: '0.5rem 0.85rem',
+              borderRadius: 6,
+              border: '1px solid #cbd5e1',
+              background: '#f8fafc',
+              color: '#475569',
+              fontSize: '0.84rem',
+              cursor: 'pointer',
+              height: '38px',
+            }}
+          >
+            Restablecer filtros
+          </button>
+        )}
+      </div>
+
       {summary && (
         <div
           style={{
@@ -130,7 +235,7 @@ export function ItemsReportPage() {
           <h3 style={{ margin: 0 }}>Listado de productos</h3>
           <input
             type="search"
-            placeholder="Buscar por nombre o categoría..."
+            placeholder="Buscar por texto en resultados..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             style={{
