@@ -30,6 +30,7 @@ use Pizzalog\Controllers\ProductController;
 use Pizzalog\Controllers\ProductionController;
 use Pizzalog\Controllers\RecipeCostingController;
 use Pizzalog\Controllers\SaleController;
+use Pizzalog\Controllers\SalesReportController;
 use Pizzalog\Controllers\TableAreaController;
 use Pizzalog\Controllers\TableController;
 use Pizzalog\Controllers\TableSessionController;

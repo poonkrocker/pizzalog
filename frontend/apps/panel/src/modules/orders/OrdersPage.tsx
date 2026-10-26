@@ -47,14 +47,22 @@ const CHANNELS: Array<{ value: SaleChannel | ''; label: string }> = [
 ];
 
 function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function daysAgo(n: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
 export function OrdersPage() {
   const [selectedTab, setSelectedTab] = useState<OrderStatus | 'all'>('all');
   const [channel, setChannel] = useState<SaleChannel | ''>('');
   const [driverId, setDriverId] = useState<string>('');
-  const [from, setFrom] = useState(today());
+  // Por defecto últimos 7 días para no ocultar pedidos recientes de ayer/fin de semana
+  const [from, setFrom] = useState(daysAgo(7));
   const [to, setTo] = useState(today());
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
 
@@ -311,7 +319,7 @@ export function OrdersPage() {
       </div>
 
       {/* Filtros */}
-      <div className="filters-bar" style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+      <div className="filters-bar" style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: '1rem' }}>
         <Field label="Canal">
           <Select value={channel} onChange={(e) => setChannel(e.target.value as SaleChannel | '')}>
             {CHANNELS.map((ch) => (
@@ -337,6 +345,53 @@ export function OrdersPage() {
         <Field label="Hasta">
           <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
         </Field>
+        <div style={{ display: 'flex', gap: '0.35rem', paddingBottom: '2px' }}>
+          <button
+            type="button"
+            className="btn btn--secondary"
+            style={{ padding: '0.45rem 0.65rem', fontSize: '0.82rem' }}
+            onClick={() => {
+              const t = today();
+              setFrom(t);
+              setTo(t);
+            }}
+          >
+            Hoy
+          </button>
+          <button
+            type="button"
+            className="btn btn--secondary"
+            style={{ padding: '0.45rem 0.65rem', fontSize: '0.82rem' }}
+            onClick={() => {
+              setFrom(daysAgo(7));
+              setTo(today());
+            }}
+          >
+            7 días
+          </button>
+          <button
+            type="button"
+            className="btn btn--secondary"
+            style={{ padding: '0.45rem 0.65rem', fontSize: '0.82rem' }}
+            onClick={() => {
+              setFrom(daysAgo(30));
+              setTo(today());
+            }}
+          >
+            30 días
+          </button>
+          <button
+            type="button"
+            className="btn btn--secondary"
+            style={{ padding: '0.45rem 0.65rem', fontSize: '0.82rem' }}
+            onClick={() => {
+              setFrom('');
+              setTo('');
+            }}
+          >
+            Ver todos
+          </button>
+        </div>
       </div>
 
       {/* Contenido */}

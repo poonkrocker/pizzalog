@@ -483,11 +483,13 @@ class PublicController
             $lines[0]['line_total'] = round((float) $declaredTotal, 2);
         }
 
+        $channel = !empty($req->input('channel')) ? (string) $req->input('channel') : 'web';
+
         $pdo->beginTransaction();
         try {
             $orderId = $this->orders->create(
                 $bid,
-                'whatsapp',
+                $channel,
                 $lines,
                 $deliveryFee,
                 $customerName,
