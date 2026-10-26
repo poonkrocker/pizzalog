@@ -631,40 +631,84 @@ class AnalyticsController
     /**
      * GET /analytics/weekly-pizzas
      * Compara unidades de pizzas por semana (lunes-domingo) y lista su evolución.
-     * La unidad se atribuye a las líneas de venta; los filtros de turno se
-     * aplican con el mismo criterio que el resto de Analítica.
+     * Incorpora filtro horario independiente: "Mediodía" (11-16 hs), "Noche" (19-03 hs) o personalizado.
+     * En el turno noche, las ventas entre 00:00 y 03:00 se atribuyen al día/semana del turno iniciado la noche anterior.
      */
     public function weeklyPizzas(Request $req): void
     {
         [$bid, $fromDt, $toDt] = $this->ctx($req);
-        $timeFilter = $this->timeFilterSql($req, 's.created_at');
         $pdo = Database::pdo();
 
-        // Identificar pizzas mediante la categoría del catálogo; también conservamos
-        // productos históricos cuando su categoría ya no está vinculada.
-        $stmt = $pdo->prepare(
-            'SELECT DATE_SUB(DATE(s.created_at), INTERVAL WEEKDAY(s.created_at) DAY) AS week_start,
-                    si.product_id,
-                    MAX(COALESCE(p.name, si.product_name)) AS product_name,
-                    SUM(si.quantity) AS units,
-                    SUM(si.line_total) AS revenue,
-                    COUNT(DISTINCT si.sale_id) AS tickets
-               FROM sale_items si
-               JOIN sales s ON s.id = si.sale_id
-          LEFT JOIN products p ON p.id = si.product_id
-          LEFT JOIN categories c ON c.id = p.category_id
-              WHERE s.business_id = ? AND s.status = "completed"
-                AND s.created_at BETWEEN ? AND ?' . $timeFilter . '
-                AND si.product_name NOT LIKE "Cobro compartido%"
-                AND (
-                  LOWER(COALESCE(c.name, "")) LIKE "%pizza%"
-                  OR LOWER(COALESCE(c.name, "")) LIKE "%pizzer%"
-                  OR LOWER(COALESCE(si.product_name, "")) LIKE "%pizza%"
-                  OR LOWER(COALESCE(si.product_name, "")) LIKE "%pizz%"
-                )
-              GROUP BY week_start, COALESCE(CAST(si.product_id AS CHAR), si.product_name)
-              ORDER BY week_start ASC, units DESC'
-        );
+        $startHour = null;
+        $endHour   = null;
+
+        $preset = (string)($req->query['hour_preset'] ?? '');
+        if ($preset === 'midday') {
+            $startHour = 11;
+            $endHour   = 16;
+        } elseif ($preset === 'night') {
+            $startHour = 19;
+            $endHour   = 3;
+        } else {
+            if (isset($req->query['start_hour']) && is_numeric($req->query['start_hour'])) {
+                $startHour = (int)$req->query['start_hour'];
+            }
+            if (isset($req->query['end_hour']) && is_numeric($req->query['end_hour'])) {
+                $endHour = (int)$req->query['end_hour'];
+            }
+        }
+
+        $hourSql = '';
+        $isOvernight = false;
+        if ($startHour !== null && $endHour !== null) {
+            if ($startHour <= $endHour) {
+                $hourSql = " AND HOUR(s.created_at) >= $startHour AND HOUR(s.created_at) < $endHour";
+            } else {
+                $hourSql = " AND (HOUR(s.created_at) >= $startHour OR HOUR(s.created_at) < $endHour)";
+                $isOvernight = true;
+            }
+        }
+
+        // Si es turno nocturno que cruza medianoche, se resta 3 horas para agrupar ventas de madrugada
+        // en la fecha de negocio y semana a la que pertenece el turno.
+        $weekDateExpr = $isOvernight
+            ? 'DATE_SUB(DATE(DATE_SUB(s.created_at, INTERVAL 3 HOUR)), INTERVAL WEEKDAY(DATE_SUB(s.created_at, INTERVAL 3 HOUR)) DAY)'
+            : 'DATE_SUB(DATE(s.created_at), INTERVAL WEEKDAY(s.created_at) DAY)';
+
+        $sql = "SELECT $weekDateExpr AS week_start,
+                       si.product_id,
+                       MAX(COALESCE(p.name, si.product_name)) AS product_name,
+                       SUM(si.quantity) AS units,
+                       SUM(si.line_total) AS revenue,
+                       COUNT(DISTINCT si.sale_id) AS tickets
+                  FROM sale_items si
+                  JOIN sales s ON s.id = si.sale_id
+             LEFT JOIN products p ON p.id = si.product_id
+             LEFT JOIN categories c ON c.id = p.category_id
+                 WHERE s.business_id = ? AND s.status = 'completed'
+                   AND s.created_at BETWEEN ? AND ? $hourSql
+                   AND si.product_name NOT LIKE 'Cobro compartido%'
+                   AND (
+                     LOWER(COALESCE(c.name, '')) LIKE '%pizza%'
+                     OR LOWER(COALESCE(c.name, '')) LIKE '%pizzer%'
+                     OR (c.id IS NULL AND (
+                         LOWER(si.product_name) LIKE '%pizza%'
+                      OR LOWER(si.product_name) LIKE '%fugazz%'
+                      OR LOWER(si.product_name) LIKE '%muzza%'
+                      OR LOWER(si.product_name) LIKE '%napolitana%'
+                      OR LOWER(si.product_name) LIKE '%calabresa%'
+                      OR LOWER(si.product_name) LIKE '%margherita%'
+                      OR LOWER(si.product_name) LIKE '%margarita%'
+                      OR LOWER(si.product_name) LIKE '%calzone%'
+                      OR LOWER(si.product_name) LIKE '%roquefort%'
+                      OR LOWER(si.product_name) LIKE '%provolone%'
+                      OR LOWER(si.product_name) LIKE '%especial%'
+                     ))
+                   )
+                 GROUP BY week_start, COALESCE(CAST(si.product_id AS CHAR), si.product_name)
+                 ORDER BY week_start ASC, units DESC";
+
+        $stmt = $pdo->prepare($sql);
         $stmt->execute([$bid, $fromDt, $toDt]);
 
         $weekly = [];
@@ -677,12 +721,12 @@ class AnalyticsController
             }
             $product = [
                 'product_id' => $r['product_id'] !== null ? (int)$r['product_id'] : null,
-                'name' => (string)$r['product_name'],
-                'units' => (float)$r['units'],
-                'revenue' => (float)$r['revenue'],
-                'tickets' => (int)$r['tickets'],
+                'name'       => (string)$r['product_name'],
+                'units'      => (float)$r['units'],
+                'revenue'    => (float)$r['revenue'],
+                'tickets'    => (int)$r['tickets'],
             ];
-            $weekly[$week]['units'] += $product['units'];
+            $weekly[$week]['units']   += $product['units'];
             $weekly[$week]['revenue'] += $product['revenue'];
             $weekly[$week]['tickets'] += $product['tickets'];
             $weekly[$week]['products'][] = $product;
@@ -690,7 +734,7 @@ class AnalyticsController
             if (!isset($productTotals[$key])) {
                 $productTotals[$key] = ['product_id' => $product['product_id'], 'name' => $product['name'], 'units' => 0.0, 'revenue' => 0.0, 'tickets' => 0, 'weeks' => []];
             }
-            $productTotals[$key]['units'] += $product['units'];
+            $productTotals[$key]['units']   += $product['units'];
             $productTotals[$key]['revenue'] += $product['revenue'];
             $productTotals[$key]['tickets'] += $product['tickets'];
             $productTotals[$key]['weeks'][$week] = $product['units'];
@@ -716,10 +760,187 @@ class AnalyticsController
         usort($products, static fn(array $a, array $b): int => $b['units'] <=> $a['units']);
 
         Response::ok([
-            'weeks' => $weeks,
-            'products' => array_slice($products, 0, 30),
+            'weeks'     => $weeks,
+            'products'  => array_slice($products, 0, 30),
             'best_week' => $bestWeek,
         ]);
+    }
+
+    /**
+     * GET /analytics/product-trends?product_ids=1,2,3&from=YYYY-MM-DD&to=YYYY-MM-DD&granularity=day|week
+     * Tendencia lineal de unidades vendidas en el tiempo para comparar múltiples productos.
+     */
+    public function productTrends(Request $req): void
+    {
+        [$bid, $fromDt, $toDt, $from, $to] = $this->ctx($req);
+        $pdo = Database::pdo();
+
+        $rawIds = $req->query['product_ids'] ?? '';
+        $productIds = [];
+        if (is_array($rawIds)) {
+            $productIds = array_values(array_unique(array_filter(array_map('intval', $rawIds))));
+        } elseif (is_string($rawIds) && trim($rawIds) !== '') {
+            $productIds = array_values(array_unique(array_filter(array_map('intval', explode(',', $rawIds)))));
+        }
+
+        // Si no se pasaron IDs, seleccionar automáticamente los top 3 productos más vendidos en el período
+        if (empty($productIds)) {
+            $topStmt = $pdo->prepare(
+                'SELECT si.product_id
+                   FROM sale_items si
+                   JOIN sales s ON s.id = si.sale_id
+                  WHERE s.business_id = ? AND s.status = "completed"
+                    AND s.created_at BETWEEN ? AND ?
+                    AND si.product_id IS NOT NULL
+                    AND si.product_name NOT LIKE "Cobro compartido%"
+                  GROUP BY si.product_id
+                  ORDER BY SUM(si.quantity) DESC
+                  LIMIT 3'
+            );
+            $topStmt->execute([$bid, $fromDt, $toDt]);
+            $productIds = array_map('intval', $topStmt->fetchAll(\PDO::FETCH_COLUMN));
+        }
+
+        if (empty($productIds)) {
+            Response::ok([
+                'granularity' => 'day',
+                'labels'      => [],
+                'series'      => [],
+            ]);
+            return;
+        }
+
+        // Determinar granularidad: día o semana
+        $granularity = (string)($req->query['granularity'] ?? '');
+        if ($granularity !== 'day' && $granularity !== 'week') {
+            $diffDays = (strtotime($to) - strtotime($from)) / 86400;
+            $granularity = $diffDays > 45 ? 'week' : 'day';
+        }
+
+        // Generar lista continua de buckets en el rango de fechas
+        $labels = [];
+        if ($granularity === 'day') {
+            $curr = strtotime($from);
+            $end  = strtotime($to);
+            while ($curr <= $end) {
+                $labels[] = date('Y-m-d', $curr);
+                $curr = strtotime('+1 day', $curr);
+            }
+            $dateExpr = 'DATE(s.created_at)';
+        } else {
+            // Semanal (lunes como inicio de semana)
+            $curr = strtotime('monday this week', strtotime($from));
+            $end  = strtotime($to);
+            while ($curr <= $end) {
+                $labels[] = date('Y-m-d', $curr);
+                $curr = strtotime('+1 week', $curr);
+            }
+            $dateExpr = 'DATE_SUB(DATE(s.created_at), INTERVAL WEEKDAY(s.created_at) DAY)';
+        }
+
+        // Cargar nombres de los productos
+        $inPlaceholders = implode(',', array_fill(0, count($productIds), '?'));
+        $namesStmt = $pdo->prepare("SELECT id, name FROM products WHERE id IN ($inPlaceholders) AND business_id = ?");
+        $namesStmt->execute([...$productIds, $bid]);
+        $productNames = [];
+        foreach ($namesStmt->fetchAll() as $row) {
+            $productNames[(int)$row['id']] = (string)$row['name'];
+        }
+
+        // Consultar unidades vendidas por producto y bucket
+        $sql = "SELECT $dateExpr AS bucket,
+                       si.product_id,
+                       MAX(COALESCE(p.name, si.product_name)) AS prod_name,
+                       SUM(si.quantity) AS units,
+                       SUM(si.line_total) AS revenue
+                  FROM sale_items si
+                  JOIN sales s ON s.id = si.sale_id
+             LEFT JOIN products p ON p.id = si.product_id
+                 WHERE s.business_id = ? AND s.status = 'completed'
+                   AND s.created_at BETWEEN ? AND ?
+                   AND si.product_id IN ($inPlaceholders)
+                 GROUP BY bucket, si.product_id
+                 ORDER BY bucket ASC";
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$bid, $fromDt, $toDt, ...$productIds]);
+        $rows = $stmt->fetchAll();
+
+        // Mapear los datos a cada serie
+        $seriesMap = [];
+        foreach ($productIds as $pid) {
+            $name = $productNames[$pid] ?? "Producto #$pid";
+            $seriesMap[$pid] = [
+                'product_id'    => $pid,
+                'name'          => $name,
+                'total_units'   => 0.0,
+                'total_revenue' => 0.0,
+                'points'        => array_fill_keys($labels, 0.0),
+            ];
+        }
+
+        foreach ($rows as $r) {
+            $pid = (int)$r['product_id'];
+            $b   = (string)$r['bucket'];
+            $u   = (float)$r['units'];
+            $rev = (float)$r['revenue'];
+
+            if (isset($seriesMap[$pid])) {
+                $seriesMap[$pid]['total_units']   += $u;
+                $seriesMap[$pid]['total_revenue'] += $rev;
+                if (isset($seriesMap[$pid]['points'][$b])) {
+                    $seriesMap[$pid]['points'][$b] += $u;
+                }
+            }
+        }
+
+        $series = [];
+        foreach ($seriesMap as $s) {
+            $series[] = [
+                'product_id'    => $s['product_id'],
+                'name'          => $s['name'],
+                'total_units'   => round($s['total_units'], 2),
+                'total_revenue' => round($s['total_revenue'], 2),
+                'data'          => array_values($s['points']),
+            ];
+        }
+
+        Response::ok([
+            'granularity' => $granularity,
+            'labels'      => $labels,
+            'series'      => $series,
+        ]);
+    }
+
+    /**
+     * GET /analytics/products-list
+     * Lista de productos con ventas para el selector de comparación.
+     */
+    public function productsList(Request $req): void
+    {
+        $bid = (int)$req->auth['business_id'];
+        $pdo = Database::pdo();
+
+        $stmt = $pdo->prepare(
+            'SELECT p.id, p.name, COALESCE(c.name, "Sin categoría") AS category_name,
+                    COALESCE(SUM(si.quantity), 0) AS total_units_sold
+               FROM products p
+          LEFT JOIN categories c ON c.id = p.category_id
+          LEFT JOIN sale_items si ON si.product_id = p.id
+              WHERE p.business_id = ?
+              GROUP BY p.id, p.name, c.name
+              ORDER BY total_units_sold DESC, p.name ASC'
+        );
+        $stmt->execute([$bid]);
+
+        $products = array_map(static fn(array $r): array => [
+            'id'               => (int)$r['id'],
+            'name'             => (string)$r['name'],
+            'category_name'    => (string)$r['category_name'],
+            'total_units_sold' => (float)$r['total_units_sold'],
+        ], $stmt->fetchAll());
+
+        Response::ok(['products' => $products]);
     }
 
     // -----------------------------------------------------------------

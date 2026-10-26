@@ -17,6 +17,7 @@ import { cashApi } from './cash';
 import { analyticsApi } from './analytics';
 import { driversApi } from './drivers';
 import { productionApi } from './production';
+import { reportsApi } from './reports';
 
 // Crea la fachada de la API. Cada dominio es un módulo independiente: sumar
 // uno nuevo (cash, inventory, fiscal...) es agregar su archivo y una línea
@@ -33,6 +34,7 @@ export function createApi(config: ApiClientConfig) {
     business: businessApi(client),
     uploads: uploadsApi(client),
     sales: salesApi(client),
+    reports: reportsApi(client),
     suppliers: suppliersApi(client),
     supplies: suppliesApi(client),
     customers: customersApi(client),
@@ -52,9 +54,29 @@ export { ApiClient, ApiError } from './client';
 export type { ApiClientConfig } from './client';
 export type { RoundItemInput, CloseSplit } from './tables';
 export type { SalesQuery, SalesImportInput, SalesImportResult } from './sales';
+export type {
+  SalesReportQuery,
+  ItemReportRow,
+  ItemsReportResponse,
+  CategoryReportRow,
+  CategoriesReportResponse,
+  EmployeeReportRow,
+  EmployeesReportResponse,
+  PaymentReportRow,
+  PaymentsReportResponse,
+  DiscountedSaleRow,
+  DiscountsReportResponse,
+  TaxReportTypeRow,
+  TaxesReportResponse,
+} from './reports';
 export type { OrdersQuery } from './orders';
 export type { SettlementQuery } from './drivers';
-export type { AnalyticsQuery } from './analytics';
+export type {
+  AnalyticsQuery,
+  ProductTrendSeries,
+  ProductTrendsResponse,
+  ProductListItem,
+} from './analytics';
 export type { DoughCalculateParams, SimulateParams } from './production';
 export type { DoughProfileInput, SaveRecipeInput, RecipeIngredientInput } from '../types';
 export type { MovementInput } from './supplies';

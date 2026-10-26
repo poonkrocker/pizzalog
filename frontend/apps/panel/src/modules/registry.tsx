@@ -7,6 +7,13 @@ import { DriversPage } from './drivers/DriversPage';
 import { ProductsPage } from './products/ProductsPage';
 import { CategoriesPage } from './categories/CategoriesPage';
 import { SalesPage } from './sales/SalesPage';
+import { ItemsReportPage } from './sales-reports/ItemsReportPage';
+import { CategoriesReportPage } from './sales-reports/CategoriesReportPage';
+import { EmployeesReportPage } from './sales-reports/EmployeesReportPage';
+import { PaymentsReportPage } from './sales-reports/PaymentsReportPage';
+import { DiscountsReportPage } from './sales-reports/DiscountsReportPage';
+import { TaxesReportPage } from './sales-reports/TaxesReportPage';
+
 import { CashPage } from './cash/CashPage';
 import { SalonPage } from './salon/SalonPage';
 import { SuppliesPage } from './supplies/SuppliesPage';
@@ -83,12 +90,68 @@ export const modules: ModuleDef[] = [
     icon: '\u25B0',
   },
   {
+    id: 'sales-items',
+    title: 'Ventas por artículo',
+    path: 'ventas/articulos',
+    roles: ['admin', 'manager'],
+    element: <ItemsReportPage />,
+    nav: false,
+  },
+  {
+    id: 'sales-categories',
+    title: 'Ventas por categoría',
+    path: 'ventas/categorias',
+    roles: ['admin', 'manager'],
+    element: <CategoriesReportPage />,
+    nav: false,
+  },
+  {
+    id: 'sales-employees',
+    title: 'Ventas por empleado',
+    path: 'ventas/empleados',
+    roles: ['admin', 'manager'],
+    element: <EmployeesReportPage />,
+    nav: false,
+  },
+  {
+    id: 'sales-payments',
+    title: 'Ventas por tipo de pago',
+    path: 'ventas/pagos',
+    roles: ['admin', 'manager'],
+    element: <PaymentsReportPage />,
+    nav: false,
+  },
+  {
+    id: 'sales-discounts',
+    title: 'Descuentos',
+    path: 'ventas/descuentos',
+    roles: ['admin', 'manager'],
+    element: <DiscountsReportPage />,
+    nav: false,
+  },
+  {
+    id: 'sales-taxes',
+    title: 'Impuestos',
+    path: 'ventas/impuestos',
+    roles: ['admin', 'manager'],
+    element: <TaxesReportPage />,
+    nav: false,
+  },
+  {
+    id: 'sales-cash',
+    title: 'Caja',
+    path: 'ventas/caja',
+    roles: ['admin', 'manager'],
+    element: <CashPage />,
+    nav: false,
+  },
+  {
     id: 'cash',
     title: 'Caja',
     path: 'caja',
     roles: ['admin', 'manager'],
     element: <CashPage />,
-    icon: '\u25A5',
+    nav: false,
   },
   {
     id: 'salon',

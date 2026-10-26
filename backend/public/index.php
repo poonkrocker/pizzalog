@@ -94,6 +94,15 @@ $router->get('/sales/{id}', [SaleController::class, 'show'], [$auth]);
 $router->post('/sales', [SaleController::class, 'store'], [$auth]);
 $router->post('/sales/{id}/cancel', [SaleController::class, 'cancel'], [$auth, $manage]);
 
+// --- Reportes de Ventas (submenú Loyverse) -----------------------------
+$router->get('/reports/sales/items', [SalesReportController::class, 'byItem'], [$auth, $manage]);
+$router->get('/reports/sales/categories', [SalesReportController::class, 'byCategory'], [$auth, $manage]);
+$router->get('/reports/sales/employees', [SalesReportController::class, 'byEmployee'], [$auth, $manage]);
+$router->get('/reports/sales/payments', [SalesReportController::class, 'byPayment'], [$auth, $manage]);
+$router->get('/reports/sales/discounts', [SalesReportController::class, 'discounts'], [$auth, $manage]);
+$router->get('/reports/sales/taxes', [SalesReportController::class, 'taxes'], [$auth, $manage]);
+
+
 // --- Analytics (admin/manager o empleado con permiso) -----------------
 $router->get('/analytics/summary', [AnalyticsController::class, 'summary'], [$auth, $manage]);
 $router->get('/analytics/top-products', [AnalyticsController::class, 'topProducts'], [$auth, $manage]);
@@ -107,6 +116,8 @@ $router->get('/analytics/time-preferences', [AnalyticsController::class, 'timePr
 $router->put('/analytics/time-preferences', [AnalyticsController::class, 'saveTimePreferences'], [$auth, $manage]);
 $router->get('/analytics/sales-over-time', [AnalyticsController::class, 'salesOverTime'], [$auth, $manage]);
 $router->get('/analytics/weekly-pizzas', [AnalyticsController::class, 'weeklyPizzas'], [$auth, $manage]);
+$router->get('/analytics/product-trends', [AnalyticsController::class, 'productTrends'], [$auth, $manage]);
+$router->get('/analytics/products-list', [AnalyticsController::class, 'productsList'], [$auth, $manage]);
 
 // --- Producción / Masas / Escandallos (Calculadora) -------------------
 $router->get('/production/dough-profiles', [ProductionController::class, 'doughProfiles'], [$auth]);

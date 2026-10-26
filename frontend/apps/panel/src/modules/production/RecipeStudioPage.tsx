@@ -10,7 +10,7 @@ import {
   type StudioRecipeComponentInput,
 } from '@pizzalog/shared';
 import { useApi } from '@/lib/auth';
-import { Field, Input, Loading } from '@/ui';
+import { Field, Input, Loading, Modal } from '@/ui';
 
 type View = 'recipes' | 'costs';
 type ComponentRow = StudioRecipeComponentInput;
@@ -76,6 +76,7 @@ export function RecipeStudioPage() {
   const qc = useQueryClient();
   const [view, setView] = useState<View>('recipes');
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [recipeModalOpen, setRecipeModalOpen] = useState(false);
   const [recipeName, setRecipeName] = useState('');
   const [recipeType, setRecipeType] = useState<'product' | 'subrecipe'>('product');
   const [linkedProductId, setLinkedProductId] = useState<number>(0);
@@ -106,6 +107,7 @@ export function RecipeStudioPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['production', 'recipe-studio'] });
       setRecipeError('');
+      setRecipeModalOpen(false);
       resetRecipe();
     },
     onError: (e: Error) => setRecipeError(e.message || 'No se pudo guardar la receta.'),
@@ -142,7 +144,7 @@ export function RecipeStudioPage() {
     })));
     setRecipeError('');
     setView('recipes');
-    document.getElementById('recipe-studio-editor')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setRecipeModalOpen(true);
   }
 
   const componentCostMap = useMemo(() => {
@@ -214,7 +216,7 @@ export function RecipeStudioPage() {
   function newRecipe(type: 'product' | 'subrecipe') {
     resetRecipe(); setRecipeType(type); setYieldUnit(type === 'product' ? 'u' : 'kg');
     setView('recipes');
-    window.setTimeout(() => document.getElementById('recipe-studio-editor')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+    setRecipeModalOpen(true);
   }
 
   return (
@@ -260,10 +262,21 @@ export function RecipeStudioPage() {
             ))}
           </div>
 
-          <div id="recipe-studio-editor" style={panelStyle}>
-            <h3 style={{ marginTop: 0 }}>{editingId ? 'Editar receta' : 'Constructor de recetas'}</h3>
+          <Modal
+            open={recipeModalOpen}
+            onClose={() => setRecipeModalOpen(false)}
+            title={editingId ? `Editar receta: ${recipeName || 'Sin título'}` : (recipeType === 'subrecipe' ? 'Nueva subreceta' : 'Nueva receta de producto')}
+            footer={
+              <div style={{ display: 'flex', gap: '.5rem', justifyContent: 'flex-end', width: '100%' }}>
+                <button type="button" style={secondaryButton} onClick={() => setRecipeModalOpen(false)}>Cancelar</button>
+                <button type="button" style={primaryButton} disabled={saveRecipe.isPending} onClick={submitRecipe}>
+                  {saveRecipe.isPending ? 'Guardando...' : (editingId ? 'Guardar cambios' : 'Crear receta')}
+                </button>
+              </div>
+            }
+          >
             <p style={{ marginTop: 0, color: '#64748b', fontSize: '.88rem' }}>Los componentes se valorizan con costos del catálogo; una subreceta aporta su costo por unidad de rendimiento.</p>
-            {recipeError && <div role="alert" style={{ marginBottom: '.8rem', padding: '.7rem', borderRadius: 6, background: '#fee2e2', color: '#991b1b' }}>{recipeError}</div>}
+{recipeError && <div role="alert" style={{ marginBottom: '.8rem', padding: '.7rem', borderRadius: 6, background: '#fee2e2', color: '#991b1b' }}>{recipeError}</div>}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: '.75rem' }}>
               <Field label="Nombre">
                 <Input value={recipeName} onChange={(e) => setRecipeName(e.target.value)} placeholder="Ej. Salsa de tomate" />
@@ -335,11 +348,7 @@ export function RecipeStudioPage() {
                 <div><div style={{ color: '#64748b', fontSize: '.75rem' }}>Food cost al precio cargado</div><strong style={{ fontSize: '1.2rem' }}>{foodCost.toFixed(1)}%</strong></div>
               </>}
             </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.5rem', marginTop: '1rem' }}>
-              <button type="button" style={primaryButton} disabled={saveRecipe.isPending} onClick={submitRecipe}>{saveRecipe.isPending ? 'Guardando...' : 'Guardar receta'}</button>
-              <button type="button" style={secondaryButton} onClick={resetRecipe}>Limpiar formulario</button>
-            </div>
-          </div>
+          </Modal>
         </>
       )}
 

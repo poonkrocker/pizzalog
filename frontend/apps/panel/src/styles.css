@@ -193,6 +193,26 @@ button { font-family: inherit; }
 .navitem:hover { background: var(--surface-2); color: var(--text); }
 .navitem--active { background: var(--surface-2); color: var(--cream); box-shadow: inset 3px 0 0 var(--red); }
 .navitem__icon { font-size: 16px; width: 18px; text-align: center; }
+.navitem-sub {
+  display: block;
+  padding: 6px 10px;
+  font-size: 13px;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+.navitem-sub:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.navitem-sub--active {
+  background: var(--surface-2);
+  color: var(--cream);
+  font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--red);
+}
+
 .shell__user {
   border-top: 1px solid var(--line);
   padding-top: 14px;

@@ -71,6 +71,9 @@ export async function printRaw(payload: string): Promise<void> {
   await BluetoothSerial.connect({ address: s.address });
   try {
     await BluetoothSerial.write({ address: s.address, value: payload });
+    // Esperar a que el búfer de la comandera térmica procese y termine de imprimir
+    // antes de cerrar la conexión RFCOMM (evita que la impresora descarte los bytes).
+    await new Promise((resolve) => setTimeout(resolve, 2200));
   } finally {
     try {
       await BluetoothSerial.disconnect({ address: s.address });

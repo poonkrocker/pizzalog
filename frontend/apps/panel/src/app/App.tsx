@@ -24,6 +24,7 @@ export function App() {
             )}
           </Route>
         </Route>
+        <Route path="caja" element={<Navigate to="/ventas/caja" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

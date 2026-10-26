@@ -110,9 +110,9 @@ export class Esc {
     return this;
   }
 
-  /** Alimenta papel y corta (si la impresora tiene cortador). */
+  /** Alimenta papel y corta (si la impresora tiene cortador; en comanderas portátiles como IT01 alimenta para poder cortar manualmente). */
   cut(): this {
-    this.out += '\n\n\n' + GS + 'V' + String.fromCharCode(66) + String.fromCharCode(0);
+    this.out += '\n\n\n\n\n' + GS + 'V' + String.fromCharCode(66) + String.fromCharCode(0);
     return this;
   }
 

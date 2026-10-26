@@ -110,19 +110,73 @@ export function AppShell() {
           <span className="shell__brand-text">Pizzalog</span>
         </div>
         <nav className="shell__menu">
-          {items.map((m) => (
-            <NavLink
-              key={m.id}
-              to={`/${m.path}`}
-              end
-              className={({ isActive }) => `navitem${isActive ? ' navitem--active' : ''}`}
-            >
-              <span className="navitem__icon" aria-hidden="true">
-                {m.icon}
-              </span>
-              <span className="navitem__label">{m.title}</span>
-            </NavLink>
-          ))}
+          {items.map((m) => {
+            if (m.id === 'sales') {
+              const inSales = location.pathname.startsWith('/ventas') || location.pathname === '/caja';
+              return (
+                <div key={m.id} style={{ display: 'flex', flexDirection: 'column' }}>
+                  <NavLink
+                    to={`/${m.path}`}
+                    end
+                    className={({ isActive }) => `navitem${isActive || inSales ? ' navitem--active' : ''}`}
+                    style={{ justifyContent: 'space-between' }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span className="navitem__icon" aria-hidden="true">
+                        {m.icon}
+                      </span>
+                      <span className="navitem__label">{m.title}</span>
+                    </div>
+                    <span style={{ fontSize: '0.65rem', opacity: 0.7 }}>
+                      {inSales ? '▼' : '▶'}
+                    </span>
+                  </NavLink>
+                  {inSales && (
+                    <div style={{ paddingLeft: '1.75rem', display: 'flex', flexDirection: 'column', gap: 2, margin: '2px 0 6px' }}>
+                      <NavLink to="/ventas" end className={({ isActive }) => `navitem-sub${isActive ? ' navitem-sub--active' : ''}`}>
+                        Resumen de ventas
+                      </NavLink>
+                      <NavLink to="/ventas/articulos" className={({ isActive }) => `navitem-sub${isActive ? ' navitem-sub--active' : ''}`}>
+                        Por artículo
+                      </NavLink>
+                      <NavLink to="/ventas/categorias" className={({ isActive }) => `navitem-sub${isActive ? ' navitem-sub--active' : ''}`}>
+                        Por categoría
+                      </NavLink>
+                      <NavLink to="/ventas/empleados" className={({ isActive }) => `navitem-sub${isActive ? ' navitem-sub--active' : ''}`}>
+                        Por empleado
+                      </NavLink>
+                      <NavLink to="/ventas/pagos" className={({ isActive }) => `navitem-sub${isActive ? ' navitem-sub--active' : ''}`}>
+                        Por tipo de pago
+                      </NavLink>
+                      <NavLink to="/ventas/descuentos" className={({ isActive }) => `navitem-sub${isActive ? ' navitem-sub--active' : ''}`}>
+                        Descuentos
+                      </NavLink>
+                      <NavLink to="/ventas/impuestos" className={({ isActive }) => `navitem-sub${isActive ? ' navitem-sub--active' : ''}`}>
+                        Impuestos
+                      </NavLink>
+                      <NavLink to="/ventas/caja" className={({ isActive }) => `navitem-sub${isActive ? ' navitem-sub--active' : ''}`}>
+                        Caja
+                      </NavLink>
+                    </div>
+                  )}
+                </div>
+              );
+            }
+
+            return (
+              <NavLink
+                key={m.id}
+                to={`/${m.path}`}
+                end
+                className={({ isActive }) => `navitem${isActive ? ' navitem--active' : ''}`}
+              >
+                <span className="navitem__icon" aria-hidden="true">
+                  {m.icon}
+                </span>
+                <span className="navitem__label">{m.title}</span>
+              </NavLink>
+            );
+          })}
           {user?.staff_person_code && (
             <NavLink
               to={`/empleado/${user.staff_person_code}`}

@@ -13,15 +13,39 @@ export interface AnalyticsQuery {
   to?: string;
   limit?: number;
   time_preset?: 'all' | 'midday' | 'night';
+  start_hour?: number;
+  end_hour?: number;
+  hour_preset?: 'midday' | 'night' | 'all';
+}
+
+export interface ProductTrendSeries {
+  product_id: number;
+  name: string;
+  total_units: number;
+  total_revenue: number;
+  data: number[];
+}
+
+export interface ProductTrendsResponse {
+  granularity: 'day' | 'week';
+  labels: string[];
+  series: ProductTrendSeries[];
+}
+
+export interface ProductListItem {
+  id: number;
+  name: string;
+  category_name: string;
+  total_units_sold: number;
 }
 
 export function analyticsApi(client: ApiClient) {
-  const queryStr = (p?: AnalyticsQuery) => {
+  const queryStr = (p?: Record<string, any>) => {
     if (!p) return '';
     const q = new URLSearchParams(
       Object.entries(p)
-        .filter(([, v]) => v !== undefined && v !== '')
-        .map(([k, v]) => [k, String(v)]),
+        .filter(([, v]) => v !== undefined && v !== null && v !== '')
+        .map(([k, v]) => [k, Array.isArray(v) ? v.join(',') : String(v)]),
     ).toString();
     return q ? `?${q}` : '';
   };
@@ -38,7 +62,37 @@ export function analyticsApi(client: ApiClient) {
     salesOverTime: (params?: AnalyticsQuery) =>
       client.get<{ points: AnalyticsSalesPoint[] }>(`/analytics/sales-over-time${queryStr(params)}`),
     weeklyPizzas: (params?: AnalyticsQuery) =>
-      client.get<{ weeks: Array<{ week_start: string; week_end: string; units: number; revenue: number; tickets: number; products: Array<{ product_id: number | null; name: string; units: number; revenue: number; tickets: number }> }>; products: Array<{ product_id: number | null; name: string; units: number; revenue: number; tickets: number; weekly_units: Record<string, number>; change_pct: number | null }>; best_week: { week_start: string; week_end: string; units: number; revenue: number; tickets: number; products: Array<{ product_id: number | null; name: string; units: number; revenue: number; tickets: number }> } | null }>(`/analytics/weekly-pizzas${queryStr(params)}`),
+      client.get<{
+        weeks: Array<{
+          week_start: string;
+          week_end: string;
+          units: number;
+          revenue: number;
+          tickets: number;
+          products: Array<{ product_id: number | null; name: string; units: number; revenue: number; tickets: number }>;
+        }>;
+        products: Array<{
+          product_id: number | null;
+          name: string;
+          units: number;
+          revenue: number;
+          tickets: number;
+          weekly_units: Record<string, number>;
+          change_pct: number | null;
+        }>;
+        best_week: {
+          week_start: string;
+          week_end: string;
+          units: number;
+          revenue: number;
+          tickets: number;
+          products: Array<{ product_id: number | null; name: string; units: number; revenue: number; tickets: number }>;
+        } | null;
+      }>(`/analytics/weekly-pizzas${queryStr(params)}`),
+    productTrends: (params?: { from?: string; to?: string; product_ids?: number[] | string; granularity?: 'day' | 'week' }) =>
+      client.get<ProductTrendsResponse>(`/analytics/product-trends${queryStr(params)}`),
+    productsList: () =>
+      client.get<{ products: ProductListItem[] }>('/analytics/products-list'),
     productMargins: (params?: AnalyticsQuery) =>
       client.get<{ products: any[] }>(`/analytics/product-margins${queryStr(params)}`),
     ingredients: (params?: AnalyticsQuery) =>

@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { formatARS, type AnalyticsQuery } from '@pizzalog/shared';
 import { useApi } from '@/lib/auth';
 import { Loading, PageHeader, Input } from '@/ui';
+import { ProductTrendChart } from './ProductTrendChart';
 
 const dateNow = () => {
   const d = new Date();
@@ -29,7 +30,18 @@ export function AnalyticsDetailsPage() {
   const [to, setTo] = useState(dateNow());
   const [heatPreset, setHeatPreset] = useState<'all' | 'midday' | 'night'>('all');
   const [preferencesSaveError, setPreferencesSaveError] = useState(false);
+  const [pizzaHourPreset, setPizzaHourPreset] = useState<'all' | 'midday' | 'night' | 'custom'>('all');
+  const [pizzaHourStart, setPizzaHourStart] = useState<number>(11);
+  const [pizzaHourEnd, setPizzaHourEnd] = useState<number>(16);
+
   const query: AnalyticsQuery = useMemo(() => ({ from, to, limit: 100, time_preset: heatPreset }), [from, to, heatPreset]);
+  const pizzaQuery: AnalyticsQuery = useMemo(() => ({
+    from,
+    to,
+    hour_preset: pizzaHourPreset !== 'custom' ? (pizzaHourPreset as 'midday' | 'night' | 'all') : undefined,
+    start_hour: pizzaHourPreset === 'custom' ? pizzaHourStart : undefined,
+    end_hour: pizzaHourPreset === 'custom' ? pizzaHourEnd : undefined,
+  }), [from, to, pizzaHourPreset, pizzaHourStart, pizzaHourEnd]);
   const previous = useMemo(() => {
     const length = Math.max(1, Math.round((new Date(to + 'T12:00:00').getTime() - new Date(from + 'T12:00:00').getTime()) / 86400000) + 1);
     return { from: addDays(from, -length), to: addDays(from, -1), time_preset: heatPreset };
@@ -45,7 +57,7 @@ export function AnalyticsDetailsPage() {
   const marginsQ = useQuery({ queryKey: ['analytics','details-margins',query], queryFn: () => api.analytics.productMargins(query).then(r => r.products as Array<{product_id:number;name:string;unit_cost:number;units:number;revenue:number;profit:number;margin_pct:number|null;has_cost:boolean}>) });
   const combosQ = useQuery({ queryKey: ['analytics','details-combos',query], queryFn: () => api.analytics.winningCombinations(query) });
   const heatQ = useQuery({ queryKey: ['analytics','details-heatmap',query], queryFn: () => api.analytics.timeHeatmap(query).then(r => r.cells) });
-  const weeklyPizzasQ = useQuery({ queryKey: ['analytics','weekly-pizzas',query], queryFn: () => api.analytics.weeklyPizzas(query) });
+  const weeklyPizzasQ = useQuery({ queryKey: ['analytics','weekly-pizzas',pizzaQuery], queryFn: () => api.analytics.weeklyPizzas(pizzaQuery) });
   const weeklyProducts = weeklyPizzasQ.data?.products ?? [];
   const weeklyWeeks = weeklyPizzasQ.data?.weeks ?? [];
   const maxWeeklyUnits = Math.max(1, ...weeklyWeeks.map(w => w.units));
@@ -102,33 +114,150 @@ export function AnalyticsDetailsPage() {
       <div style={card}><div style={muted}>Artículos por ticket</div><div style={{fontSize:'1.6rem',fontWeight:800}}>{currentItemsPerTicket.toFixed(2)}</div><strong style={{color: itemsPerTicketTrend === null ? '#777' : itemsPerTicketTrend >= 0 ? '#16803d' : '#c62828'}}>{itemsPerTicketTrend === null ? 'Sin base comparable' : `${itemsPerTicketTrend >= 0 ? '+' : ''}${itemsPerTicketTrend.toFixed(1)}% vs. período anterior`}</strong><div style={muted}>Unidades contabilizadas / ventas completadas</div></div>
     </div>
     <div style={card}>
-      <h3 style={{marginTop:0}}>Pizzas por semana</h3>
-      <p style={muted}>Unidades de pizzas vendidas agrupadas por semana calendario (lunes a domingo). Respeta el rango de fechas y el filtro horario de arriba.</p>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.75rem' }}>
+        <div>
+          <h3 style={{ margin: 0 }}>Pizzas por semana</h3>
+          <p style={{ ...muted, margin: '0.25rem 0 0' }}>
+            Unidades de pizzas vendidas agrupadas por semana calendario (lunes a domingo).
+          </p>
+        </div>
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', alignItems: 'center' }}>
+          <span style={{ fontSize: '0.78rem', color: '#64748b', fontWeight: 600 }}>Horario:</span>
+          <button
+            type="button"
+            onClick={() => setPizzaHourPreset('all')}
+            style={{
+              padding: '0.3rem 0.55rem',
+              borderRadius: 6,
+              border: '1px solid #cbd5e1',
+              background: pizzaHourPreset === 'all' ? 'var(--c-accent, #c7101b)' : '#fff',
+              color: pizzaHourPreset === 'all' ? '#fff' : '#334155',
+              fontSize: '0.78rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            Todo el día
+          </button>
+          <button
+            type="button"
+            onClick={() => setPizzaHourPreset('midday')}
+            style={{
+              padding: '0.3rem 0.55rem',
+              borderRadius: 6,
+              border: '1px solid #cbd5e1',
+              background: pizzaHourPreset === 'midday' ? 'var(--c-accent, #c7101b)' : '#fff',
+              color: pizzaHourPreset === 'midday' ? '#fff' : '#334155',
+              fontSize: '0.78rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            ☀️ Mediodía (11 a 16 hs)
+          </button>
+          <button
+            type="button"
+            onClick={() => setPizzaHourPreset('night')}
+            style={{
+              padding: '0.3rem 0.55rem',
+              borderRadius: 6,
+              border: '1px solid #cbd5e1',
+              background: pizzaHourPreset === 'night' ? 'var(--c-accent, #c7101b)' : '#fff',
+              color: pizzaHourPreset === 'night' ? '#fff' : '#334155',
+              fontSize: '0.78rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            🌙 Noche (19 a 03 am)
+          </button>
+          <button
+            type="button"
+            onClick={() => setPizzaHourPreset('custom')}
+            style={{
+              padding: '0.3rem 0.55rem',
+              borderRadius: 6,
+              border: '1px solid #cbd5e1',
+              background: pizzaHourPreset === 'custom' ? 'var(--c-accent, #c7101b)' : '#fff',
+              color: pizzaHourPreset === 'custom' ? '#fff' : '#334155',
+              fontSize: '0.78rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            ⚙️ Personalizado
+          </button>
+
+          {pizzaHourPreset === 'custom' && (
+            <div style={{ display: 'flex', gap: '0.3rem', alignItems: 'center', marginLeft: 4 }}>
+              <select
+                value={pizzaHourStart}
+                onChange={(e) => setPizzaHourStart(Number(e.target.value))}
+                style={{ padding: '0.3rem', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.78rem' }}
+              >
+                {Array.from({ length: 24 }, (_, i) => (
+                  <option key={i} value={i}>{String(i).padStart(2, '0')}:00 hs</option>
+                ))}
+              </select>
+              <span style={{ fontSize: '0.75rem', color: '#64748b' }}>a</span>
+              <select
+                value={pizzaHourEnd}
+                onChange={(e) => setPizzaHourEnd(Number(e.target.value))}
+                style={{ padding: '0.3rem', borderRadius: 6, border: '1px solid #cbd5e1', fontSize: '0.78rem' }}
+              >
+                {Array.from({ length: 24 }, (_, i) => (
+                  <option key={i} value={i}>{String(i).padStart(2, '0')}:00 hs</option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+      </div>
+
       {weeklyPizzasQ.isLoading && <p style={muted}>Calculando semanas…</p>}
       {weeklyPizzasQ.isError && <p role="alert" style={{...muted,color:'#a12622'}}>No se pudo cargar el análisis semanal de pizzas.</p>}
-      {weeklyPizzasQ.data?.best_week && <div style={{border:'1px solid #e5e7eb',borderRadius:8,padding:'.75rem',marginBottom:'.75rem'}}>
-        <div style={muted}>Semana con más unidades</div>
-        <strong>{weeklyPizzasQ.data.best_week.week_start} al {weeklyPizzasQ.data.best_week.week_end}</strong>
-        <div style={{fontSize:'1.4rem',fontWeight:800}}>{weeklyPizzasQ.data.best_week.units.toLocaleString('es-AR')} pizzas</div>
-        <div style={muted}>{weeklyPizzasQ.data.best_week.tickets} tickets · {formatARS(weeklyPizzasQ.data.best_week.revenue)} facturados</div>
-      </div>}
-      {weeklyPizzasQ.data?.weeks.length ? <div style={{overflowX:'auto'}}>
-        <table style={{width:'100%',borderCollapse:'collapse',fontSize:'.86rem'}}>
-          <thead><tr style={{textAlign:'left',borderBottom:'1px solid #ddd'}}><th style={{padding:'.5rem'}}>Semana</th><th style={{padding:'.5rem',textAlign:'right'}}>Pizzas</th><th style={{padding:'.5rem',textAlign:'right'}}>Tickets</th><th style={{padding:'.5rem',textAlign:'right'}}>Facturación</th></tr></thead>
-          <tbody>{weeklyPizzasQ.data.weeks.map(w=><tr key={w.week_start} style={{borderBottom:'1px solid #eee'}}><td style={{padding:'.5rem'}}>{w.week_start} – {w.week_end}</td><td style={{padding:'.5rem',textAlign:'right',fontWeight:700}}>{w.units.toLocaleString('es-AR')}</td><td style={{padding:'.5rem',textAlign:'right'}}>{w.tickets}</td><td style={{padding:'.5rem',textAlign:'right'}}>{formatARS(w.revenue)}</td></tr>)}</tbody>
-        </table>
-      </div> : !weeklyPizzasQ.isLoading && <p style={muted}>No hay ventas de productos identificados como pizza en este período y horario.</p>}
+      {weeklyPizzasQ.data?.best_week && (
+        <div style={{border:'1px solid #e5e7eb',borderRadius:8,padding:'.75rem',marginBottom:'.75rem'}}>
+          <div style={muted}>Semana récord con más unidades</div>
+          <strong>{weeklyPizzasQ.data.best_week.week_start} al {weeklyPizzasQ.data.best_week.week_end}</strong>
+          <div style={{fontSize:'1.4rem',fontWeight:800}}>{weeklyPizzasQ.data.best_week.units.toLocaleString('es-AR')} pizzas</div>
+          <div style={muted}>{weeklyPizzasQ.data.best_week.tickets} tickets · {formatARS(weeklyPizzasQ.data.best_week.revenue)} facturados</div>
+        </div>
+      )}
+      {weeklyPizzasQ.data?.weeks.length ? (
+        <div style={{overflowX:'auto'}}>
+          <table style={{width:'100%',borderCollapse:'collapse',fontSize:'.86rem'}}>
+            <thead>
+              <tr style={{textAlign:'left',borderBottom:'1px solid #ddd'}}>
+                <th style={{padding:'.5rem'}}>Semana</th>
+                <th style={{padding:'.5rem',textAlign:'right'}}>Pizzas</th>
+                <th style={{padding:'.5rem',textAlign:'right'}}>Tickets</th>
+                <th style={{padding:'.5rem',textAlign:'right'}}>Facturación</th>
+              </tr>
+            </thead>
+            <tbody>
+              {weeklyPizzasQ.data.weeks.map(w => (
+                <tr key={w.week_start} style={{borderBottom:'1px solid #eee'}}>
+                  <td style={{padding:'.5rem', fontWeight: 600}}>{w.week_start} – {w.week_end}</td>
+                  <td style={{padding:'.5rem',textAlign:'right',fontWeight:700}}>{w.units.toLocaleString('es-AR')}</td>
+                  <td style={{padding:'.5rem',textAlign:'right'}}>{w.tickets}</td>
+                  <td style={{padding:'.5rem',textAlign:'right'}}>{formatARS(w.revenue)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : !weeklyPizzasQ.isLoading && <p style={muted}>No hay ventas de productos identificados como pizza en este período y horario.</p>}
     </div>
-    <div style={{...card,marginTop:'1rem'}}>
-      <h3 style={{marginTop:0}}>Tendencia por pizza</h3>
-      <p style={muted}>Unidades, facturación y variación entre la primera y la última semana del rango. Se muestran las 30 pizzas con más unidades.</p>
-      {weeklyPizzasQ.data?.products.length ? <div style={{overflowX:'auto'}}>
-        <table style={{width:'100%',borderCollapse:'collapse',fontSize:'.86rem'}}>
-          <thead><tr style={{textAlign:'left',borderBottom:'1px solid #ddd'}}><th style={{padding:'.5rem'}}>Pizza</th><th style={{padding:'.5rem',textAlign:'right'}}>Unidades</th><th style={{padding:'.5rem',textAlign:'right'}}>Tickets</th><th style={{padding:'.5rem',textAlign:'right'}}>Facturación</th><th style={{padding:'.5rem',textAlign:'right'}}>Tendencia</th></tr></thead>
-          <tbody>{weeklyPizzasQ.data.products.map(p=><tr key={p.product_id ?? p.name} style={{borderBottom:'1px solid #eee'}}><td style={{padding:'.5rem',fontWeight:600}}>{p.name}<div style={{display:'flex',gap:3,marginTop:4,flexWrap:'wrap'}}>{weeklyWeeks.map(w=><span key={w.week_start} title={w.week_start+': '+(p.weekly_units[w.week_start] ?? 0)+' u.'} style={{display:'inline-block',height:7,width:Math.max(8,Math.min(28,8+((p.weekly_units[w.week_start] ?? 0)/maxWeeklyUnits*20))),background:(p.weekly_units[w.week_start] ?? 0)>0?'var(--c-accent, #d73828)':'#e5e7eb',borderRadius:2}} />)}</div></td><td style={{padding:'.5rem',textAlign:'right'}}>{p.units.toLocaleString('es-AR')}</td><td style={{padding:'.5rem',textAlign:'right'}}>{p.tickets}</td><td style={{padding:'.5rem',textAlign:'right'}}>{formatARS(p.revenue)}</td><td style={{padding:'.5rem',textAlign:'right',fontWeight:700,color:p.change_pct===null?'#777':p.change_pct>=0?'#16803d':'#c62828'}}>{p.change_pct===null?'Sin base':(p.change_pct>=0?'+':'')+p.change_pct.toFixed(1)+'%'}</td></tr>)}</tbody>
-        </table>
-      </div> : <p style={muted}>Todavía no hay datos suficientes para la tendencia por pizza.</p>}
-      <p style={muted}>Las barras pequeñas muestran las unidades vendidas en cada semana. La variación compara la primera y la última semana con ventas registradas para esa pizza.</p>
+
+    {/* Tendencia lineal de ventas por producto (reemplazo del antiguo panel de pizzas) */}
+    <div style={{ ...card, marginTop: '1rem' }}>
+      <h3 style={{ marginTop: 0 }}>Tendencia de ventas por producto</h3>
+      <p style={muted}>
+        Evolución temporal de unidades vendidas para cualquier producto del catálogo. Podés comparar hasta 4 productos a la vez.
+      </p>
+      <ProductTrendChart from={from} to={to} />
     </div>
     <div style={grid}>
       <div style={card}>
