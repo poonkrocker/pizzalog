@@ -37,6 +37,8 @@ export function analyticsApi(client: ApiClient) {
       client.get<{ leaders: Array<{ category_id: number; category_name: string; product_id: number | null; product_name: string; units: number; revenue: number }> }>(`/analytics/category-leaders${queryStr(params)}`),
     salesOverTime: (params?: AnalyticsQuery) =>
       client.get<{ points: AnalyticsSalesPoint[] }>(`/analytics/sales-over-time${queryStr(params)}`),
+    weeklyPizzas: (params?: AnalyticsQuery) =>
+      client.get<{ weeks: Array<{ week_start: string; week_end: string; units: number; revenue: number; tickets: number; products: Array<{ product_id: number | null; name: string; units: number; revenue: number; tickets: number }> }>; products: Array<{ product_id: number | null; name: string; units: number; revenue: number; tickets: number; weekly_units: Record<string, number>; change_pct: number | null }>; best_week: { week_start: string; week_end: string; units: number; revenue: number; tickets: number; products: Array<{ product_id: number | null; name: string; units: number; revenue: number; tickets: number }> } | null }>(`/analytics/weekly-pizzas${queryStr(params)}`),
     productMargins: (params?: AnalyticsQuery) =>
       client.get<{ products: any[] }>(`/analytics/product-margins${queryStr(params)}`),
     ingredients: (params?: AnalyticsQuery) =>
