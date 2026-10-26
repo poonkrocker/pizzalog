@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Pizzalog\Controllers;
 
-use Pizzalog\Database;
-use Pizzalog\Http\Request;
-use Pizzalog\Http\Response;
+use Pizzalog\Core\Database;
+use Pizzalog\Core\Request;
+use Pizzalog\Core\Response;
 use Pizzalog\Services\LoyverseMigrationService;
 
 final class SalesReportController
@@ -39,9 +39,11 @@ final class SalesReportController
             $params[] = $productId;
         }
 
+        $catExpr = $this->categorySqlExpr();
+
         $sql = "SELECT COALESCE(si.product_id, 0) AS product_id,
                        si.product_name,
-                       MAX(COALESCE(c.name, 'Sin categoría')) AS category_name,
+                       MAX($catExpr) AS category_name,
                        SUM(si.quantity) AS units,
                        SUM(si.line_total) AS gross_sales,
                        MAX(COALESCE(p.cost, 0)) AS unit_cost
@@ -118,13 +120,16 @@ final class SalesReportController
         $categoryId = isset($req->query['category_id']) && is_numeric($req->query['category_id']) && (int)$req->query['category_id'] > 0
             ? (int)$req->query['category_id']
             : null;
+        $catExpr = $this->categorySqlExpr();
+
         if ($categoryId !== null) {
-            $whereExtra .= ' AND c.id = ?';
+            $whereExtra .= ' AND (c.id = ? OR ' . $catExpr . ' = (SELECT name FROM categories WHERE id = ?))';
+            $params[] = $categoryId;
             $params[] = $categoryId;
         }
 
-        $sql = "SELECT COALESCE(c.id, 0) AS category_id,
-                       MAX(COALESCE(c.name, 'Sin categoría')) AS category_name,
+        $sql = "SELECT $catExpr AS category_name,
+                       MAX(COALESCE(c.id, 0)) AS category_id,
                        SUM(si.quantity) AS units,
                        SUM(si.line_total) AS gross_sales
                   FROM sale_items si
@@ -135,7 +140,7 @@ final class SalesReportController
                    AND s.created_at BETWEEN ? AND ? $timeFilter
                    AND si.product_name NOT LIKE 'Cobro compartido%'
                    $whereExtra
-                 GROUP BY COALESCE(c.id, 0)
+                 GROUP BY $catExpr
                  ORDER BY gross_sales DESC";
 
         $stmt = $pdo->prepare($sql);
@@ -170,14 +175,15 @@ final class SalesReportController
                           FROM sale_items si
                           JOIN sales s ON s.id = si.sale_id
                      LEFT JOIN products p ON p.id = si.product_id
+                     LEFT JOIN categories c ON c.id = p.category_id
                          WHERE s.business_id = ? AND s.status = 'completed'
                            AND s.created_at BETWEEN ? AND ? $timeFilter
-                           AND p.category_id = ?
+                           AND (p.category_id = ? OR $catExpr = (SELECT name FROM categories WHERE id = ?))
                            AND si.product_name NOT LIKE 'Cobro compartido%'
                          GROUP BY COALESCE(si.product_id, 0), si.product_name
                          ORDER BY gross_sales DESC";
             $itemStmt = $pdo->prepare($itemSql);
-            $itemStmt->execute([$bid, $fromDt, $toDt, $categoryId]);
+            $itemStmt->execute([$bid, $fromDt, $toDt, $categoryId, $categoryId]);
             $itemRows = $itemStmt->fetchAll();
             $catGross = $totalGross;
             $items = array_map(static function (array $r) use ($catGross): array {
@@ -488,5 +494,56 @@ final class SalesReportController
         }
 
         return [$bid, $fromDt, $toDt, $timeFilter];
+    }
+
+    private function categorySqlExpr(): string
+    {
+        return "COALESCE(
+            c.name,
+            CASE
+                WHEN LOWER(si.product_name) LIKE '%pizza%'
+                  OR LOWER(si.product_name) LIKE '%fugazz%'
+                  OR LOWER(si.product_name) LIKE '%muzza%'
+                  OR LOWER(si.product_name) LIKE '%napolitana%'
+                  OR LOWER(si.product_name) LIKE '%calabresa%'
+                  OR LOWER(si.product_name) LIKE '%margarita%'
+                  OR LOWER(si.product_name) LIKE '%margherita%'
+                  OR LOWER(si.product_name) LIKE '%arrabbiata%'
+                  OR LOWER(si.product_name) LIKE '%cipollina%'
+                  OR LOWER(si.product_name) LIKE '%pineta%'
+                  OR LOWER(si.product_name) LIKE '%quattro%'
+                  OR LOWER(si.product_name) LIKE '%cuore%'
+                  OR LOWER(si.product_name) LIKE '%plantasia%'
+                  OR LOWER(si.product_name) LIKE '%marinara%'
+                  OR LOWER(si.product_name) LIKE '%calzone%'
+                  OR LOWER(si.product_name) LIKE '%romana%'
+                  OR LOWER(si.product_name) LIKE '%pizzucca%'
+                  THEN 'Pizza'
+                WHEN LOWER(si.product_name) LIKE '%cerveza%'
+                  OR LOWER(si.product_name) LIKE '%gaseosa%'
+                  OR LOWER(si.product_name) LIKE '%vino%'
+                  OR LOWER(si.product_name) LIKE '%agua%'
+                  OR LOWER(si.product_name) LIKE '%coca%'
+                  OR LOWER(si.product_name) LIKE '%sprite%'
+                  OR LOWER(si.product_name) LIKE '%heineken%'
+                  OR LOWER(si.product_name) LIKE '%patagonia%'
+                  OR LOWER(si.product_name) LIKE '%grolsh%'
+                  OR LOWER(si.product_name) LIKE '%amstel%'
+                  OR LOWER(si.product_name) LIKE '%vermut%'
+                  OR LOWER(si.product_name) LIKE '%vermu%'
+                  OR LOWER(si.product_name) LIKE '%gin%'
+                  THEN 'Bebida'
+                WHEN LOWER(si.product_name) LIKE '%tiramisu%'
+                  OR LOWER(si.product_name) LIKE '%postre%'
+                  OR LOWER(si.product_name) LIKE '%flan%'
+                  OR LOWER(si.product_name) LIKE '%helado%'
+                  THEN 'Postres'
+                WHEN LOWER(si.product_name) LIKE '%empanada%'
+                  THEN 'Empanadas'
+                WHEN LOWER(si.product_name) LIKE '%faina%'
+                  THEN 'Pizza'
+                ELSE 'Sin categoría'
+            END
+        )";
     }
 }

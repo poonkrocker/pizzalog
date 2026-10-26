@@ -86,7 +86,7 @@ export function ItemsReportPage() {
       <PageHeader
         eyebrow="Ventas"
         title="Ventas por artículo"
-        description="Rendimiento detallado de cada producto vendido en el período (estilo Loyverse)."
+        description="Rendimiento detallado de cada producto vendido en el período."
       />
 
       <ReportFilterBar

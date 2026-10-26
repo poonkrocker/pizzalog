@@ -47,7 +47,7 @@ export function PaymentsReportPage() {
       <PageHeader
         eyebrow="Ventas"
         title="Ventas por tipo de pago"
-        description="Recaudación separada por Efectivo, Tarjeta, Transferencia y Mercado Pago (estilo Loyverse)."
+        description="Recaudación separada por Efectivo, Tarjeta, Transferencia y Mercado Pago."
       />
 
       <ReportFilterBar

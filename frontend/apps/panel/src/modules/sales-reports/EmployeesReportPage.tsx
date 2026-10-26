@@ -55,7 +55,7 @@ export function EmployeesReportPage() {
       <PageHeader
         eyebrow="Ventas"
         title="Ventas por empleado"
-        description="Monto cobrado, cantidad de tickets y ticket promedio por persona (estilo Loyverse)."
+        description="Monto cobrado, cantidad de tickets y ticket promedio por persona."
       />
 
       <ReportFilterBar

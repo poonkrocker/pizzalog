@@ -691,19 +691,25 @@ class AnalyticsController
                    AND (
                      LOWER(COALESCE(c.name, '')) LIKE '%pizza%'
                      OR LOWER(COALESCE(c.name, '')) LIKE '%pizzer%'
-                     OR (c.id IS NULL AND (
-                         LOWER(si.product_name) LIKE '%pizza%'
-                      OR LOWER(si.product_name) LIKE '%fugazz%'
-                      OR LOWER(si.product_name) LIKE '%muzza%'
-                      OR LOWER(si.product_name) LIKE '%napolitana%'
-                      OR LOWER(si.product_name) LIKE '%calabresa%'
-                      OR LOWER(si.product_name) LIKE '%margherita%'
-                      OR LOWER(si.product_name) LIKE '%margarita%'
-                      OR LOWER(si.product_name) LIKE '%calzone%'
-                      OR LOWER(si.product_name) LIKE '%roquefort%'
-                      OR LOWER(si.product_name) LIKE '%provolone%'
-                      OR LOWER(si.product_name) LIKE '%especial%'
-                     ))
+                     OR LOWER(COALESCE(p.name, si.product_name)) LIKE '%pizza%'
+                     OR LOWER(COALESCE(p.name, si.product_name)) LIKE '%fugazz%'
+                     OR LOWER(COALESCE(p.name, si.product_name)) LIKE '%muzza%'
+                     OR LOWER(COALESCE(p.name, si.product_name)) LIKE '%napolitana%'
+                     OR LOWER(COALESCE(p.name, si.product_name)) LIKE '%calabresa%'
+                     OR LOWER(COALESCE(p.name, si.product_name)) LIKE '%margherita%'
+                     OR LOWER(COALESCE(p.name, si.product_name)) LIKE '%margarita%'
+                     OR LOWER(COALESCE(p.name, si.product_name)) LIKE '%arrabbiata%'
+                     OR LOWER(COALESCE(p.name, si.product_name)) LIKE '%cipollina%'
+                     OR LOWER(COALESCE(p.name, si.product_name)) LIKE '%pineta%'
+                     OR LOWER(COALESCE(p.name, si.product_name)) LIKE '%quattro%'
+                     OR LOWER(COALESCE(p.name, si.product_name)) LIKE '%cuore%'
+                     OR LOWER(COALESCE(p.name, si.product_name)) LIKE '%plantasia%'
+                     OR LOWER(COALESCE(p.name, si.product_name)) LIKE '%marinara%'
+                     OR LOWER(COALESCE(p.name, si.product_name)) LIKE '%calzone%'
+                     OR LOWER(COALESCE(p.name, si.product_name)) LIKE '%romana%'
+                     OR LOWER(COALESCE(p.name, si.product_name)) LIKE '%roquefort%'
+                     OR LOWER(COALESCE(p.name, si.product_name)) LIKE '%provolone%'
+                     OR LOWER(COALESCE(p.name, si.product_name)) LIKE '%especial%'
                    )
                  GROUP BY week_start, COALESCE(CAST(si.product_id AS CHAR), si.product_name)
                  ORDER BY week_start ASC, units DESC";
