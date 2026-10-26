@@ -45,6 +45,10 @@ export function AnalyticsDetailsPage() {
   const marginsQ = useQuery({ queryKey: ['analytics','details-margins',query], queryFn: () => api.analytics.productMargins(query).then(r => r.products as Array<{product_id:number;name:string;unit_cost:number;units:number;revenue:number;profit:number;margin_pct:number|null;has_cost:boolean}>) });
   const combosQ = useQuery({ queryKey: ['analytics','details-combos',query], queryFn: () => api.analytics.winningCombinations(query) });
   const heatQ = useQuery({ queryKey: ['analytics','details-heatmap',query], queryFn: () => api.analytics.timeHeatmap(query).then(r => r.cells) });
+  const weeklyPizzasQ = useQuery({ queryKey: ['analytics','weekly-pizzas',query], queryFn: () => api.analytics.weeklyPizzas(query) });
+  const weeklyProducts = weeklyPizzasQ.data?.products ?? [];
+  const weeklyWeeks = weeklyPizzasQ.data?.weeks ?? [];
+  const maxWeeklyUnits = Math.max(1, ...weeklyWeeks.map(w => w.units));
   const margins = marginsQ.data ?? [];
   const combos = combosQ.data?.product_combinations ?? [];
   const rankedCombos = useMemo(() => [...combos].sort((a, b) => {
@@ -96,6 +100,35 @@ export function AnalyticsDetailsPage() {
       <div style={card}><div style={muted}>Ticket promedio vs. período anterior</div><div style={{fontSize:'1.6rem',fontWeight:800}}>{formatARS(summary.data?.avg_ticket ?? 0)}</div><strong style={{color: ticketTrend === null ? '#777' : ticketTrend >= 0 ? '#16803d' : '#c62828'}}>{ticketTrend === null ? 'Sin base comparable' : `${ticketTrend >= 0 ? '+' : ''}${ticketTrend.toFixed(1)}%`}</strong></div>
       <div style={card}><div style={muted}>Ventas completadas</div><div style={{fontSize:'1.6rem',fontWeight:800}}>{summary.data?.sales_count ?? '—'}</div><strong style={{color: salesTrend === null ? '#777' : salesTrend >= 0 ? '#16803d' : '#c62828'}}>{salesTrend === null ? 'Sin base comparable' : `${salesTrend >= 0 ? '+' : ''}${salesTrend.toFixed(1)}% vs. período anterior`}</strong><div style={muted}>Unidades vendidas: {summary.data?.units_sold ?? '—'}</div></div>
       <div style={card}><div style={muted}>Artículos por ticket</div><div style={{fontSize:'1.6rem',fontWeight:800}}>{currentItemsPerTicket.toFixed(2)}</div><strong style={{color: itemsPerTicketTrend === null ? '#777' : itemsPerTicketTrend >= 0 ? '#16803d' : '#c62828'}}>{itemsPerTicketTrend === null ? 'Sin base comparable' : `${itemsPerTicketTrend >= 0 ? '+' : ''}${itemsPerTicketTrend.toFixed(1)}% vs. período anterior`}</strong><div style={muted}>Unidades contabilizadas / ventas completadas</div></div>
+    </div>
+    <div style={card}>
+      <h3 style={{marginTop:0}}>Pizzas por semana</h3>
+      <p style={muted}>Unidades de pizzas vendidas agrupadas por semana calendario (lunes a domingo). Respeta el rango de fechas y el filtro horario de arriba.</p>
+      {weeklyPizzasQ.isLoading && <p style={muted}>Calculando semanas…</p>}
+      {weeklyPizzasQ.isError && <p role="alert" style={{...muted,color:'#a12622'}}>No se pudo cargar el análisis semanal de pizzas.</p>}
+      {weeklyPizzasQ.data?.best_week && <div style={{border:'1px solid #e5e7eb',borderRadius:8,padding:'.75rem',marginBottom:'.75rem'}}>
+        <div style={muted}>Semana con más unidades</div>
+        <strong>{weeklyPizzasQ.data.best_week.week_start} al {weeklyPizzasQ.data.best_week.week_end}</strong>
+        <div style={{fontSize:'1.4rem',fontWeight:800}}>{weeklyPizzasQ.data.best_week.units.toLocaleString('es-AR')} pizzas</div>
+        <div style={muted}>{weeklyPizzasQ.data.best_week.tickets} tickets · {formatARS(weeklyPizzasQ.data.best_week.revenue)} facturados</div>
+      </div>}
+      {weeklyPizzasQ.data?.weeks.length ? <div style={{overflowX:'auto'}}>
+        <table style={{width:'100%',borderCollapse:'collapse',fontSize:'.86rem'}}>
+          <thead><tr style={{textAlign:'left',borderBottom:'1px solid #ddd'}}><th style={{padding:'.5rem'}}>Semana</th><th style={{padding:'.5rem',textAlign:'right'}}>Pizzas</th><th style={{padding:'.5rem',textAlign:'right'}}>Tickets</th><th style={{padding:'.5rem',textAlign:'right'}}>Facturación</th></tr></thead>
+          <tbody>{weeklyPizzasQ.data.weeks.map(w=><tr key={w.week_start} style={{borderBottom:'1px solid #eee'}}><td style={{padding:'.5rem'}}>{w.week_start} – {w.week_end}</td><td style={{padding:'.5rem',textAlign:'right',fontWeight:700}}>{w.units.toLocaleString('es-AR')}</td><td style={{padding:'.5rem',textAlign:'right'}}>{w.tickets}</td><td style={{padding:'.5rem',textAlign:'right'}}>{formatARS(w.revenue)}</td></tr>)}</tbody>
+        </table>
+      </div> : !weeklyPizzasQ.isLoading && <p style={muted}>No hay ventas de productos identificados como pizza en este período y horario.</p>}
+    </div>
+    <div style={{...card,marginTop:'1rem'}}>
+      <h3 style={{marginTop:0}}>Tendencia por pizza</h3>
+      <p style={muted}>Unidades, facturación y variación entre la primera y la última semana del rango. Se muestran las 30 pizzas con más unidades.</p>
+      {weeklyPizzasQ.data?.products.length ? <div style={{overflowX:'auto'}}>
+        <table style={{width:'100%',borderCollapse:'collapse',fontSize:'.86rem'}}>
+          <thead><tr style={{textAlign:'left',borderBottom:'1px solid #ddd'}}><th style={{padding:'.5rem'}}>Pizza</th><th style={{padding:'.5rem',textAlign:'right'}}>Unidades</th><th style={{padding:'.5rem',textAlign:'right'}}>Tickets</th><th style={{padding:'.5rem',textAlign:'right'}}>Facturación</th><th style={{padding:'.5rem',textAlign:'right'}}>Tendencia</th></tr></thead>
+          <tbody>{weeklyPizzasQ.data.products.map(p=><tr key={p.product_id ?? p.name} style={{borderBottom:'1px solid #eee'}}><td style={{padding:'.5rem',fontWeight:600}}>{p.name}<div style={{display:'flex',gap:3,marginTop:4,flexWrap:'wrap'}}>{weeklyWeeks.map(w=><span key={w.week_start} title={w.week_start+': '+(p.weekly_units[w.week_start] ?? 0)+' u.'} style={{display:'inline-block',height:7,width:Math.max(8,Math.min(28,8+((p.weekly_units[w.week_start] ?? 0)/maxWeeklyUnits*20))),background:(p.weekly_units[w.week_start] ?? 0)>0?'var(--c-accent, #d73828)':'#e5e7eb',borderRadius:2}} />)}</div></td><td style={{padding:'.5rem',textAlign:'right'}}>{p.units.toLocaleString('es-AR')}</td><td style={{padding:'.5rem',textAlign:'right'}}>{p.tickets}</td><td style={{padding:'.5rem',textAlign:'right'}}>{formatARS(p.revenue)}</td><td style={{padding:'.5rem',textAlign:'right',fontWeight:700,color:p.change_pct===null?'#777':p.change_pct>=0?'#16803d':'#c62828'}}>{p.change_pct===null?'Sin base':(p.change_pct>=0?'+':'')+p.change_pct.toFixed(1)+'%'}</td></tr>)}</tbody>
+        </table>
+      </div> : <p style={muted}>Todavía no hay datos suficientes para la tendencia por pizza.</p>}
+      <p style={muted}>Las barras pequeñas muestran las unidades vendidas en cada semana. La variación compara la primera y la última semana con ventas registradas para esa pizza.</p>
     </div>
     <div style={grid}>
       <div style={card}>

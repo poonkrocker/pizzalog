@@ -627,6 +627,101 @@ class AnalyticsController
         ], $stmt->fetchAll())]);
     }
 
+
+    /**
+     * GET /analytics/weekly-pizzas
+     * Compara unidades de pizzas por semana (lunes-domingo) y lista su evolución.
+     * La unidad se atribuye a las líneas de venta; los filtros de turno se
+     * aplican con el mismo criterio que el resto de Analítica.
+     */
+    public function weeklyPizzas(Request $req): void
+    {
+        [$bid, $fromDt, $toDt] = $this->ctx($req);
+        $timeFilter = $this->timeFilterSql($req, 's.created_at');
+        $pdo = Database::pdo();
+
+        // Identificar pizzas mediante la categoría del catálogo; también conservamos
+        // productos históricos cuando su categoría ya no está vinculada.
+        $stmt = $pdo->prepare(
+            'SELECT DATE_SUB(DATE(s.created_at), INTERVAL WEEKDAY(s.created_at) DAY) AS week_start,
+                    si.product_id,
+                    MAX(COALESCE(p.name, si.product_name)) AS product_name,
+                    SUM(si.quantity) AS units,
+                    SUM(si.line_total) AS revenue,
+                    COUNT(DISTINCT si.sale_id) AS tickets
+               FROM sale_items si
+               JOIN sales s ON s.id = si.sale_id
+          LEFT JOIN products p ON p.id = si.product_id
+          LEFT JOIN categories c ON c.id = p.category_id
+              WHERE s.business_id = ? AND s.status = "completed"
+                AND s.created_at BETWEEN ? AND ?' . $timeFilter . '
+                AND si.product_name NOT LIKE "Cobro compartido%"
+                AND (
+                  LOWER(COALESCE(c.name, "")) LIKE "%pizza%"
+                  OR LOWER(COALESCE(c.name, "")) LIKE "%pizzer%"
+                  OR LOWER(COALESCE(si.product_name, "")) LIKE "%pizza%"
+                  OR LOWER(COALESCE(si.product_name, "")) LIKE "%pizz%"
+                )
+              GROUP BY week_start, COALESCE(CAST(si.product_id AS CHAR), si.product_name)
+              ORDER BY week_start ASC, units DESC'
+        );
+        $stmt->execute([$bid, $fromDt, $toDt]);
+
+        $weekly = [];
+        $productTotals = [];
+        foreach ($stmt->fetchAll() as $r) {
+            $week = (string)$r['week_start'];
+            $key = $r['product_id'] !== null ? 'id:' . (int)$r['product_id'] : 'name:' . mb_strtolower((string)$r['product_name']);
+            if (!isset($weekly[$week])) {
+                $weekly[$week] = ['week_start' => $week, 'week_end' => date('Y-m-d', strtotime($week . ' +6 days')), 'units' => 0.0, 'revenue' => 0.0, 'tickets' => 0, 'products' => []];
+            }
+            $product = [
+                'product_id' => $r['product_id'] !== null ? (int)$r['product_id'] : null,
+                'name' => (string)$r['product_name'],
+                'units' => (float)$r['units'],
+                'revenue' => (float)$r['revenue'],
+                'tickets' => (int)$r['tickets'],
+            ];
+            $weekly[$week]['units'] += $product['units'];
+            $weekly[$week]['revenue'] += $product['revenue'];
+            $weekly[$week]['tickets'] += $product['tickets'];
+            $weekly[$week]['products'][] = $product;
+
+            if (!isset($productTotals[$key])) {
+                $productTotals[$key] = ['product_id' => $product['product_id'], 'name' => $product['name'], 'units' => 0.0, 'revenue' => 0.0, 'tickets' => 0, 'weeks' => []];
+            }
+            $productTotals[$key]['units'] += $product['units'];
+            $productTotals[$key]['revenue'] += $product['revenue'];
+            $productTotals[$key]['tickets'] += $product['tickets'];
+            $productTotals[$key]['weeks'][$week] = $product['units'];
+        }
+
+        $weeks = array_values($weekly);
+        usort($weeks, static fn(array $a, array $b): int => strcmp($a['week_start'], $b['week_start']));
+        $bestWeek = null;
+        foreach ($weeks as $week) {
+            if ($bestWeek === null || $week['units'] > $bestWeek['units']) $bestWeek = $week;
+            usort($week['products'], static fn(array $a, array $b): int => $b['units'] <=> $a['units']);
+        }
+        $products = array_values(array_map(static function (array $p): array {
+            $series = $p['weeks'];
+            unset($p['weeks']);
+            $values = array_values($series);
+            $first = $values[0] ?? 0;
+            $last = $values[count($values) - 1] ?? 0;
+            $p['weekly_units'] = $series;
+            $p['change_pct'] = $first > 0 ? round(($last - $first) / $first * 100, 1) : null;
+            return $p;
+        }, $productTotals));
+        usort($products, static fn(array $a, array $b): int => $b['units'] <=> $a['units']);
+
+        Response::ok([
+            'weeks' => $weeks,
+            'products' => array_slice($products, 0, 30),
+            'best_week' => $bestWeek,
+        ]);
+    }
+
     // -----------------------------------------------------------------
 
     /**
