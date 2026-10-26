@@ -106,6 +106,7 @@ $router->get('/analytics/time-heatmap', [AnalyticsController::class, 'timeHeatma
 $router->get('/analytics/time-preferences', [AnalyticsController::class, 'timePreferences'], [$auth, $manage]);
 $router->put('/analytics/time-preferences', [AnalyticsController::class, 'saveTimePreferences'], [$auth, $manage]);
 $router->get('/analytics/sales-over-time', [AnalyticsController::class, 'salesOverTime'], [$auth, $manage]);
+$router->get('/analytics/weekly-pizzas', [AnalyticsController::class, 'weeklyPizzas'], [$auth, $manage]);
 
 // --- Producción / Masas / Escandallos (Calculadora) -------------------
 $router->get('/production/dough-profiles', [ProductionController::class, 'doughProfiles'], [$auth]);
