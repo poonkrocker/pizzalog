@@ -199,8 +199,8 @@ button { font-family: inherit; }
   min-height: 60px;
   justify-content: center;
 }
-.nav-item__icon { font-size: 20px; line-height: 1; }
-.nav-item.active { color: var(--ocre); }
+.nav-item__icon { display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; line-height: 1; }
+.nav-item.active { color: #C92D32; font-weight: 700; }
 .nav-item--soon { opacity: 0.4; }
 
 /* ---------- Home ---------- */

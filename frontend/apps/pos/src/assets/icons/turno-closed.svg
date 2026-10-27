@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#B95B56" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M5 8.5 12 2.8l7 5.7"/><circle cx="12" cy="2.8" r=".65" fill="#B95B56" stroke="none"/>
+  <rect x="3.8" y="8.5" width="16.4" height="11.3" rx="1.4"/>
+  <text x="12" y="15.7" fill="#B95B56" stroke="none" font-family="Arial, Helvetica, sans-serif" font-size="4.15" font-weight="600" text-anchor="middle">CLOSED</text>
+</svg>

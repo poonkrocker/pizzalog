@@ -132,23 +132,33 @@ export function cashCloseTicket(input: {
   return t.toString();
 }
 
-/** Comanda de cocina: qué preparar y para qué cuenta. */
+/** Comanda de cocina / barra: qué preparar y para qué cuenta. */
 export function comandaTicket(input: {
   place: string; // "Barra 1", "Mostrador"...
   account?: string; // nombre de la cuenta ("Juan")
   lines: Array<{ qty: number; label: string; note?: string }>;
   width: number;
+  groupTitle?: string; // e.g. "COCINA", "BARRA / BEBIDAS"
+  roundNumber?: number;
+  isReprint?: boolean;
 }): string {
   const t = new Esc(input.width);
   t.init();
 
-  t.align('center').bold(true).size(2).line('COMANDA').size(1).bold(false);
-  t.line(new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }));
+  t.align('center').bold(true).size(2);
+  if (input.isReprint) {
+    t.line('** REIMPRESION **');
+  }
+  t.line(input.groupTitle ? `COMANDA - ${input.groupTitle.toUpperCase()}` : 'COMANDA');
+  t.size(1).bold(false);
+
+  const timeStr = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+  t.line(timeStr + (input.roundNumber ? ` · Ronda #${input.roundNumber}` : ''));
   t.align('left').hr('=');
 
   t.bold(true).size(2).line(input.place).size(1).bold(false);
   if (input.account) t.line(`Cuenta: ${input.account}`);
-  t.hr();
+  t.hr('-');
 
   for (const l of input.lines) {
     t.bold(true).size('tall').line(`${l.qty} x ${l.label}`).size(1).bold(false);
@@ -157,6 +167,84 @@ export function comandaTicket(input: {
   }
 
   t.cut();
+  return t.toString();
+}
+
+/** Ticket de Cuenta / Pre-ticket de mesa (para entregar al cliente antes de cobrar). */
+export function accountTicket(input: {
+  businessName: string;
+  place: string;
+  account?: string;
+  lines: Array<{
+    qty: number;
+    label: string;
+    unitPrice: number;
+    originalPrice?: number;
+    discountPct?: number;
+    note?: string;
+  }>;
+  subtotal: number;
+  discount?: number;
+  total: number;
+  width: number;
+  fiscalData?: {
+    enabled?: boolean;
+    cuit?: string;
+    iibb?: string;
+    ivaCondition?: string;
+    address?: string;
+    fantasyName?: string;
+  };
+  footerNote?: string;
+}): string {
+  const t = new Esc(input.width);
+  t.init();
+
+  // Encabezado
+  t.align('center')
+    .bold(true)
+    .size(2)
+    .line(input.fiscalData?.fantasyName || input.businessName)
+    .size(1)
+    .bold(false);
+
+  if (input.fiscalData?.enabled) {
+    if (input.fiscalData.address) t.line(input.fiscalData.address);
+    if (input.fiscalData.cuit) t.line(`CUIT: ${input.fiscalData.cuit}`);
+    if (input.fiscalData.ivaCondition) t.line(`IVA: ${input.fiscalData.ivaCondition}`);
+    if (input.fiscalData.iibb) t.line(`Ing. Brutos: ${input.fiscalData.iibb}`);
+  }
+
+  t.bold(true).line('CONTROL DE MESA / PRE-CUENTA').bold(false);
+  t.line(new Date().toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' }));
+  t.align('left').hr('=');
+
+  t.bold(true).line(`Ubicacion: ${input.place}`).bold(false);
+  if (input.account) t.line(`Cuenta: ${input.account}`);
+  t.hr('-');
+
+  for (const l of input.lines) {
+    const lineTotal = l.unitPrice * l.qty;
+    t.row(`${l.qty} x ${l.label}`, money(lineTotal));
+    if (l.discountPct && l.discountPct > 0) {
+      t.wrapped(`  (Desc. ${Math.round(l.discountPct)}% incluido)`, 2);
+    }
+    if (l.note) t.wrapped(`  ${l.note}`, 2);
+  }
+
+  t.hr('-');
+  if (input.discount && input.discount > 0) {
+    t.row('Subtotal', money(input.subtotal));
+    t.row('Descuento', '-' + money(input.discount));
+  }
+  t.bold(true).size('tall').row('TOTAL', money(input.total)).size(1).bold(false);
+  t.hr('=');
+
+  t.align('center');
+  t.line('DOCUMENTO NO VALIDO COMO FACTURA');
+  t.line(input.footerNote || '¡Muchas gracias por su visita!');
+  t.cut();
+
   return t.toString();
 }
 

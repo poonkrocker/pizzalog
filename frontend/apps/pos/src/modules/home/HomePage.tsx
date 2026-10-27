@@ -114,8 +114,8 @@ export function HomePage() {
           }}
         >
           <span style={{ fontSize: '32px' }}>🍽️</span>
-          <strong style={{ fontSize: '16px', color: 'var(--text)' }}>Mesas & Salón</strong>
-          <small style={{ color: 'var(--muted)', fontSize: '12px' }}>Cuentas y comandas</small>
+          <strong style={{ fontSize: '16px', color: 'var(--text)' }}>Cuentas y Comandas</strong>
+          <small style={{ color: 'var(--muted)', fontSize: '12px' }}>Mesas y salón</small>
         </div>
 
         {/* Turno & Caja */}

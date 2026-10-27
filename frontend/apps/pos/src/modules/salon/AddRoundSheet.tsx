@@ -6,7 +6,7 @@ import { VariantPicker } from '@/modules/sale/VariantPicker';
 import { PriceKeypad } from '@/modules/sale/PriceKeypad';
 import { useAddRound } from './hooks';
 import { comandaTicket } from '@/print/tickets';
-import { getPrinterSettings, isNative, tryPrint } from '@/print/printer';
+import { dispatchComandas, getPrinterSettings, isNative, tryPrint } from '@/print/printer';
 
 function isExtrasCategoryName(name: string): boolean {
   return /^(extras?|agregados?|adicionales?)(\s+.*)?$/i.test(name.trim());
@@ -86,14 +86,28 @@ export function AddRoundSheet({
     });
   }
 
-  function add(product: Product) {
-    if (product.has_variants === 1) {
+  function add(product: Product, isLongPress = false) {
+    if (isLongPress) {
+      // Tap sostenido: abrir selector de opciones (queso vegano) y extras
       setVariantFor(product);
       return;
     }
     if (product.is_open_price === 1) {
       setKeypadFor(product);
       return;
+    }
+    if (product.has_variants === 1) {
+      // Tap común: agregar directamente con queso común (sin extras)
+      const variants = (product.variants ?? []).filter((v) => v.is_active === 1);
+      const defaultVariant =
+        variants.find((v) => !/vegan/i.test(v.label) && /com[uú]n|clasic|tradicional/i.test(v.label)) ??
+        variants.find((v) => !/vegan/i.test(v.label)) ??
+        variants[0];
+
+      if (defaultVariant) {
+        pickVariant(product, defaultVariant, []);
+        return;
+      }
     }
     addLine({ key: `p${product.id}`, product, quantity: 1, unitPrice: Number(product.price) || 0, label: product.name });
   }
@@ -165,15 +179,17 @@ export function AddRoundSheet({
         })),
       });
       const settings = await getPrinterSettings();
-      if (settings.autoComanda && isNative()) {
-        void tryPrint(
-          comandaTicket({
-            place: placeLabel || 'Salón',
-            account: accountLabel,
-            lines: lines.map((l) => ({ qty: l.quantity, label: l.label })),
-            width: settings.width,
-          }),
-        );
+      if (settings.autoComanda) {
+        void dispatchComandas({
+          place: placeLabel || 'Salón',
+          account: accountLabel,
+          lines: lines.map((l) => ({
+            qty: l.quantity,
+            label: l.label,
+            categoryId: l.product.category_id,
+            categoryName: categories.find((c) => c.id === l.product.category_id)?.name,
+          })),
+        });
       }
       onClose();
     } catch {

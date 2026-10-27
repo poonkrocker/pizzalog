@@ -10,7 +10,7 @@ import { SendToAccountSheet } from './SendToAccountSheet';
 import { HalfHalfModal } from './HalfHalfModal';
 import { config } from '@/lib/config';
 import { saleTicket, comandaTicket } from '@/print/tickets';
-import { getPrinterSettings, isNative, tryPrint } from '@/print/printer';
+import { dispatchComandas, getPrinterSettings, isNative, tryPrint } from '@/print/printer';
 import { useCatalog, useCheckout, type CartLine } from './hooks';
 
 type OrderChannel = 'here' | 'takeaway' | 'delivery';
@@ -162,14 +162,28 @@ export function SalePage() {
     });
   }
 
-  function add(product: Product) {
-    if (product.has_variants === 1) {
+  function add(product: Product, isLongPress = false) {
+    if (isLongPress) {
+      // Tap sostenido: abrir selector de opciones (queso vegano) y extras
       setVariantFor(product);
       return;
     }
     if (product.is_open_price === 1) {
       setKeypadFor(product);
       return;
+    }
+    if (product.has_variants === 1) {
+      // Tap común: agregar directamente con queso común (sin extras)
+      const variants = (product.variants ?? []).filter((v) => v.is_active === 1);
+      const defaultVariant =
+        variants.find((v) => !/vegan/i.test(v.label) && /com[uú]n|clasic|tradicional/i.test(v.label)) ??
+        variants.find((v) => !/vegan/i.test(v.label)) ??
+        variants[0];
+
+      if (defaultVariant) {
+        pickVariant(product, defaultVariant, []);
+        return;
+      }
     }
     addLine({
       key: `p${product.id}`,
@@ -323,6 +337,23 @@ export function SalePage() {
         </div>
 
         <div className="cat-tabs">
+          {categories.map((c) => (
+            <button
+              key={c.id}
+              className={`cat-tab${activeTab === String(c.id) ? ' cat-tab--active' : ''}`}
+              onClick={() => setActiveTab(String(c.id))}
+            >
+              {c.name}
+            </button>
+          ))}
+          {hasUncategorized && (
+            <button
+              className={`cat-tab${activeTab === 'otros' ? ' cat-tab--active' : ''}`}
+              onClick={() => setActiveTab('otros')}
+            >
+              Otros
+            </button>
+          )}
           <button
             type="button"
             className="cat-tab"
@@ -350,23 +381,6 @@ export function SalePage() {
               title="Agregar un extra a una pizza del pedido"
             >
               🧀 + Extra a pizza
-            </button>
-          )}
-          {categories.map((c) => (
-            <button
-              key={c.id}
-              className={`cat-tab${activeTab === String(c.id) ? ' cat-tab--active' : ''}`}
-              onClick={() => setActiveTab(String(c.id))}
-            >
-              {c.name}
-            </button>
-          ))}
-          {hasUncategorized && (
-            <button
-              className={`cat-tab${activeTab === 'otros' ? ' cat-tab--active' : ''}`}
-              onClick={() => setActiveTab('otros')}
-            >
-              Otros
             </button>
           )}
         </div>
@@ -468,16 +482,19 @@ export function SalePage() {
           onDone={(accountName, placeLabel) => {
             setToAccount(false);
             void getPrinterSettings().then((settings) => {
-              const payload = comandaTicket({
-                place: placeLabel,
-                account: accountName,
-                lines: cart.map((l) => ({ qty: l.quantity, label: l.label })),
-                width: settings.width,
-              });
-              setLastPrint(payload);
-              setPrintMsg(null);
-              if (settings.autoComanda && isNative()) {
-                void tryPrint(payload).then((err) => setPrintMsg(err));
+              if (settings.autoComanda) {
+                void dispatchComandas({
+                  place: placeLabel,
+                  account: accountName,
+                  lines: cart.map((l) => ({
+                    qty: l.quantity,
+                    label: l.label,
+                    categoryId: l.product.category_id,
+                    categoryName: categories.find((c) => c.id === l.product.category_id)?.name,
+                  })),
+                }).then((res) => {
+                  if (res.error) setPrintMsg(res.error);
+                });
               }
               clearCart();
               setResult({ kind: 'round', detail: accountName, withoutCash: !isCashOpen });

@@ -5,6 +5,14 @@ import { useOnline } from '@/lib/network';
 import { useSync } from '@/offline/sync';
 import { useCurrentCashSession } from '@/modules/cash/hooks';
 import { getPrinterSettings } from '@/print/printer';
+import {
+  IconInicio,
+  IconTurno,
+  IconVenta,
+  IconCuentas,
+  IconCocina,
+  IconAjustes,
+} from './NavIcons';
 
 export function Shell() {
   const { user, logout } = useAuth();
@@ -13,6 +21,15 @@ export function Shell() {
   const { pendingCount } = useSync();
   const { data: cashSession } = useCurrentCashSession();
   const navigate = useNavigate();
+
+  const [business, setBusiness] = useState<{ name?: string; logo_url?: string | null } | null>(() => {
+    try {
+      const cached = localStorage.getItem('pizzalog_cached_business');
+      return cached ? JSON.parse(cached) : null;
+    } catch {
+      return null;
+    }
+  });
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [useDigitalKds, setUseDigitalKds] = useState(true);
@@ -31,6 +48,15 @@ export function Shell() {
     void api.business
       .get()
       .then((r) => {
+        if (r.business) {
+          setBusiness({ name: r.business.name, logo_url: r.business.logo_url });
+          try {
+            localStorage.setItem(
+              'pizzalog_cached_business',
+              JSON.stringify({ name: r.business.name, logo_url: r.business.logo_url }),
+            );
+          } catch {}
+        }
         if (r.business.use_digital_kds !== undefined) {
           setUseDigitalKds(r.business.use_digital_kds === 1);
         }
@@ -88,7 +114,29 @@ export function Shell() {
   return (
     <div className="shell">
       <header className="shell-top">
-        <span className="shell-brand">Pizzalog</span>
+        <div className="shell-brand-wrap" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <img
+            src="/brand/pizzalog-logo-horizontal-cream.svg"
+            alt="Pizzalog"
+            style={{ height: '26px', width: 'auto', display: 'block' }}
+          />
+          {business?.logo_url && (
+            <>
+              <span style={{ width: '1px', height: '18px', background: 'var(--line)', opacity: 0.8 }} />
+              <img
+                src={business.logo_url}
+                alt={business.name || 'Local'}
+                style={{
+                  maxHeight: '26px',
+                  maxWidth: '85px',
+                  objectFit: 'contain',
+                  borderRadius: '4px',
+                  display: 'block',
+                }}
+              />
+            </>
+          )}
+        </div>
         <div className="shell-top__right">
           {pendingCount > 0 && (
             <span className="pending-pill">{pendingCount} por enviar</span>
@@ -277,29 +325,41 @@ export function Shell() {
 
       <nav className="shell-nav">
         <NavLink to="/" end className="nav-item">
-          <span className="nav-item__icon">▦</span>
+          <span className="nav-item__icon">
+            <IconInicio />
+          </span>
           Inicio
         </NavLink>
         <NavLink to="/caja" className="nav-item">
-          <span className="nav-item__icon">💵</span>
+          <span className="nav-item__icon">
+            <IconTurno isOpen={isCashOpen} />
+          </span>
           Turno
         </NavLink>
         <NavLink to="/venta" className="nav-item">
-          <span className="nav-item__icon">＄</span>
+          <span className="nav-item__icon">
+            <IconVenta />
+          </span>
           Venta
         </NavLink>
         <NavLink to="/salon" className="nav-item">
-          <span className="nav-item__icon">▤</span>
-          Salón
+          <span className="nav-item__icon">
+            <IconCuentas />
+          </span>
+          Cuentas
         </NavLink>
         {useDigitalKds && (
           <NavLink to="/cocina" className="nav-item">
-            <span className="nav-item__icon">♨</span>
+            <span className="nav-item__icon">
+              <IconCocina />
+            </span>
             Cocina
           </NavLink>
         )}
         <NavLink to="/ajustes" className="nav-item">
-          <span className="nav-item__icon">⚙</span>
+          <span className="nav-item__icon">
+            <IconAjustes />
+          </span>
           Ajustes
         </NavLink>
       </nav>

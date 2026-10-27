@@ -2,6 +2,9 @@ import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { formatARS, type CloseSplit, type PaymentSlice, type RoundItem } from '@pizzalog/shared';
 import { useCurrentCashSession } from '@/modules/cash/hooks';
+import { dispatchComandas, getPrinterSettings, tryPrint } from '@/print/printer';
+import { accountTicket } from '@/print/tickets';
+import { useCatalog } from '@/modules/sale/hooks';
 import { AddRoundSheet } from './AddRoundSheet';
 import {
   useCancelSession,
@@ -29,6 +32,76 @@ export function SessionPage() {
   const cashQuery = useCurrentCashSession();
   const isCashOpen = cashQuery.isLoading ? true : cashQuery.data !== null && cashQuery.data !== undefined;
   const navigate = useNavigate();
+  const catalog = useCatalog();
+  const categories = catalog.data?.categories ?? [];
+
+  async function handleReprintRound(round: any) {
+    try {
+      const activeItems = (round.items ?? []).filter((it: any) => it.status === 'ordered');
+      if (activeItems.length === 0) {
+        alert('Esta comanda no contiene productos activos.');
+        return;
+      }
+      const res = await dispatchComandas({
+        place: tablesLabel || 'Salón',
+        account: s.label || undefined,
+        roundNumber: round.number,
+        isReprint: true,
+        lines: activeItems.map((it: any) => {
+          const p = catalog.data?.products?.find((prod) => prod.id === it.product_id);
+          return {
+            qty: it.qty,
+            label: it.name,
+            note: it.note ?? undefined,
+            categoryId: p ? p.category_id : null,
+            categoryName: p?.category_id ? categories.find((c) => c.id === p.category_id)?.name : undefined,
+          };
+        }),
+      });
+      if (res.error) {
+        alert('Aviso de comanda: ' + res.error);
+      }
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Error al reimprimir');
+    }
+  }
+
+  async function handlePrintAccount() {
+    try {
+      const settings = await getPrinterSettings();
+      let cachedBiz: any = null;
+      try {
+        const raw = localStorage.getItem('pizzalog_cached_business');
+        if (raw) cachedBiz = JSON.parse(raw);
+      } catch {}
+
+      const ticket = accountTicket({
+        businessName: cachedBiz?.name || 'Pizzalog',
+        place: tablesLabel || 'Mesa / Salón',
+        account: s.label || undefined,
+        lines: allActiveItems.map((it) => ({
+          qty: it.qty,
+          label: it.name,
+          unitPrice: it.unit_price,
+          originalPrice: it.original_unit_price ?? undefined,
+          discountPct: it.discount_pct ?? undefined,
+          note: it.note ?? undefined,
+        })),
+        subtotal: total,
+        discount: discountAmount,
+        total: finalTotal,
+        width: settings.width,
+        fiscalData: settings.fiscalData,
+      });
+
+      const err = await tryPrint(ticket);
+      if (err) {
+        alert('Aviso al imprimir cuenta: ' + err);
+      }
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Error al imprimir cuenta');
+    }
+  }
 
   const [addOpen, setAddOpen] = useState(false);
   const [payOpen, setPayOpen] = useState(false);
@@ -206,7 +279,7 @@ export function SessionPage() {
     <div className="session">
       <div className="session__head">
         <button className="back-btn" onClick={() => navigate('/salon')}>
-          ‹ Salón
+          ‹ Cuentas
         </button>
         <div className="session__title-wrap">
           <h1 className="session__table">{accountTitle}</h1>
@@ -226,7 +299,24 @@ export function SessionPage() {
         ) : (
           rounds.map((r) => (
             <div key={r.id} className="round-card">
-              <div className="round-card__head">Comanda {r.number}</div>
+              <div className="round-card__head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>Comanda {r.number}</span>
+                <button
+                  type="button"
+                  className="t-btn"
+                  style={{
+                    fontSize: '11px',
+                    minHeight: '26px',
+                    padding: '2px 8px',
+                    background: 'rgba(255, 255, 255, 0.08)',
+                    border: '1px solid var(--line)',
+                  }}
+                  onClick={() => void handleReprintRound(r)}
+                  title="Reimprimir esta comanda"
+                >
+                  🖨️ Reimprimir
+                </button>
+              </div>
               {r.items.map((it) => {
                 const hasDisc = Boolean(it.discount_pct && it.discount_pct > 0);
                 const origTotal =
@@ -301,15 +391,17 @@ export function SessionPage() {
           <button className="t-btn method-btn" onClick={() => setAddOpen(true)}>
             + Comanda
           </button>
-          {s.status === 'open' && (
-            <button
-              className="t-btn method-btn"
-              disabled={requestBill.isPending}
-              onClick={() => requestBill.mutate(sid)}
-            >
-              Pedir cuenta
-            </button>
-          )}
+          <button
+            className="t-btn method-btn"
+            disabled={total <= 0}
+            onClick={() => {
+              if (s.status === 'open') requestBill.mutate(sid);
+              void handlePrintAccount();
+            }}
+            title="Imprimir pre-cuenta en comanderas"
+          >
+            🖨️ Cuenta
+          </button>
           <button className="t-btn method-btn method-btn--danger" onClick={() => void doCancel()}>
             Cancelar cuenta
           </button>
