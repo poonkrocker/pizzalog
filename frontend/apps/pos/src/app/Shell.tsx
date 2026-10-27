@@ -18,7 +18,7 @@ import {
 
 export function Shell() {
   const { user, logout } = useAuth();
-  const { resolved } = useTheme();
+  const { resolved, toggle } = useTheme();
   const api = useApi();
   const online = useOnline();
   const { pendingCount } = useSync();
@@ -165,6 +165,25 @@ export function Shell() {
             <span className="net-dot" />
             {online ? 'En línea' : 'Sin conexión'}
           </span>
+
+          <button
+            type="button"
+            onClick={toggle}
+            style={{
+              background: 'var(--surface-2)',
+              border: '1px solid var(--line)',
+              borderRadius: '10px',
+              cursor: 'pointer',
+              padding: '6px 9px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              fontSize: '15px',
+              lineHeight: 1,
+            }}
+            title={`Cambiar a tema ${resolved === 'dark' ? 'claro' : 'oscuro'}`}
+          >
+            {resolved === 'dark' ? '☀️' : '🌙'}
+          </button>
 
           <div ref={menuRef} style={{ position: 'relative' }}>
             <button

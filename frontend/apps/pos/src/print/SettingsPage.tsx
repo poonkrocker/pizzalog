@@ -12,6 +12,7 @@ import {
   type PrinterSettings,
 } from './printer';
 import { useCatalog } from '@/modules/sale/hooks';
+import { ThemeToggle } from '@/app/ThemeToggle';
 import {
   DEFAULT_API_URL,
   getStoredApiUrl,
@@ -169,6 +170,17 @@ export function SettingsPage() {
   return (
     <div className="settings">
       <h1 className="page-title">Ajustes y Comanderas</h1>
+
+      {/* SECCIÓN: APARIENCIA Y TEMA */}
+      <section className="settings__block">
+        <h2 className="settings__subtitle">🎨 Apariencia y Tema Visual</h2>
+        <p className="muted-text" style={{ fontSize: 13, marginTop: 4 }}>
+          Elegí la apariencia visual para operar en este dispositivo:
+        </p>
+        <div style={{ marginTop: 12 }}>
+          <ThemeToggle />
+        </div>
+      </section>
 
       {/* SECCIÓN: MÚLTIPLES COMANDERAS */}
       <section className="settings__block">
@@ -523,6 +535,32 @@ export function SettingsPage() {
                 onChange={(e) =>
                   void update({
                     fiscalData: { ...settings.fiscalData, iibb: e.target.value },
+                  })
+                }
+              />
+            </label>
+            <label className="t-field" style={{ gridColumn: 'span 2' }}>
+              <span>Dirección fiscal / Local</span>
+              <input
+                type="text"
+                value={settings.fiscalData?.address ?? ''}
+                placeholder="27 de Abril 798, Córdoba"
+                onChange={(e) =>
+                  void update({
+                    fiscalData: { ...settings.fiscalData, address: e.target.value },
+                  })
+                }
+              />
+            </label>
+            <label className="t-field" style={{ gridColumn: 'span 2' }}>
+              <span>Mensaje de pie de cuenta / ticket</span>
+              <input
+                type="text"
+                value={settings.fiscalData?.footerNote ?? ''}
+                placeholder="¡Muchas gracias por su visita! Seguinos en @arrabbiata.pizza"
+                onChange={(e) =>
+                  void update({
+                    fiscalData: { ...settings.fiscalData, footerNote: e.target.value },
                   })
                 }
               />

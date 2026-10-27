@@ -92,6 +92,7 @@ export function SessionPage() {
         total: finalTotal,
         width: settings.width,
         fiscalData: settings.fiscalData,
+        footerNote: settings.fiscalData?.footerNote,
       });
 
       const err = await tryPrint(ticket);

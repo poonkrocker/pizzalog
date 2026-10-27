@@ -29,6 +29,7 @@ export interface PrinterSettings {
     ivaCondition?: string;
     fantasyName?: string;
     address?: string;
+    footerNote?: string;
   };
 }
 
