@@ -12,6 +12,7 @@ import { config } from '@/lib/config';
 import { saleTicket, comandaTicket } from '@/print/tickets';
 import { dispatchComandas, getPrinterSettings, isNative, tryPrint } from '@/print/printer';
 import { useCatalog, useCheckout, type CartLine } from './hooks';
+import { CategoryIcon } from '@/assets/icons/CategoryIcon';
 
 type OrderChannel = 'here' | 'takeaway' | 'delivery';
 
@@ -343,7 +344,8 @@ export function SalePage() {
               className={`cat-tab${activeTab === String(c.id) ? ' cat-tab--active' : ''}`}
               onClick={() => setActiveTab(String(c.id))}
             >
-              {c.name}
+              <CategoryIcon name={c.name} size={28} className="category-icon" />
+              <span className="cat-tab__label">{c.name}</span>
             </button>
           ))}
           {hasUncategorized && (
@@ -351,7 +353,8 @@ export function SalePage() {
               className={`cat-tab${activeTab === 'otros' ? ' cat-tab--active' : ''}`}
               onClick={() => setActiveTab('otros')}
             >
-              Otros
+              <CategoryIcon name="Sin categoría" size={28} className="category-icon" />
+              <span className="cat-tab__label">Otros</span>
             </button>
           )}
           <button
@@ -360,7 +363,8 @@ export function SalePage() {
             style={{ background: 'var(--c-accent, #e63946)', color: '#fff', fontWeight: 700 }}
             onClick={() => setShowHalfHalf(true)}
           >
-            🍕 Mitad y Mitad
+            <span className="cat-tab__glyph" aria-hidden="true">½</span>
+            <span className="cat-tab__label">Mitad y Mitad</span>
           </button>
           {extraProducts.length > 0 && (
             <button
@@ -380,7 +384,8 @@ export function SalePage() {
               }}
               title="Agregar un extra a una pizza del pedido"
             >
-              🧀 + Extra a pizza
+              <span className="cat-tab__glyph" aria-hidden="true">+</span>
+            <span className="cat-tab__label">Extra a pizza</span>
             </button>
           )}
         </div>
