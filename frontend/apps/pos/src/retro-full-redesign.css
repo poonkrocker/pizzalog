@@ -352,3 +352,24 @@ h1, h2, h3, p, label, span, strong, small { text-rendering: optimizeLegibility; 
   .retro-page-heading h1 { font-size: 25px; }
   .retro-page-heading__icon { width: 32px; height: 32px; }
 }
+
+.cash-module .page-title::before {
+  content: '';
+  display: inline-block;
+  width: 34px;
+  height: 34px;
+  margin-right: 8px;
+  vertical-align: -7px;
+  background: url('/category-icons/module-register.svg') center / contain no-repeat;
+  image-rendering: pixelated;
+}
+.settings .page-title::before {
+  content: '';
+  display: inline-block;
+  width: 32px;
+  height: 32px;
+  margin-right: 8px;
+  vertical-align: -7px;
+  background: url('/brand/pizzalog-mark.svg') center / contain no-repeat;
+  image-rendering: pixelated;
+}
