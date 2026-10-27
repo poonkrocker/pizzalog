@@ -6,6 +6,8 @@ import { AuthProvider } from '@/lib/auth';
 import { SyncProvider } from '@/offline/sync';
 import { App } from '@/app/App';
 import './styles.css';
+import './theme-prototype.css';
+import { ThemeProvider } from '@/app/ThemeProvider';
 
 const queryClient = new QueryClient();
 
@@ -15,6 +17,7 @@ if (!root) throw new Error('No se encontró #root');
 createRoot(root).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
+      <ThemeProvider>
       <NetworkProvider>
         <AuthProvider>
           <SyncProvider>
@@ -22,6 +25,7 @@ createRoot(root).render(
           </SyncProvider>
         </AuthProvider>
       </NetworkProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   </StrictMode>,
 );
