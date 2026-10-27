@@ -35,3 +35,7 @@ Este documento acompaña el inventario de recursos. No modifica la lógica de la
 - Respetar safe areas, scroll independiente de catálogo y carrito, teclado virtual y pantallas de 320 px de ancho.
 - Conservar la interacción de pulsación prolongada para variantes mientras no se pruebe una alternativa equivalente; añadir un indicador comprensible.
 - No inventar productos/precios reales en la implementación; usar datos reales del catálogo y mocks sólo en las capturas de diseño.
+
+
+## Estado del prototipo de trabajo
+La rama `design/mobile-pos-retro-prototype` contiene un primer cableado de temas claro/oscuro/sistema, un selector de apariencia en el menú de usuario, iconos de categorías SVG servidos localmente y un carrito contraíble en móvil. Todavía requiere validación de build y pruebas reales en un dispositivo antes de considerarse listo.
