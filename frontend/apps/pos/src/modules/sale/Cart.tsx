@@ -72,8 +72,9 @@ export function Cart({
   }
 
   return (
-    <div className={`cart${expandedOnMobile ? ' cart--expanded' : ' cart--collapsed'}`}>
+    <div className={`cart${expandedOnMobile ? ' cart--expanded' : ' cart--collapsed'}${lines.length === 0 ? ' cart--empty' : ''}`}>
       <div className="cart__head">
+        <span className="cart__desktop-title">Pedido</span>
         <button
           type="button"
           className="cart__toggle"
