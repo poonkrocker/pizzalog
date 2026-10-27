@@ -307,3 +307,34 @@ h1, h2, h3, p, label, span, strong, small { text-rendering: optimizeLegibility; 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
 }
+
+/* Product cards place a tiny local pixel illustration beside name and price */
+.product-btn {
+  display: grid !important;
+  grid-template-columns: 42px minmax(0,1fr) !important;
+  grid-template-rows: 1fr !important;
+  align-items: center !important;
+  justify-content: stretch !important;
+  text-align: left !important;
+}
+.product-btn__illustration { width: 38px; height: 38px; display: grid; place-items: center; align-self: center; }
+.product-btn__illustration img { width: 38px; height: 38px; object-fit: contain; image-rendering: pixelated; }
+.product-btn__details { display: flex; min-width: 0; flex-direction: column; align-items: flex-start; gap: 2px; }
+.product-btn__name { overflow-wrap: anywhere; }
+.product-btn__details > span[style*="Mantener"] { font-size: 10px !important; line-height: 1.1; }
+.shell-wordmark {
+  display: inline-block;
+  color: var(--red);
+  font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif;
+  font-size: 25px;
+  font-weight: 800;
+  letter-spacing: -.02em;
+  line-height: 1;
+  text-shadow: 1px 1px 0 rgba(95,28,18,.12);
+}
+.channel-btn__icon img { width: 25px; height: 25px; object-fit: contain; image-rendering: pixelated; }
+@media (max-width: 819px) {
+  .product-btn { grid-template-columns: 34px minmax(0,1fr) !important; padding: 7px !important; }
+  .product-btn__illustration, .product-btn__illustration img { width: 32px; height: 32px; }
+  .shell-wordmark { font-size: 23px; }
+}
