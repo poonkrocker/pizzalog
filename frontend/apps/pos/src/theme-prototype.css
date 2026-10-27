@@ -165,3 +165,10 @@ body { transition: background-color .18s ease, color .18s ease; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
+
+.cart__desktop-title { display: inline; }
+@media (max-width: 819px) {
+  .cart__desktop-title { display: none; }
+  .cart--empty .cart__foot { display: none; }
+  .cart--empty .cart__toggle-action { display: none; }
+}
