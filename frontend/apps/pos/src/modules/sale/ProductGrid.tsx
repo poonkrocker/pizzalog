@@ -1,7 +1,6 @@
 import { useRef } from 'react';
 import { formatARS, type Product } from '@pizzalog/shared';
 import { CategoryIcon } from '@/assets/icons/CategoryIcon';
-import { categoryIconSrc } from '@/assets/icons/categoryIconMap';
 
 interface Props {
   products: Product[];
