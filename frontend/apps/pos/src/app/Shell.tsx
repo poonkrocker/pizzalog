@@ -6,6 +6,7 @@ import { useSync } from '@/offline/sync';
 import { useCurrentCashSession } from '@/modules/cash/hooks';
 import { getPrinterSettings } from '@/print/printer';
 import { ThemeToggle } from './ThemeToggle';
+import { useTheme } from './ThemeProvider';
 import {
   IconInicio,
   IconTurno,
@@ -17,6 +18,7 @@ import {
 
 export function Shell() {
   const { user, logout } = useAuth();
+  const { resolved } = useTheme();
   const api = useApi();
   const online = useOnline();
   const { pendingCount } = useSync();
@@ -117,7 +119,7 @@ export function Shell() {
       <header className="shell-top">
         <div className="shell-brand-wrap" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <img
-            src="/brand/pizzalog-logo-horizontal-cream.svg"
+            src={resolved === 'light' ? '/brand/pizzalog-logo-horizontal-red.svg' : '/brand/pizzalog-logo-horizontal-cream.svg'}
             alt="Pizzalog"
             style={{ height: '26px', width: 'auto', display: 'block' }}
           />
