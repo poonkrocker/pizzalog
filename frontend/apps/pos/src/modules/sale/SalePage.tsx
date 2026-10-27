@@ -17,9 +17,9 @@ import { CategoryIcon } from '@/assets/icons/CategoryIcon';
 type OrderChannel = 'here' | 'takeaway' | 'delivery';
 
 const CHANNELS: { value: OrderChannel; icon: string; label: string }[] = [
-  { value: 'here', icon: '🍽️', label: 'Acá' },
-  { value: 'takeaway', icon: '🛍️', label: 'Llevar' },
-  { value: 'delivery', icon: '🛵', label: 'Delivery' },
+  { value: 'here', icon: '/category-icons/channel-table.svg', label: 'Acá' },
+  { value: 'takeaway', icon: '/category-icons/channel-takeaway.svg', label: 'Llevar' },
+  { value: 'delivery', icon: '/category-icons/channel-delivery.svg', label: 'Delivery' },
 ];
 
 const METHODS: { value: string; label: string }[] = [
@@ -334,7 +334,7 @@ export function SalePage() {
               onClick={() => setChannel(c.value)}
             >
               <span className="channel-btn__icon" aria-hidden="true">
-                {c.icon}
+                <img src={c.icon} alt="" />
               </span>
               {c.label}
             </button>
