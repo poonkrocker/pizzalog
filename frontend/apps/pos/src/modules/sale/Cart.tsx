@@ -40,6 +40,7 @@ export function Cart({
   const [discountLine, setDiscountLine] = useState<CartLine | null>(null);
   const [customLineAmount, setCustomLineAmount] = useState('');
   const [globalModalOpen, setGlobalModalOpen] = useState(false);
+  const [expandedOnMobile, setExpandedOnMobile] = useState(false);
   const [customGlobalAmount, setCustomGlobalAmount] = useState('');
 
   function applyGlobalPct(pct: number) {
@@ -71,9 +72,18 @@ export function Cart({
   }
 
   return (
-    <div className="cart">
+    <div className={`cart${expandedOnMobile ? ' cart--expanded' : ' cart--collapsed'}`}>
       <div className="cart__head">
-        <span>Pedido</span>
+        <button
+          type="button"
+          className="cart__toggle"
+          aria-expanded={expandedOnMobile}
+          onClick={() => setExpandedOnMobile((value) => !value)}
+        >
+          <span className="cart__toggle-title">Pedido <small>{lines.reduce((count, line) => count + line.quantity, 0)}</small></span>
+          <strong className="cart__toggle-total">{formatARS(total)}</strong>
+          <span className="cart__toggle-action">{expandedOnMobile ? 'Ocultar' : 'Ver pedido'} <span aria-hidden="true">{expandedOnMobile ? '⌄' : '⌃'}</span></span>
+        </button>
         {lines.length > 0 && (
           <button className="cart__clear" onClick={onClear}>
             Vaciar
