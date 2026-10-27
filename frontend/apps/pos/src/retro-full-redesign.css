@@ -338,3 +338,15 @@ h1, h2, h3, p, label, span, strong, small { text-rendering: optimizeLegibility; 
   .product-btn__illustration, .product-btn__illustration img { width: 32px; height: 32px; }
   .shell-wordmark { font-size: 23px; }
 }
+
+.retro-page-heading { display: flex; align-items: center; gap: 10px; margin: 0 0 10px; min-height: 38px; }
+.retro-page-heading h1 { margin: 0; font-family: 'Barlow Condensed', 'Arial Narrow', sans-serif !important; color: var(--text); font-size: 27px; font-weight: 800; line-height: 1.05; }
+.retro-page-heading__icon { width: 36px; height: 36px; object-fit: contain; image-rendering: pixelated; }
+.kds-page { min-height: 100%; display: flex; flex-direction: column; gap: 8px; }
+.kds-page .kds { flex: 1; }
+.kds-page .kds-empty { min-height: 220px; }
+@media (max-width: 819px) {
+  .retro-page-heading { margin-bottom: 8px; gap: 8px; min-height: 32px; }
+  .retro-page-heading h1 { font-size: 25px; }
+  .retro-page-heading__icon { width: 32px; height: 32px; }
+}
