@@ -25,6 +25,7 @@ const CATEGORY_ICON_BY_KEY: Record<string, CategoryIconName> = {
   hamburguesa: 'burgers', hamburguesas: 'burgers', burger: 'burgers', burgers: 'burgers',
   panaderia: 'bakery', panificados: 'bakery', medialunas: 'bakery', bolleria: 'bakery',
   otros: 'other', otro: 'other',
+  'sin categoria': 'uncategorized', 'sin asignar': 'uncategorized', 'sin categoria asignada': 'uncategorized',
 };
 
 function normalizedCategoryKey(value: string): string {
