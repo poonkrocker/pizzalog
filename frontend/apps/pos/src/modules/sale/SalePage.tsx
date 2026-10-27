@@ -98,6 +98,10 @@ export function SalePage() {
     }
   }, [categories, hasUncategorized, activeTab]);
 
+  const activeCategoryName = activeTab === 'otros'
+    ? 'Sin categoría'
+    : categories.find((category) => String(category.id) === activeTab)?.name;
+
   const visibleProducts = useMemo(() => {
     if (activeTab === 'otros') return products.filter((p) => p.category_id === null);
     if (activeTab === '') return [];
@@ -390,7 +394,7 @@ export function SalePage() {
           )}
         </div>
         <div className="sale__products">
-          <ProductGrid products={visibleProducts} onAdd={add} />
+          <ProductGrid products={visibleProducts} onAdd={add} categoryName={activeCategoryName} />
         </div>
       </div>
 
