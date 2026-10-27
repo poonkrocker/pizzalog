@@ -94,7 +94,7 @@ export function HomePage() {
             gap: '8px',
           }}
         >
-          <span style={{ fontSize: '32px' }}>🍕</span>
+          <img className="home-tile-illustration" src="/category-icons/product-pizza.svg" alt="" aria-hidden="true" />
           <strong style={{ fontSize: '16px', color: 'var(--text)' }}>Venta Mostrador</strong>
           <small style={{ color: 'var(--muted)', fontSize: '12px' }}>Para llevar & delivery</small>
         </div>
@@ -113,7 +113,7 @@ export function HomePage() {
             gap: '8px',
           }}
         >
-          <span style={{ fontSize: '32px' }}>🍽️</span>
+          <img className="home-tile-illustration" src="/category-icons/module-accounts.svg" alt="" aria-hidden="true" />
           <strong style={{ fontSize: '16px', color: 'var(--text)' }}>Cuentas y Comandas</strong>
           <small style={{ color: 'var(--muted)', fontSize: '12px' }}>Mesas y salón</small>
         </div>
@@ -132,7 +132,7 @@ export function HomePage() {
             gap: '8px',
           }}
         >
-          <span style={{ fontSize: '32px' }}>💵</span>
+          <img className="home-tile-illustration" src="/category-icons/module-cash.svg" alt="" aria-hidden="true" />
           <strong style={{ fontSize: '16px', color: 'var(--text)' }}>Turno & Caja</strong>
           <small style={{ color: 'var(--muted)', fontSize: '12px' }}>Apertura, arqueo y cierre</small>
         </div>
@@ -151,7 +151,7 @@ export function HomePage() {
             gap: '8px',
           }}
         >
-          <span style={{ fontSize: '32px' }}>♨️</span>
+          <img className="home-tile-illustration" src="/category-icons/module-oven.svg" alt="" aria-hidden="true" />
           <strong style={{ fontSize: '16px', color: 'var(--text)' }}>Cocina</strong>
           <small style={{ color: 'var(--muted)', fontSize: '12px' }}>Monitor de pedidos</small>
         </div>
