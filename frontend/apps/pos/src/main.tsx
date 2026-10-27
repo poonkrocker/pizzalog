@@ -18,13 +18,13 @@ createRoot(root).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
-      <NetworkProvider>
-        <AuthProvider>
-          <SyncProvider>
-            <App />
-          </SyncProvider>
-        </AuthProvider>
-      </NetworkProvider>
+        <NetworkProvider>
+          <AuthProvider>
+            <SyncProvider>
+              <App />
+            </SyncProvider>
+          </AuthProvider>
+        </NetworkProvider>
       </ThemeProvider>
     </QueryClientProvider>
   </StrictMode>,
