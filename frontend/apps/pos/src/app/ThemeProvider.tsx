@@ -29,18 +29,18 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       return 'light';
     }
   });
-  const [systemDark, setSystemDark] = useState(() => systemTheme());
+  const [isSystemDark, setIsSystemDark] = useState<boolean>(() => systemTheme() === 'dark');
 
   useEffect(() => {
     if (choice !== 'system' || !window.matchMedia) return;
     const media = window.matchMedia('(prefers-color-scheme: dark)');
-    const update = (event: MediaQueryListEvent) => setSystemDark(event.matches);
-    setSystemDark(media.matches);
+    const update = (event: MediaQueryListEvent) => setIsSystemDark(event.matches);
+    setIsSystemDark(media.matches);
     media.addEventListener?.('change', update);
     return () => media.removeEventListener?.('change', update);
   }, [choice]);
 
-  const resolved: ResolvedTheme = choice === 'system' ? (systemDark ? 'dark' : 'light') : choice;
+  const resolved: ResolvedTheme = choice === 'system' ? (isSystemDark ? 'dark' : 'light') : choice;
 
   useEffect(() => {
     document.documentElement.dataset.theme = resolved;

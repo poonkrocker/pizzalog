@@ -119,9 +119,9 @@ export function Shell() {
       <header className="shell-top">
         <div className="shell-brand-wrap" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <img
-            src={resolved === 'light' ? '/brand/pizzalog-logo-horizontal-red.svg' : '/brand/pizzalog-logo-horizontal-cream.svg'}
+            src={resolved === 'light' ? '/brand/pizzalog-mark.svg' : '/brand/pizzalog-mark-cream.svg'}
             alt="Pizzalog"
-            style={{ height: '26px', width: 'auto', display: 'block' }}
+            style={{ height: '32px', width: '32px', display: 'block', objectFit: 'contain' }}
           />
           {business?.logo_url && (
             <>
