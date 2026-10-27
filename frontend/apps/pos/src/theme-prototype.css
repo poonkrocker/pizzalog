@@ -1,0 +1,59 @@
+/* Pizzalog POS theme tokens — prototype */
+:root,
+:root[data-theme='light'] {
+  color-scheme: light;
+  --red: #c92d32;
+  --ocre: #a96f18;
+  --cream: #f4e8ce;
+  --blue: #075f91;
+  --sky: #2b7797;
+  --charcoal: #e9dcc0;
+  --bg: #f4e8ce;
+  --surface: #fff8eb;
+  --surface-2: #eee0c4;
+  --line: #c9b99a;
+  --text: #27231f;
+  --muted: #665c4d;
+  --success: #39764a;
+  --danger-soft: #f6dfd7;
+  --shadow-soft: 0 2px 4px rgba(39,35,31,.08);
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --red: #d93b3f;
+  --ocre: #efbd69;
+  --cream: #f3e5c8;
+  --blue: #72b8de;
+  --sky: #78c6e8;
+  --charcoal: #211e1c;
+  --bg: #171514;
+  --surface: #25211f;
+  --surface-2: #302a27;
+  --line: #49403a;
+  --text: #f3e5c8;
+  --muted: #b8aa99;
+  --success: #87c58c;
+  --danger-soft: #442724;
+  --shadow-soft: 0 2px 4px rgba(0,0,0,.20);
+}
+.theme-toggle {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.theme-toggle__legend { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+.theme-toggle__options { display: flex; gap: 6px; flex-wrap: wrap; }
+.theme-toggle__option {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+.theme-toggle__option.is-active {
+  background: var(--red);
+  border-color: var(--red);
+  color: #fff;
+}
