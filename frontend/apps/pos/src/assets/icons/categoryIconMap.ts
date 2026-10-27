@@ -17,7 +17,7 @@ const CATEGORY_ICON_BY_KEY: Record<string, CategoryIconName> = {
   extra: 'extras', extras: 'extras', adicional: 'extras', adicionales: 'extras', 'costos extra': 'extras', 'costos extras': 'extras', 'costo extra': 'extras', 'costos adicionales': 'extras',
   plato: 'hot-meals', platos: 'hot-meals', 'platos calientes': 'hot-meals', 'comidas calientes': 'hot-meals',
   ensalada: 'salads', ensaladas: 'salads',
-  guarnicion: 'sides', guarniciones: 'sides', papas: 'sides', guarnicion: 'sides',
+  guarnicion: 'sides', guarniciones: 'sides', papas: 'sides',
   desayuno: 'breakfast', desayunos: 'breakfast',
   helado: 'ice-cream', helados: 'ice-cream', heladeria: 'ice-cream',
   empanada: 'empanadas', empanadas: 'empanadas',
