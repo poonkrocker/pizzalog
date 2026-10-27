@@ -325,6 +325,10 @@ export function SalePage() {
   return (
     <div className="sale">
       <div className="sale__main">
+        <div className="retro-page-heading">
+          <CategoryIcon name="pizza" size={38} className="retro-page-heading__icon" />
+          <h1>Venta Mostrador</h1>
+        </div>
         <div className="channel-bar">
           {CHANNELS.map((c) => (
             <button
