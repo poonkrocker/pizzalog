@@ -151,7 +151,8 @@ h1, h2, h3, p, label, span, strong, small { text-rendering: optimizeLegibility; 
   box-shadow: 3px 3px 0 rgba(70,49,24,.18), inset 0 0 0 2px rgba(255,255,255,.28) !important;
   position: relative;
 }
-.home-tile-illustration { width: 48px; height: 48px; object-fit: contain; image-rendering: pixelated; filter: drop-shadow(1px 2px 0 rgba(60,40,20,.18)); }\n.home > div[style*="grid-template-columns"] > div > span:first-child {
+.home-tile-illustration { width: 48px; height: 48px; object-fit: contain; image-rendering: pixelated; filter: drop-shadow(1px 2px 0 rgba(60,40,20,.18)); }
+.home > div[style*="grid-template-columns"] > div > span:first-child {
   font-size: 37px !important; line-height: 1.05 !important; filter: saturate(.9);
 }
 .home > div[style*="grid-template-columns"] > div strong {
@@ -282,7 +283,8 @@ h1, h2, h3, p, label, span, strong, small { text-rendering: optimizeLegibility; 
   .home { padding: 3px 1px 10px !important; }
   .home h1 { font-size: 29px !important; }
   .home > div[style*="grid-template-columns"] > div { min-height: 122px; padding: 10px 9px !important; }
-  .home-tile-illustration { width: 40px; height: 40px; }\n  .home > div[style*="grid-template-columns"] > div > span:first-child { font-size: 34px !important; }
+  .home-tile-illustration { width: 40px; height: 40px; }
+  .home > div[style*="grid-template-columns"] > div > span:first-child { font-size: 34px !important; }
   .sale { grid-template-rows: minmax(0,1fr) auto !important; gap: 8px !important; }
   .sale__main { min-height: 0 !important; display: flex; flex-direction: column; }
   .channel-bar { flex-shrink: 0; }
