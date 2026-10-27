@@ -7,6 +7,7 @@ import { SyncProvider } from '@/offline/sync';
 import { App } from '@/app/App';
 import './styles.css';
 import './theme-prototype.css';
+import './retro-full-redesign.css';
 import { ThemeProvider } from '@/app/ThemeProvider';
 
 const queryClient = new QueryClient();
