@@ -143,7 +143,12 @@ body { transition: background-color .18s ease, color .18s ease; }
   .product-btn__price { font-size: 15px; }
   .product-btn [style*="Mantener"] { display: none !important; }
   .cart { max-height: min(52vh, 440px); border-top: 1px solid var(--line); border-left: 0; border-radius: 16px 16px 0 0; padding-bottom: env(safe-area-inset-bottom); overflow: hidden; box-shadow: 0 -4px 16px rgba(0,0,0,.09); }
-  .cart__head { padding: 8px 12px 6px; gap: 8px; }
+   .cart__head { padding: 8px 12px 6px; gap: 8px; }
+  .cart__head > .cart__toggle { flex: 1 1 auto; min-width: 0; }
+  .cart__toggle-total { font-size: 16px; }
+  .cart__toggle-action { display: none; }
+  .cart--expanded .cart__toggle-action { display: inline; }
+  .cart__clear { flex: 0 0 auto; }
   .cart__toggle { display: flex; }
   .cart--collapsed .cart__lines { display: none; }
   .cart--collapsed { max-height: none; }
