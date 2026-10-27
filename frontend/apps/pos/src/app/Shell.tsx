@@ -5,6 +5,7 @@ import { useOnline } from '@/lib/network';
 import { useSync } from '@/offline/sync';
 import { useCurrentCashSession } from '@/modules/cash/hooks';
 import { getPrinterSettings } from '@/print/printer';
+import { ThemeToggle } from './ThemeToggle';
 import {
   IconInicio,
   IconTurno,
@@ -281,6 +282,9 @@ export function Shell() {
                   <span>🔑</span> Cambiar mi contraseña
                 </button>
 
+                <div className="theme-menu-section">
+                  <ThemeToggle />
+                </div>
                 <div style={{ borderTop: '1px solid var(--line)', margin: '6px 0' }} />
 
                 <button
