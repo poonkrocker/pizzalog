@@ -7,7 +7,7 @@ Estado: propuesta/prototipo en rama aislada. No mergear a main sin revisión fun
 - La venta se orquesta desde `modules/sale/SalePage.tsx`; componentes de catálogo y cobro: `ProductGrid.tsx`, `Cart.tsx`, `VariantPicker.tsx`, `PriceKeypad.tsx`, `SendToAccountSheet.tsx`, `HalfHalfModal.tsx` y `hooks.ts`.
 - El shell, navegación y cabecera están en `app/Shell.tsx`, con iconografía compartida en `app/NavIcons.tsx`.
 - Estilos globales y responsivos en `styles.css`; tema actual declara tokens CSS en `:root` y ahora mismo utiliza paleta oscura fija.
-- Existe `src/assets/icons/` con SVG lineales de navegación (Inicio, Turno abierto/cerrado, Venta, Cuentas, Cocina, Ajustes). No se encontraron iconos de categorías de catálogo en esa carpeta.
+- Existe `src/assets/icons/` con SVG lineales de navegación (Inicio, Turno abierto/cerrado, Venta, Cuentas, Cocina, Ajustes). Se agregó en esta rama un primer set de iconos de categorías en `public/category-icons/`; los iconos genéricos de control siguen separados de las ilustraciones a color.
 - Existe marca (variantes SVG/PNG) en `public/brand/` y `src/assets/brand/`.
 - La app tiene funciones que deben conservarse: variantes por pulsación prolongada, productos con precio abierto, extras, descuentos por línea y globales, medias pizzas, cobro con medios de pago, pagos divididos, envío a cuenta/diferir pago, impresión térmica/comandas, sincronización offline y estados de caja/conexión.
 - No crear imágenes/recursos dentro del proyecto Android nativo salvo launcher/splash; los recursos visuales de pantallas deben vivir en POS web y ser incluidos por el build de Vite/Capacitor.
@@ -21,7 +21,7 @@ Estado: propuesta/prototipo en rama aislada. No mergear a main sin revisión fun
 - Respeto de safe-area de Android, alturas de barra inferior y área de navegación gestual.
 
 ## Inventario de recursos por diseñar
-Crear un set de SVG vectoriales con estética pixel-art limpia (retícula 24/32 px, bordes nítidos, paleta limitada y fondo transparente). SVG es conveniente para tamaño y nitidez; exportar PNG @1x/@2x si Android/WebView o herramientas posteriores lo requieren. Las categorías deben poder asociarse por nombre o ID de categoría, no por posición.
+Se preparó un primer set de SVG vectoriales con estética pixel-art limpia (retícula 32 px, bordes nítidos, paleta limitada y fondo transparente) en `frontend/apps/pos/public/category-icons/`. El mapa inicial está en `src/assets/icons/categoryIconMap.ts`; revisar aliases con nombres reales de las categorías. Las categorías deben poder asociarse por ID/nombre normalizado, no por posición.
 
 ### Categorías de venta
 | Recurso / nombre | Significado | Prioridad |
@@ -78,4 +78,4 @@ Crear un set de SVG vectoriales con estética pixel-art limpia (retícula 24/32 
 - Las categorías se resuelven desde los datos disponibles y categorías desconocidas usan icono genérico.
 - Todas las acciones de negocio existentes siguen entrando en los mismos handlers/hooks.
 - `pnpm --filter @pizzalog/pos build` completa sin errores (o comando workspace equivalente según `frontend/package.json`).
-- La prueba visual no depende de que haya red para descargar iconos o fuentes.
+- Los iconos de categorías son recursos locales; la tipografía conserva la pila y fallback que ya usa el POS.
