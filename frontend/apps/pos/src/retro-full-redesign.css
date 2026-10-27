@@ -370,6 +370,6 @@ h1, h2, h3, p, label, span, strong, small { text-rendering: optimizeLegibility; 
   height: 32px;
   margin-right: 8px;
   vertical-align: -7px;
-  background: url('/brand/pizzalog-mark.svg') center / contain no-repeat;
+  background: url('/category-icons/module-settings.svg') center / contain no-repeat;
   image-rendering: pixelated;
 }
