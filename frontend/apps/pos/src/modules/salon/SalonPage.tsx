@@ -92,7 +92,8 @@ export function SalonPage() {
                 gap: 8,
               }}
             >
-              <span>📋 Cuentas Abiertas</span>
+              <img src="/category-icons/module-accounts.svg" alt="" className="retro-page-heading__icon" style={{ width: 28, height: 28 }} />
+              <span>Cuentas Abiertas</span>
               <span
                 style={{
                   fontSize: 13,
