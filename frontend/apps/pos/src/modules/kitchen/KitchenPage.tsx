@@ -26,7 +26,7 @@ export function KitchenPage() {
     return (
       <div className="kds-page">
         <div className="retro-page-heading">
-          <img src="/category-icons/module-oven.svg" alt="" className="retro-page-heading__icon" />
+          <img src="/category-icons/horno.svg" alt="" className="retro-page-heading__icon" />
           <h1>Cocina</h1>
         </div>
         <div className="kds-empty">No hay comandas pendientes.</div>
@@ -37,7 +37,7 @@ export function KitchenPage() {
   return (
     <div className="kds-page">
       <div className="retro-page-heading">
-        <img src="/category-icons/module-oven.svg" alt="" className="retro-page-heading__icon" />
+        <img src="/category-icons/horno.svg" alt="" className="retro-page-heading__icon" />
         <h1>Cocina</h1>
       </div>
       <div className="kds">

@@ -83,7 +83,7 @@ export function HomePage() {
           className="retro-home__tile"
           style={{ cursor: 'pointer' }}
         >
-          <img className="home-tile-illustration" src="/category-icons/product-pizza.svg" alt="" aria-hidden="true" />
+          <img className="home-tile-illustration" src="/category-icons/porcion-pizza.svg" alt="" aria-hidden="true" />
           <strong className="retro-home__tile-title">Venta Mostrador</strong>
           <small className="retro-home__tile-subtitle">Para llevar & delivery</small>
         </div>
@@ -94,7 +94,7 @@ export function HomePage() {
           className="retro-home__tile"
           style={{ cursor: 'pointer' }}
         >
-          <img className="home-tile-illustration" src="/category-icons/module-accounts.svg" alt="" aria-hidden="true" />
+          <img className="home-tile-illustration" src="/category-icons/libreta.svg" alt="" aria-hidden="true" />
           <strong className="retro-home__tile-title">Cuentas y Comandas</strong>
           <small className="retro-home__tile-subtitle">Mesas y salón</small>
         </div>
@@ -105,7 +105,7 @@ export function HomePage() {
           className="retro-home__tile"
           style={{ cursor: 'pointer' }}
         >
-          <img className="home-tile-illustration" src="/category-icons/module-cash.svg" alt="" aria-hidden="true" />
+          <img className="home-tile-illustration" src="/category-icons/caja-registradora.svg" alt="" aria-hidden="true" />
           <strong className="retro-home__tile-title">Turno & Caja</strong>
           <small className="retro-home__tile-subtitle">Apertura, arqueo y cierre</small>
         </div>
@@ -116,7 +116,7 @@ export function HomePage() {
           className="retro-home__tile"
           style={{ cursor: 'pointer' }}
         >
-          <img className="home-tile-illustration" src="/category-icons/module-oven.svg" alt="" aria-hidden="true" />
+          <img className="home-tile-illustration" src="/category-icons/horno.svg" alt="" aria-hidden="true" />
           <strong className="retro-home__tile-title">Cocina</strong>
           <small className="retro-home__tile-subtitle">Monitor de pedidos</small>
         </div>

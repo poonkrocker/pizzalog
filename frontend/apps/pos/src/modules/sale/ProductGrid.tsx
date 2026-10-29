@@ -139,7 +139,7 @@ function ProductGridItem({
     >
       <span className="product-btn__illustration" aria-hidden="true">
         {categoryName && /pizza/i.test(categoryName) ? (
-          <img src="/category-icons/product-pizza.svg" alt="" />
+          <img src="/category-icons/porcion-pizza.svg" alt="" />
         ) : (
           <CategoryIcon name={categoryName} size={36} />
         )}
