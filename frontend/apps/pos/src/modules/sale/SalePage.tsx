@@ -17,9 +17,9 @@ import { CategoryIcon } from '@/assets/icons/CategoryIcon';
 type OrderChannel = 'here' | 'takeaway' | 'delivery';
 
 const CHANNELS: { value: OrderChannel; icon: string; label: string }[] = [
-  { value: 'here', icon: '🍽️', label: 'Acá' },
-  { value: 'takeaway', icon: '🛍️', label: 'Llevar' },
-  { value: 'delivery', icon: '🛵', label: 'Delivery' },
+  { value: 'here', icon: '/category-icons/channel-table.svg', label: 'Acá' },
+  { value: 'takeaway', icon: '/category-icons/channel-takeaway.svg', label: 'Llevar' },
+  { value: 'delivery', icon: '/category-icons/channel-delivery.svg', label: 'Delivery' },
 ];
 
 const METHODS: { value: string; label: string }[] = [
@@ -97,6 +97,10 @@ export function SalePage() {
       setActiveTab(first ? String(first.id) : 'otros');
     }
   }, [categories, hasUncategorized, activeTab]);
+
+  const activeCategoryName = activeTab === 'otros'
+    ? 'Sin categoría'
+    : categories.find((category) => String(category.id) === activeTab)?.name;
 
   const visibleProducts = useMemo(() => {
     if (activeTab === 'otros') return products.filter((p) => p.category_id === null);
@@ -297,6 +301,7 @@ export function SalePage() {
         paymentMethod: method,
         channel: input.channel ?? 'takeaway',
         width: settings.width,
+        receiptConfig: settings.receiptConfig,
       });
       setLastPrint(payload);
       setPrintMsg(null);
@@ -321,6 +326,10 @@ export function SalePage() {
   return (
     <div className="sale">
       <div className="sale__main">
+        <div className="retro-page-heading">
+          <CategoryIcon name="pizza" size={38} className="retro-page-heading__icon" />
+          <h1>Venta Mostrador</h1>
+        </div>
         <div className="channel-bar">
           {CHANNELS.map((c) => (
             <button
@@ -330,7 +339,7 @@ export function SalePage() {
               onClick={() => setChannel(c.value)}
             >
               <span className="channel-btn__icon" aria-hidden="true">
-                {c.icon}
+                <img src={c.icon} alt="" />
               </span>
               {c.label}
             </button>
@@ -390,7 +399,7 @@ export function SalePage() {
           )}
         </div>
         <div className="sale__products">
-          <ProductGrid products={visibleProducts} onAdd={add} />
+          <ProductGrid products={visibleProducts} onAdd={add} categoryName={activeCategoryName} />
         </div>
       </div>
 

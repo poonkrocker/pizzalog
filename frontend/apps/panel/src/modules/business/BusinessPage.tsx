@@ -7,6 +7,7 @@ import { Button, Checkbox, Field, Input, Select, Textarea } from '@/ui';
 import { PageHeader } from '@/ui';
 import { ErrorState, Loading } from '@/ui';
 import { HoursSection } from './HoursSection';
+import { ReceiptConfigSection } from './ReceiptConfigSection';
 import { SocialSection } from './SocialSection';
 import { ImageCropModal } from '../products/ImageCropModal';
 
@@ -379,6 +380,7 @@ export function BusinessPage() {
         </div>
       </form>
 
+      <ReceiptConfigSection business={form} />
       <SocialSection />
       <HoursSection />
     </section>

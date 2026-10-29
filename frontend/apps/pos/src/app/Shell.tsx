@@ -123,6 +123,7 @@ export function Shell() {
             alt="Pizzalog"
             style={{ height: '32px', width: '32px', display: 'block', objectFit: 'contain' }}
           />
+          
           {business?.logo_url && (
             <>
               <span style={{ width: '1px', height: '18px', background: 'var(--line)', opacity: 0.8 }} />

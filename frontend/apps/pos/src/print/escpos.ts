@@ -110,6 +110,18 @@ export class Esc {
     return this;
   }
 
+  /** Inserta bytes crudos directos al flujo de impresión. */
+  raw(bytes: string): this {
+    this.out += bytes;
+    return this;
+  }
+
+  /** Inserta comando ESC/POS raster de imagen. */
+  image(rasterBytes: string): this {
+    this.out += rasterBytes;
+    return this;
+  }
+
   /** Alimenta papel y corta (si la impresora tiene cortador; en comanderas portátiles como IT01 alimenta para poder cortar manualmente). */
   cut(): this {
     this.out += '\n\n\n\n\n' + GS + 'V' + String.fromCharCode(66) + String.fromCharCode(0);

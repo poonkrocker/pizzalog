@@ -16,7 +16,7 @@ final class BusinessController
 {
     private const FIELDS = 'id, name, slug, phone, address, google_maps_url, description,
                             logo_url, theme, accepts_online_orders, use_digital_kds, transfer_alias, card_surcharge_pct,
-                            pay_methods_pickup, pay_methods_delivery';
+                            pay_methods_pickup, pay_methods_delivery, receipt_config';
 
     private const THEME_COLORS   = ['bg', 'accent', 'link', 'text'];
     private const THEME_PATTERNS = ['mosaico', 'liso', 'rayas', 'lunares'];
@@ -41,6 +41,10 @@ final class BusinessController
             $col = $pdo->query("SHOW COLUMNS FROM businesses LIKE 'use_digital_kds'")->fetch();
             if (!$col) {
                 $pdo->exec("ALTER TABLE businesses ADD COLUMN use_digital_kds TINYINT(1) NOT NULL DEFAULT 1 AFTER accepts_online_orders");
+            }
+            $colReceipt = $pdo->query("SHOW COLUMNS FROM businesses LIKE 'receipt_config'")->fetch();
+            if (!$colReceipt) {
+                $pdo->exec("ALTER TABLE businesses ADD COLUMN receipt_config TEXT NULL AFTER pay_methods_delivery");
             }
             self::$ensured = true;
         } catch (\Throwable) {
@@ -151,12 +155,26 @@ final class BusinessController
         $useDigitalKds = $req->input('use_digital_kds');
         $useDigitalKdsBit = ($useDigitalKds === null) ? 1 : ((int) (bool) $useDigitalKds);
 
+        $receiptConfig = null;
+        $rawRc = $req->input('receipt_config');
+        if (is_array($rawRc) && $rawRc !== []) {
+            $cleanRc = [
+                'show_logo'          => (bool) ($rawRc['show_logo'] ?? true),
+                'header_text'        => isset($rawRc['header_text']) ? mb_substr(trim((string) $rawRc['header_text']), 0, 500) : null,
+                'footer_text'        => isset($rawRc['footer_text']) ? mb_substr(trim((string) $rawRc['footer_text']), 0, 500) : null,
+                'show_customer_info' => (bool) ($rawRc['show_customer_info'] ?? false),
+                'show_comments'      => (bool) ($rawRc['show_comments'] ?? false),
+                'language'           => isset($rawRc['language']) ? trim((string) $rawRc['language']) : 'es',
+            ];
+            $receiptConfig = json_encode($cleanRc, JSON_UNESCAPED_UNICODE);
+        }
+
         Database::pdo()->prepare(
             'UPDATE businesses
                 SET name = ?, slug = ?, phone = ?, address = ?, google_maps_url = ?,
                     description = ?, logo_url = ?, theme = ?, accepts_online_orders = ?, use_digital_kds = ?,
                     transfer_alias = ?, card_surcharge_pct = ?,
-                    pay_methods_pickup = ?, pay_methods_delivery = ?
+                    pay_methods_pickup = ?, pay_methods_delivery = ?, receipt_config = ?
               WHERE id = ?'
         )->execute([
             $name, $slug, $opt('phone'), $opt('address'), $maps !== '' ? $maps : null,
@@ -165,6 +183,7 @@ final class BusinessController
             $useDigitalKdsBit,
             $transferAlias !== '' ? $transferAlias : null, $surcharge,
             $this->encodeMethods($pickup), $this->encodeMethods($delivery),
+            $receiptConfig,
             $bid,
         ]);
 
@@ -324,6 +343,7 @@ final class BusinessController
             'pay_methods_pickup'    => $this->decodeMethods($b['pay_methods_pickup']),
             'pay_methods_delivery'  => $this->decodeMethods($b['pay_methods_delivery']),
             'theme'                 => $b['theme'] !== null ? json_decode((string) $b['theme'], true) : null,
+            'receipt_config'        => !empty($b['receipt_config']) ? json_decode((string) $b['receipt_config'], true) : null,
         ];
     }
 }

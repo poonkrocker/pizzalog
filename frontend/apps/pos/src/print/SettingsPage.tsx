@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Esc } from './escpos';
+import { accountTicket } from './tickets';
 import {
   dispatchComandas,
   getPrinterSettings,
@@ -25,6 +26,7 @@ export function SettingsPage() {
   const categories = catalog.data?.categories ?? [];
 
   const [settings, setSettings] = useState<PrinterSettings | null>(null);
+  const [cachedBiz, setCachedBiz] = useState<any>(null);
   const [devices, setDevices] = useState<BtDevice[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -39,6 +41,10 @@ export function SettingsPage() {
   useEffect(() => {
     void getPrinterSettings().then(setSettings);
     void getStoredApiUrl().then(setApiUrl);
+    try {
+      const raw = localStorage.getItem('pizzalog_cached_business');
+      if (raw) setCachedBiz(JSON.parse(raw));
+    } catch {}
   }, []);
 
   async function update(patch: Partial<PrinterSettings>) {
@@ -101,6 +107,31 @@ export function SettingsPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+    async function testAccountPrint() {
+    if (!settings) return;
+    setBusy(true);
+    setMsg(null);
+    const rc = settings.receiptConfig;
+    const ticket = accountTicket({
+      businessName: cachedBiz?.name || settings.fiscalData?.fantasyName || 'Arrabbiata Pizza',
+      place: 'Mesa 4',
+      account: 'Prueba',
+      lines: [
+        { qty: 2, label: 'Pizza Muzzarella', unitPrice: 12000, note: 'Sin oregano' },
+        { qty: 1, label: 'Bebida Coca Cola', unitPrice: 3500 },
+      ],
+      subtotal: 27500,
+      total: 27500,
+      width: settings.width,
+      fiscalData: settings.fiscalData,
+      receiptConfig: rc,
+      customer: (rc?.showCustomerInfo ?? rc?.show_customer_info) ? { name: 'Juan Perez', phone: '351-1234567' } : undefined,
+    });
+    const err = await tryPrint(ticket, settings.address || undefined);
+    setMsg(err ?? '✓ Ticket de pre-cuenta de prueba enviado a la comandera.');
+    setBusy(false);
   }
 
   async function testPrint(targetAddress?: string) {
@@ -612,111 +643,328 @@ export function SettingsPage() {
         </div>
       </section>
 
-      {/* SECCIÓN: OPCIONES DE IMPRESIÓN Y DATOS FISCALES */}
+      {/* SECCIÓN: CONFIGURACIÓN DE LOS RECIBOS Y PRE-CUENTAS */}
       <section className="settings__block">
-        <h2 className="settings__subtitle">Pre-Cuentas y Datos Fiscales</h2>
+        <h2 className="settings__subtitle">🧾 Configuración de los Recibos</h2>
         <p className="muted-text" style={{ fontSize: 13, marginTop: 4 }}>
-          Los datos fiscales se incluyen opcionalmente en los tickets y pre-cuentas de mesa:
+          Personalizá el diseño, logotipo, cabecera y pie de página de las cuentas y tickets impresos:
         </p>
 
-        <label className="settings__toggle" style={{ marginTop: 10 }}>
-          <input
-            type="checkbox"
-            checked={Boolean(settings.fiscalData?.enabled)}
+        {/* LOGOTIPO */}
+        <div style={{ marginTop: 14 }}>
+          <label style={{ display: 'block', fontSize: 13, fontWeight: 700, color: 'var(--cream)', marginBottom: 8 }}>
+            Logotipo
+          </label>
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+            {/* Preview Recibo enviado por email / web */}
+            <div
+              style={{
+                width: 125,
+                padding: '8px 10px',
+                background: 'var(--surface-2)',
+                border: '1px solid var(--line)',
+                borderRadius: 8,
+                textAlign: 'center',
+              }}
+            >
+              <span style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 6 }}>
+                Recibo por email
+              </span>
+              <div
+                style={{
+                  height: 60,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: 'var(--surface)',
+                  border: '1px solid var(--line)',
+                  borderRadius: 4,
+                }}
+              >
+                {cachedBiz?.logo_url ? (
+                  <img
+                    src={cachedBiz.logo_url}
+                    alt=""
+                    style={{ maxHeight: 50, maxWidth: 90, objectFit: 'contain' }}
+                  />
+                ) : (
+                  <strong style={{ fontSize: 13, color: 'var(--text)' }}>
+                    {cachedBiz?.name || settings.fiscalData?.fantasyName || 'PIZZALOG'}
+                  </strong>
+                )}
+              </div>
+            </div>
+
+            {/* Preview Recibo impreso térmico */}
+            <div
+              style={{
+                width: 125,
+                padding: '8px 10px',
+                background: 'var(--surface-2)',
+                border: '1px solid var(--line)',
+                borderRadius: 8,
+                textAlign: 'center',
+              }}
+            >
+              <span style={{ fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 6 }}>
+                Recibo impreso
+              </span>
+              <div
+                style={{
+                  height: 60,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: '#fff',
+                  border: '1px solid var(--line)',
+                  borderRadius: 4,
+                  filter: 'grayscale(100%) contrast(250%)',
+                }}
+              >
+                {settings.receiptConfig?.showLogo !== false && cachedBiz?.logo_url ? (
+                  <img
+                    src={cachedBiz.logo_url}
+                    alt=""
+                    style={{ maxHeight: 50, maxWidth: 90, objectFit: 'contain' }}
+                  />
+                ) : (
+                  <strong style={{ fontSize: 12, color: '#000', letterSpacing: 1 }}>
+                    {(cachedBiz?.name || settings.fiscalData?.fantasyName || 'PIZZALOG').toUpperCase()}
+                  </strong>
+                )}
+              </div>
+            </div>
+
+            <div style={{ flex: '1 1 200px' }}>
+              <label className="settings__toggle">
+                <input
+                  type="checkbox"
+                  checked={settings.receiptConfig?.showLogo !== false}
+                  onChange={(e) =>
+                    void update({
+                      receiptConfig: {
+                        ...settings.receiptConfig,
+                        showLogo: e.target.checked,
+                      },
+                    })
+                  }
+                />
+                <span>Incluir logotipo o título en recibos y pre-cuentas</span>
+              </label>
+              <p className="muted-text" style={{ fontSize: 12, marginTop: 4 }}>
+                Si se desmarca, se imprime en tipografía simple para ahorrar papel.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* CABECERA (0 / 500) */}
+        <label className="t-field" style={{ marginTop: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span>Cabecera</span>
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+              {(settings.receiptConfig?.headerText ?? '').length} / 500
+            </span>
+          </div>
+          <textarea
+            className="t-input"
+            rows={2}
+            maxLength={500}
+            value={settings.receiptConfig?.headerText ?? ''}
+            placeholder="ej: Dirección del local, teléfono de pedidos, o mensaje de bienvenida…"
             onChange={(e) =>
               void update({
-                fiscalData: {
-                  ...settings.fiscalData,
-                  enabled: e.target.checked,
+                receiptConfig: {
+                  ...settings.receiptConfig,
+                  headerText: e.target.value,
                 },
               })
             }
+            style={{ width: '100%', resize: 'vertical' }}
           />
-          <span>Imprimir datos fiscales en tickets de cuenta</span>
         </label>
 
-        {settings.fiscalData?.enabled && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 10 }}>
-            <label className="t-field">
-              <span>Nombre fantasía / Local</span>
-              <input
-                type="text"
-                value={settings.fiscalData?.fantasyName ?? ''}
-                placeholder="Arrabbiata Pizza"
-                onChange={(e) =>
-                  void update({
-                    fiscalData: { ...settings.fiscalData, fantasyName: e.target.value },
-                  })
-                }
-              />
-            </label>
-            <label className="t-field">
-              <span>CUIT</span>
-              <input
-                type="text"
-                value={settings.fiscalData?.cuit ?? ''}
-                placeholder="20-xxxxxxxx-x"
-                onChange={(e) =>
-                  void update({
-                    fiscalData: { ...settings.fiscalData, cuit: e.target.value },
-                  })
-                }
-              />
-            </label>
-            <label className="t-field">
-              <span>Condición IVA</span>
-              <input
-                type="text"
-                value={settings.fiscalData?.ivaCondition ?? ''}
-                placeholder="Resp. Inscripto / Monotributo"
-                onChange={(e) =>
-                  void update({
-                    fiscalData: { ...settings.fiscalData, ivaCondition: e.target.value },
-                  })
-                }
-              />
-            </label>
-            <label className="t-field">
-              <span>Ingresos Brutos</span>
-              <input
-                type="text"
-                value={settings.fiscalData?.iibb ?? ''}
-                placeholder="IIBB..."
-                onChange={(e) =>
-                  void update({
-                    fiscalData: { ...settings.fiscalData, iibb: e.target.value },
-                  })
-                }
-              />
-            </label>
-            <label className="t-field" style={{ gridColumn: 'span 2' }}>
-              <span>Dirección fiscal / Local</span>
-              <input
-                type="text"
-                value={settings.fiscalData?.address ?? ''}
-                placeholder="27 de Abril 798, Córdoba"
-                onChange={(e) =>
-                  void update({
-                    fiscalData: { ...settings.fiscalData, address: e.target.value },
-                  })
-                }
-              />
-            </label>
-            <label className="t-field" style={{ gridColumn: 'span 2' }}>
-              <span>Mensaje de pie de cuenta / ticket</span>
-              <input
-                type="text"
-                value={settings.fiscalData?.footerNote ?? ''}
-                placeholder="¡Muchas gracias por su visita! Seguinos en @arrabbiata.pizza"
-                onChange={(e) =>
-                  void update({
-                    fiscalData: { ...settings.fiscalData, footerNote: e.target.value },
-                  })
-                }
-              />
-            </label>
+        {/* PIE DE PÁGINA (0 / 500) */}
+        <label className="t-field" style={{ marginTop: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <span>Pie de página</span>
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+              {(settings.receiptConfig?.footerText ?? settings.fiscalData?.footerNote ?? '').length} / 500
+            </span>
           </div>
-        )}
+          <textarea
+            className="t-input"
+            rows={2}
+            maxLength={500}
+            value={settings.receiptConfig?.footerText ?? settings.fiscalData?.footerNote ?? ''}
+            placeholder="ej: ¡Muchas gracias por su visita! Seguinos en @arrabbiata.pizza"
+            onChange={(e) =>
+              void update({
+                receiptConfig: {
+                  ...settings.receiptConfig,
+                  footerText: e.target.value,
+                },
+              })
+            }
+            style={{ width: '100%', resize: 'vertical' }}
+          />
+        </label>
+
+        {/* TOGGLES: INFO CLIENTE Y COMENTARIOS */}
+        <div style={{ display: 'grid', gap: 10, marginTop: 12, padding: 12, background: 'var(--surface-2)', borderRadius: 8, border: '1px solid var(--line)' }}>
+          <label className="settings__toggle">
+            <input
+              type="checkbox"
+              checked={Boolean(settings.receiptConfig?.showCustomerInfo)}
+              onChange={(e) =>
+                void update({
+                  receiptConfig: {
+                    ...settings.receiptConfig,
+                    showCustomerInfo: e.target.checked,
+                  },
+                })
+              }
+            />
+            <span>Mostrar información del cliente (nombre, teléfono y dirección si están asociados)</span>
+          </label>
+
+          <label className="settings__toggle">
+            <input
+              type="checkbox"
+              checked={Boolean(settings.receiptConfig?.showComments)}
+              onChange={(e) =>
+                void update({
+                  receiptConfig: {
+                    ...settings.receiptConfig,
+                    showComments: e.target.checked,
+                  },
+                })
+              }
+            />
+            <span>Mostrar comentarios y notas de los productos en la cuenta del cliente</span>
+          </label>
+        </div>
+
+        {/* IDIOMA DE RECIBO */}
+        <label className="t-field" style={{ marginTop: 12, maxWidth: 220 }}>
+          <span>Idioma de recibo</span>
+          <select
+            className="t-input"
+            value={settings.receiptConfig?.language || 'es'}
+            onChange={(e) =>
+              void update({
+                receiptConfig: {
+                  ...settings.receiptConfig,
+                  language: e.target.value,
+                },
+              })
+            }
+          >
+            <option value="es">Español</option>
+          </select>
+        </label>
+
+        {/* DATOS FISCALES OPCIONALES */}
+        <div style={{ marginTop: 16, borderTop: '1px dashed var(--line)', paddingTop: 12 }}>
+          <label className="settings__toggle">
+            <input
+              type="checkbox"
+              checked={Boolean(settings.fiscalData?.enabled)}
+              onChange={(e) =>
+                void update({
+                  fiscalData: {
+                    ...settings.fiscalData,
+                    enabled: e.target.checked,
+                  },
+                })
+              }
+            />
+            <span>Incluir datos fiscales en pre-cuentas (CUIT, IIBB, IVA)</span>
+          </label>
+
+          {settings.fiscalData?.enabled && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 10 }}>
+              <label className="t-field">
+                <span>Nombre fantasía / Local</span>
+                <input
+                  type="text"
+                  value={settings.fiscalData?.fantasyName ?? ''}
+                  placeholder="Arrabbiata Pizza"
+                  onChange={(e) =>
+                    void update({
+                      fiscalData: { ...settings.fiscalData, fantasyName: e.target.value },
+                    })
+                  }
+                />
+              </label>
+              <label className="t-field">
+                <span>CUIT</span>
+                <input
+                  type="text"
+                  value={settings.fiscalData?.cuit ?? ''}
+                  placeholder="20-xxxxxxxx-x"
+                  onChange={(e) =>
+                    void update({
+                      fiscalData: { ...settings.fiscalData, cuit: e.target.value },
+                    })
+                  }
+                />
+              </label>
+              <label className="t-field">
+                <span>Condición IVA</span>
+                <input
+                  type="text"
+                  value={settings.fiscalData?.ivaCondition ?? ''}
+                  placeholder="Resp. Inscripto / Monotributo"
+                  onChange={(e) =>
+                    void update({
+                      fiscalData: { ...settings.fiscalData, ivaCondition: e.target.value },
+                    })
+                  }
+                />
+              </label>
+              <label className="t-field">
+                <span>Ingresos Brutos</span>
+                <input
+                  type="text"
+                  value={settings.fiscalData?.iibb ?? ''}
+                  placeholder="IIBB..."
+                  onChange={(e) =>
+                    void update({
+                      fiscalData: { ...settings.fiscalData, iibb: e.target.value },
+                    })
+                  }
+                />
+              </label>
+              <label className="t-field" style={{ gridColumn: 'span 2' }}>
+                <span>Dirección fiscal / Local</span>
+                <input
+                  type="text"
+                  value={settings.fiscalData?.address ?? ''}
+                  placeholder="27 de Abril 798, Córdoba"
+                  onChange={(e) =>
+                    void update({
+                      fiscalData: { ...settings.fiscalData, address: e.target.value },
+                    })
+                  }
+                />
+              </label>
+            </div>
+          )}
+        </div>
+
+        {/* BOTÓN PROBAR CUENTA */}
+        <div style={{ marginTop: 16 }}>
+          <button
+            type="button"
+            className="t-btn"
+            style={{ width: '100%', minHeight: 40, borderColor: 'var(--ocre)', color: 'var(--ocre)', fontWeight: 700 }}
+            disabled={busy}
+            onClick={() => void testAccountPrint()}
+          >
+            🧾 Probar impresión de pre-cuenta con este diseño
+          </button>
+        </div>
       </section>
 
       {/* SECCIÓN: SISTEMA DE COCINA */}

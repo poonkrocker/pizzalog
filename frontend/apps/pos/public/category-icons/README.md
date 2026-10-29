@@ -35,3 +35,12 @@ La primera versión usa `src/assets/icons/categoryIconMap.ts` para normalizar no
 - Usar a unos 24–32 px en las pestañas de categorías.
 - Los controles de la interfaz (volver, cerrar, cantidades, imprimir) siguen siendo iconos lineales y tintables; no reemplazar esos controles por ilustraciones.
 - Mantener los SVG locales: no descargar imágenes en tiempo de ejecución.
+
+
+## Iconos de interfaz del prototipo retro
+- `product-pizza.svg` — miniatura de pizza redonda para cada tarjeta de producto de la categoría pizza.
+- `module-register.svg` — ilustración de caja registradora.
+- `module-accounts.svg` — libreta/mesas y cuentas.
+- `module-cash.svg` — caja y efectivo.
+- `module-oven.svg` — horno de pizza para Cocina.
+- `channel-table.svg`, `channel-takeaway.svg`, `channel-delivery.svg` — modalidad de consumo, llevar y delivery.

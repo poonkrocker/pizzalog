@@ -7,6 +7,20 @@ export interface TicketLine {
   note?: string;
 }
 
+export interface ReceiptConfigInput {
+  showLogo?: boolean;
+  headerText?: string | null;
+  footerText?: string | null;
+  showCustomerInfo?: boolean;
+  showComments?: boolean;
+  language?: string;
+  show_logo?: boolean;
+  header_text?: string | null;
+  footer_text?: string | null;
+  show_customer_info?: boolean;
+  show_comments?: boolean;
+}
+
 const money = (n: number) =>
   '$' + n.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
@@ -14,9 +28,10 @@ const CHANNEL_NAMES: Record<string, string> = {
   takeaway: 'PARA LLEVAR',
   delivery: 'DELIVERY',
   counter: 'MOSTRADOR',
+  salon: 'SALON',
 };
 
-/** Ticket de venta (Llevar / Delivery): se entrega al cliente. */
+/** Ticket de venta (Llevar / Delivery / Mostrador): se entrega al cliente. */
 export function saleTicket(input: {
   businessName: string;
   lines: TicketLine[];
@@ -25,19 +40,42 @@ export function saleTicket(input: {
   channel: string;
   width: number;
   discount?: number;
+  receiptConfig?: ReceiptConfigInput;
+  customer?: { name?: string; phone?: string; address?: string };
 }): string {
   const t = new Esc(input.width);
   t.init();
 
-  t.align('center').bold(true).size(2).line(input.businessName).size(1).bold(false);
+  const rc = input.receiptConfig;
+  const showLogo = rc?.showLogo ?? rc?.show_logo ?? true;
+  if (showLogo) {
+    t.align('center').bold(true).size(2).line(input.businessName).size(1).bold(false);
+  } else {
+    t.align('center').bold(true).line(input.businessName).bold(false);
+  }
+
+  const header = rc?.headerText ?? rc?.header_text;
+  if (header && header.trim()) {
+    t.align('center').wrapped(header.trim()).feed(1);
+  }
+
   const ch = CHANNEL_NAMES[input.channel];
-  if (ch) t.line(ch);
+  if (ch) t.align('center').line(ch);
   t.line(new Date().toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' }));
   t.align('left').hr();
 
+  const showCust = rc?.showCustomerInfo ?? rc?.show_customer_info ?? false;
+  if (showCust && input.customer) {
+    if (input.customer.name) t.line(`Cliente: ${input.customer.name}`);
+    if (input.customer.phone) t.line(`Tel: ${input.customer.phone}`);
+    if (input.customer.address) t.line(`Dir: ${input.customer.address}`);
+    t.hr('-');
+  }
+
+  const showComments = rc?.showComments ?? rc?.show_comments ?? true;
   for (const l of input.lines) {
     t.row(`${l.qty} x ${l.label}`, money(l.unitPrice * l.qty));
-    if (l.note) t.wrapped(`  ${l.note}`, 2);
+    if (showComments && l.note) t.wrapped(`  ${l.note}`, 2);
   }
 
   t.hr();
@@ -49,7 +87,9 @@ export function saleTicket(input: {
   t.bold(true).size('tall').row('TOTAL', money(input.total)).size(1).bold(false);
   t.line(`Pago: ${paymentName(input.paymentMethod)}`);
   t.feed(1);
-  t.align('center').line('¡Gracias por tu compra!');
+
+  const footer = rc?.footerText ?? rc?.footer_text ?? '¡Gracias por tu compra!';
+  t.align('center').line(footer);
   t.cut();
   return t.toString();
 }
@@ -196,17 +236,28 @@ export function accountTicket(input: {
     fantasyName?: string;
   };
   footerNote?: string;
+  receiptConfig?: ReceiptConfigInput;
+  customer?: { name?: string; phone?: string; address?: string };
 }): string {
   const t = new Esc(input.width);
   t.init();
 
+  const rc = input.receiptConfig;
+  const showLogo = rc?.showLogo ?? rc?.show_logo ?? true;
+
   // Encabezado
-  t.align('center')
-    .bold(true)
-    .size(2)
-    .line(input.fiscalData?.fantasyName || input.businessName)
-    .size(1)
-    .bold(false);
+  t.align('center');
+  if (showLogo) {
+    t.bold(true)
+      .size(2)
+      .line(input.fiscalData?.fantasyName || input.businessName)
+      .size(1)
+      .bold(false);
+  } else {
+    t.bold(true)
+      .line(input.fiscalData?.fantasyName || input.businessName)
+      .bold(false);
+  }
 
   if (input.fiscalData?.enabled) {
     if (input.fiscalData.address) t.line(input.fiscalData.address);
@@ -215,21 +266,37 @@ export function accountTicket(input: {
     if (input.fiscalData.iibb) t.line(`Ing. Brutos: ${input.fiscalData.iibb}`);
   }
 
+  const customHeader = rc?.headerText ?? rc?.header_text;
+  if (customHeader && customHeader.trim()) {
+    t.wrapped(customHeader.trim());
+    t.feed(1);
+  }
+
   t.bold(true).line('CONTROL DE MESA / PRE-CUENTA').bold(false);
   t.line(new Date().toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' }));
   t.align('left').hr('=');
 
   t.bold(true).line(`Ubicacion: ${input.place}`).bold(false);
   if (input.account) t.line(`Cuenta: ${input.account}`);
+
+  const showCust = rc?.showCustomerInfo ?? rc?.show_customer_info ?? false;
+  if (showCust && input.customer) {
+    if (input.customer.name) t.line(`Cliente: ${input.customer.name}`);
+    if (input.customer.phone) t.line(`Tel: ${input.customer.phone}`);
+    if (input.customer.address) t.line(`Dir: ${input.customer.address}`);
+  }
   t.hr('-');
 
+  const showComments = rc?.showComments ?? rc?.show_comments ?? true;
   for (const l of input.lines) {
     const lineTotal = l.unitPrice * l.qty;
     t.row(`${l.qty} x ${l.label}`, money(lineTotal));
     if (l.discountPct && l.discountPct > 0) {
       t.wrapped(`  (Desc. ${Math.round(l.discountPct)}% incluido)`, 2);
     }
-    if (l.note) t.wrapped(`  ${l.note}`, 2);
+    if (showComments && l.note) {
+      t.wrapped(`  ${l.note}`, 2);
+    }
   }
 
   t.hr('-');
@@ -242,7 +309,9 @@ export function accountTicket(input: {
 
   t.align('center');
   t.line('DOCUMENTO NO VALIDO COMO FACTURA');
-  t.line(input.footerNote || '¡Muchas gracias por su visita!');
+
+  const customFooter = rc?.footerText ?? rc?.footer_text ?? input.footerNote ?? '¡Muchas gracias por su visita!';
+  t.line(customFooter);
   t.cut();
 
   return t.toString();

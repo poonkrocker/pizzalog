@@ -1,5 +1,5 @@
 import type { ApiClient } from './client';
-import type { Business, BusinessHour, BusinessTheme, SocialLink } from '../types';
+import type { Business, BusinessHour, BusinessTheme, ReceiptConfig, SocialLink } from '../types';
 
 export interface BusinessUpdateInput {
   name: string;
@@ -16,6 +16,7 @@ export interface BusinessUpdateInput {
   pay_methods_pickup?: string[];
   pay_methods_delivery?: string[];
   theme?: BusinessTheme | null;
+  receipt_config?: ReceiptConfig | null;
 }
 
 export interface BusinessHoursResponse {

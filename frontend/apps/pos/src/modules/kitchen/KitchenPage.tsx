@@ -23,11 +23,24 @@ export function KitchenPage() {
   const sorted = [...list].sort((a, b) => a.created_at.localeCompare(b.created_at));
 
   if (sorted.length === 0) {
-    return <div className="kds-empty">No hay comandas pendientes.</div>;
+    return (
+      <div className="kds-page">
+        <div className="retro-page-heading">
+          <img src="/category-icons/module-oven.svg" alt="" className="retro-page-heading__icon" />
+          <h1>Cocina</h1>
+        </div>
+        <div className="kds-empty">No hay comandas pendientes.</div>
+      </div>
+    );
   }
 
   return (
-    <div className="kds">
+    <div className="kds-page">
+      <div className="retro-page-heading">
+        <img src="/category-icons/module-oven.svg" alt="" className="retro-page-heading__icon" />
+        <h1>Cocina</h1>
+      </div>
+      <div className="kds">
       {sorted.map((r) => (
         <RoundCard
           key={r.id}
@@ -36,6 +49,7 @@ export function KitchenPage() {
           onAdvance={(status) => setStatus.mutate({ roundId: r.id, status })}
         />
       ))}
+      </div>
     </div>
   );
 }

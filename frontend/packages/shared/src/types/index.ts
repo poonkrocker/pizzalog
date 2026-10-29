@@ -194,6 +194,15 @@ export interface BusinessTheme {
   pattern?: 'mosaico' | 'liso' | 'rayas' | 'lunares';
 }
 
+export interface ReceiptConfig {
+  show_logo?: boolean;
+  header_text?: string | null;
+  footer_text?: string | null;
+  show_customer_info?: boolean;
+  show_comments?: boolean;
+  language?: string;
+}
+
 export interface Business {
   id: number;
   name: string;
@@ -211,6 +220,7 @@ export interface Business {
   pay_methods_pickup: string[];
   pay_methods_delivery: string[];
   theme: BusinessTheme | null;
+  receipt_config?: ReceiptConfig | null;
 }
 
 // --- Horarios de atención (gatean el pedido online, no la carta) -----------

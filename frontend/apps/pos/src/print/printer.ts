@@ -13,6 +13,20 @@ export interface ConfiguredPrinter {
   isDefault?: boolean;
 }
 
+export interface ReceiptConfig {
+  showLogo?: boolean;
+  headerText?: string;
+  footerText?: string;
+  showCustomerInfo?: boolean;
+  showComments?: boolean;
+  language?: string;
+  show_logo?: boolean;
+  header_text?: string | null;
+  footer_text?: string | null;
+  show_customer_info?: boolean;
+  show_comments?: boolean;
+}
+
 export interface PrinterSettings {
   address: string | null;
   name: string | null;
@@ -31,6 +45,7 @@ export interface PrinterSettings {
     address?: string;
     footerNote?: string;
   };
+  receiptConfig?: ReceiptConfig;
 }
 
 const KEY = 'printer_settings';

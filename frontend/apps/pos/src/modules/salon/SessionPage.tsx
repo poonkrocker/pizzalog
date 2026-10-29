@@ -93,6 +93,12 @@ export function SessionPage() {
         width: settings.width,
         fiscalData: settings.fiscalData,
         footerNote: settings.fiscalData?.footerNote,
+        receiptConfig: settings.receiptConfig || cachedBiz?.receipt_config,
+        customer: (s as any).customer ? {
+          name: (s as any).customer.name,
+          phone: (s as any).customer.phone,
+          address: (s as any).customer.address,
+        } : undefined,
       });
 
       const err = await tryPrint(ticket);
