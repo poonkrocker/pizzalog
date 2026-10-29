@@ -13,13 +13,13 @@ export function HomePage() {
   const isCashOpen = Boolean(cashSession && cashSession.status === 'open');
 
   return (
-    <div className="home" style={{ padding: '20px 16px', maxWidth: '640px', margin: '0 auto' }}>
+    <div className="home retro-home">
       {/* Saludo */}
-      <div style={{ marginBottom: '20px' }}>
-        <h1 style={{ fontSize: '26px', fontWeight: 800, margin: '0 0 4px 0', color: 'var(--text)' }}>
+      <div className="retro-home__welcome">
+        <h1 className="retro-home__greeting">
           Hola{user?.name ? `, ${user.name}` : ''} 👋
         </h1>
-        <p style={{ margin: 0, fontSize: '14px', color: 'var(--muted)' }}>
+        <p className="retro-home__connection">
           {online ? '🟢 Conectado con el servidor' : '🟠 Trabajando en modo local (sin conexión)'}
         </p>
       </div>
@@ -28,15 +28,12 @@ export function HomePage() {
       {!cashLoading && (
         <div
           onClick={() => navigate('/caja')}
+          className="retro-home__cash"
           style={{
             cursor: 'pointer',
-            borderRadius: '16px',
-            padding: '16px 18px',
             marginBottom: '24px',
-            background: isCashOpen
-              ? 'linear-gradient(135deg, rgba(108, 192, 112, 0.15) 0%, rgba(42, 38, 37, 1) 100%)'
-              : 'linear-gradient(135deg, rgba(253, 183, 64, 0.18) 0%, rgba(42, 38, 37, 1) 100%)',
-            border: `1px solid ${isCashOpen ? 'var(--success)' : 'var(--ocre)'}`,
+            background: 'var(--surface)',
+            border: `2px solid ${isCashOpen ? 'var(--success)' : 'var(--ocre)'}`,
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
@@ -75,43 +72,27 @@ export function HomePage() {
       )}
 
       {/* Menú de Módulos */}
-      <h2 style={{ fontSize: '15px', textTransform: 'uppercase', color: 'var(--muted)', letterSpacing: '0.5px', margin: '0 0 12px 0' }}>
+      <h2 className="retro-home__section-title">
         Operaciones
       </h2>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+      <div className="retro-home__grid">
         {/* Mostrador / Venta */}
         <div
           onClick={() => navigate('/venta')}
-          style={{
-            cursor: 'pointer',
-            background: 'var(--surface)',
-            border: '1px solid var(--line)',
-            borderRadius: '16px',
-            padding: '20px 16px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '8px',
-          }}
+          className="retro-home__tile"
+          style={{ cursor: 'pointer' }}
         >
           <img className="home-tile-illustration" src="/category-icons/product-pizza.svg" alt="" aria-hidden="true" />
-          <strong style={{ fontSize: '16px', color: 'var(--text)' }}>Venta Mostrador</strong>
-          <small style={{ color: 'var(--muted)', fontSize: '12px' }}>Para llevar & delivery</small>
+          <strong className="retro-home__tile-title">Venta Mostrador</strong>
+          <small className="retro-home__tile-subtitle">Para llevar & delivery</small>
         </div>
 
         {/* Salón */}
         <div
           onClick={() => navigate('/salon')}
-          style={{
-            cursor: 'pointer',
-            background: 'var(--surface)',
-            border: '1px solid var(--line)',
-            borderRadius: '16px',
-            padding: '20px 16px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '8px',
-          }}
+          className="retro-home__tile"
+          style={{ cursor: 'pointer' }}
         >
           <img className="home-tile-illustration" src="/category-icons/module-accounts.svg" alt="" aria-hidden="true" />
           <strong style={{ fontSize: '16px', color: 'var(--text)' }}>Cuentas y Comandas</strong>
@@ -121,16 +102,8 @@ export function HomePage() {
         {/* Turno & Caja */}
         <div
           onClick={() => navigate('/caja')}
-          style={{
-            cursor: 'pointer',
-            background: 'var(--surface)',
-            border: '1px solid var(--line)',
-            borderRadius: '16px',
-            padding: '20px 16px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '8px',
-          }}
+          className="retro-home__tile"
+          style={{ cursor: 'pointer' }}
         >
           <img className="home-tile-illustration" src="/category-icons/module-cash.svg" alt="" aria-hidden="true" />
           <strong style={{ fontSize: '16px', color: 'var(--text)' }}>Turno & Caja</strong>
@@ -140,16 +113,8 @@ export function HomePage() {
         {/* Cocina */}
         <div
           onClick={() => navigate('/cocina')}
-          style={{
-            cursor: 'pointer',
-            background: 'var(--surface)',
-            border: '1px solid var(--line)',
-            borderRadius: '16px',
-            padding: '20px 16px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '8px',
-          }}
+          className="retro-home__tile"
+          style={{ cursor: 'pointer' }}
         >
           <img className="home-tile-illustration" src="/category-icons/module-oven.svg" alt="" aria-hidden="true" />
           <strong style={{ fontSize: '16px', color: 'var(--text)' }}>Cocina</strong>
