@@ -137,20 +137,29 @@ export function App() {
     return (menu?.categories ?? []).filter((c) => !extraCatIds.has(c.id) && withProducts.has(c.id));
   }, [menu, products, extraCatIds]);
 
+  function isCategoryEligibleForExtras(name: string): boolean {
+    // Categorías particulares que aceptan extras: pizzas, entradas y sanguches / hamburguesas
+    return /pizza|pizzeta|calz[oó]n|fugazz|entrada|starter|picada|tapa|apetizer|aperitivo|s[aá]ngu|sandwich|burger|hamburguesa|lomo|lomito|panino/i.test(name);
+  }
+
   function canTakePizzaExtras(p: Product): boolean {
     if (extraProducts.length === 0) return false;
     if (p.is_combo === 1) return false;
-    if (p.is_combinable === 1) return true;
     if (p.category_id !== null && pizzaCatIds.has(p.category_id)) return true;
-    const catName =
-      (menu?.categories ?? []).find((c) => c.id === p.category_id)?.name ?? '';
-    if (/bebida|cerveza|vino|trago|gaseosa|agua|postre|helado|fain[aá]|empanada/i.test(catName)) {
-      return false;
+
+    const cat = (menu?.categories ?? []).find((c) => c.id === p.category_id);
+    const catName = cat?.name ?? '';
+
+    // Si la categoría tiene configurado explícitamente allows_extras en el panel
+    if (cat && (cat as any).allows_extras === 1) return true;
+    if (cat && (cat as any).allows_extras === 0) return false;
+
+    // Solo se pueden agregar extras a artículos de categorías particulares: pizzas, entradas y sanguches
+    if (isCategoryEligibleForExtras(catName) || isCategoryEligibleForExtras(p.name)) {
+      return true;
     }
-    if (/bebida|cerveza|vino|trago|gaseosa|agua|coca|sprite|fanta|pepsi|postre|helado|tiramis|flan|brownie|fain[aá]/i.test(p.name)) {
-      return false;
-    }
-    return true;
+
+    return false;
   }
 
   // El orden lo manda el panel: categorías ordenadas y luego productos por su sort_order.

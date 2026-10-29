@@ -7,11 +7,27 @@ use Pizzalog\Core\Response;
 
 class CategoryController
 {
+    public function __construct()
+    {
+        self::ensureSchema();
+    }
+
+    public static function ensureSchema(): void
+    {
+        try {
+            $pdo = Database::pdo();
+            $col = $pdo->query("SHOW COLUMNS FROM categories LIKE 'allows_extras'")->fetch();
+            if (!$col) {
+                $pdo->exec("ALTER TABLE categories ADD COLUMN allows_extras TINYINT(1) NOT NULL DEFAULT 0 AFTER is_active");
+            }
+        } catch (\Throwable) {}
+    }
+
     /** GET /categories  (incluye cuántos productos activos tiene cada una) */
     public function index(Request $req): void
     {
         $stmt = Database::pdo()->prepare(
-            'SELECT c.id, c.name, c.sort_order, c.is_active,
+            'SELECT c.id, c.name, c.sort_order, c.is_active, COALESCE(c.allows_extras, 0) AS allows_extras,
                     (SELECT COUNT(*) FROM products p
                       WHERE p.category_id = c.id AND p.is_active = 1) AS product_count
                FROM categories c
@@ -25,6 +41,7 @@ class CategoryController
             $c['sort_order']    = (int) $c['sort_order'];
             $c['is_active']     = (int) $c['is_active'];
             $c['product_count']  = (int) $c['product_count'];
+            $c['allows_extras']  = (int) $c['allows_extras'];
             $c['products_count'] = (int) $c['product_count'];
             return $c;
         }, $stmt->fetchAll());
@@ -71,9 +88,9 @@ class CategoryController
         }
 
         $stmt = Database::pdo()->prepare(
-            'INSERT INTO categories (business_id, name, sort_order) VALUES (?, ?, ?)'
+            'INSERT INTO categories (business_id, name, sort_order, allows_extras) VALUES (?, ?, ?, ?)'
         );
-        $stmt->execute([$bid, $name, (int) $req->input('sort_order', 0)]);
+        $stmt->execute([$bid, $name, (int) $req->input('sort_order', 0), (int) (bool) $req->input('allows_extras', 0)]);
         $id = (int) Database::pdo()->lastInsertId();
 
         Response::ok(['category' => $this->findOwned($req, $id)], 201);
@@ -95,13 +112,14 @@ class CategoryController
         }
 
         $stmt = Database::pdo()->prepare(
-            'UPDATE categories SET name = ?, sort_order = ?, is_active = ?
+            'UPDATE categories SET name = ?, sort_order = ?, is_active = ?, allows_extras = ?
               WHERE id = ? AND business_id = ?'
         );
         $stmt->execute([
             $name,
             (int) $req->input('sort_order', 0),
             (int) (bool) $req->input('is_active', true),
+            (int) (bool) $req->input('allows_extras', 0),
             $id,
             $bid,
         ]);

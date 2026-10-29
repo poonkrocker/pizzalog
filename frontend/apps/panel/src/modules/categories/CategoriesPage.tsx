@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import { ApiError, type Category } from '@pizzalog/shared';
 import {
   Button,
+  Checkbox,
   DataTable,
   EmptyState,
   ErrorState,
@@ -23,6 +24,7 @@ export function CategoriesPage() {
   const [editing, setEditing] = useState<Category | null>(null);
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
+  const [allowsExtras, setAllowsExtras] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const cats = categories.data ?? [];
@@ -40,6 +42,7 @@ export function CategoriesPage() {
   function startCreate() {
     setEditing(null);
     setName('');
+    setAllowsExtras(false);
     setError(null);
     setOpen(true);
   }
@@ -47,6 +50,8 @@ export function CategoriesPage() {
   function startEdit(c: Category) {
     setEditing(c);
     setName(c.name);
+    const isEligible = Boolean(c.allows_extras !== undefined && c.allows_extras !== null ? c.allows_extras : /pizza|entrada|s[aá]ngu|sandwich|burger|hamburguesa|lomo/i.test(c.name));
+    setAllowsExtras(isEligible);
     setError(null);
     setOpen(true);
   }
@@ -55,7 +60,7 @@ export function CategoriesPage() {
     e.preventDefault();
     setError(null);
     try {
-      await save.mutateAsync({ id: editing?.id, data: { name: name.trim() } });
+      await save.mutateAsync({ id: editing?.id, data: { name: name.trim(), allows_extras: allowsExtras ? 1 : 0 } });
       setOpen(false);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'No se pudo guardar la categoría');
@@ -96,6 +101,25 @@ export function CategoriesPage() {
       },
     },
     { key: 'name', header: 'Categoría' },
+    {
+      key: 'allows_extras',
+      header: 'Extras',
+      width: '120px',
+      render: (c) => {
+        const active = Boolean(
+          c.allows_extras !== undefined && c.allows_extras !== null
+            ? c.allows_extras
+            : /pizza|entrada|s[aá]ngu|sandwich|burger|hamburguesa|lomo/i.test(c.name),
+        );
+        return active ? (
+          <span style={{ fontSize: '11px', background: '#e2f5ea', color: '#166534', padding: '2px 8px', borderRadius: '4px', fontWeight: 600 }}>
+            Habilitados
+          </span>
+        ) : (
+          <span style={{ fontSize: '11px', color: '#94a3b8' }}>-</span>
+        );
+      },
+    },
     {
       key: 'products_count',
       header: 'Productos',
@@ -153,6 +177,16 @@ export function CategoriesPage() {
           <Field label="Nombre">
             <Input value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
           </Field>
+          <div style={{ marginTop: '14px', marginBottom: '14px' }}>
+            <Checkbox
+              label="Permitir agregar extras en esta categoría (ej. Pizzas, Entradas, Sánguches)"
+              checked={allowsExtras}
+              onChange={() => setAllowsExtras(!allowsExtras)}
+            />
+            <p style={{ fontSize: '12px', color: '#64748b', margin: '4px 0 0 24px' }}>
+              En la carta web y pedidos, los productos de esta categoría podrán sumar adicionales (como queso extra, salsas o ingredientes).
+            </p>
+          </div>
           {error && (
             <p className="login__error" role="alert">
               {error}
