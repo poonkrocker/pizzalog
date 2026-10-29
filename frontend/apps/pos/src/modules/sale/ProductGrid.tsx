@@ -19,16 +19,26 @@ function ProductGridItem({
 }) {
   const timerRef = useRef<any>(null);
   const isLongPressRef = useRef(false);
+  const isMovedRef = useRef(false);
+  const startPosRef = useRef<{ x: number; y: number } | null>(null);
+  const touchStartTimeRef = useRef<number>(0);
+  const isTouchRef = useRef(false);
 
-  function startHold() {
+  function startHold(clientX: number, clientY: number) {
     isLongPressRef.current = false;
+    isMovedRef.current = false;
+    startPosRef.current = { x: clientX, y: clientY };
+    touchStartTimeRef.current = Date.now();
+
     timerRef.current = setTimeout(() => {
-      isLongPressRef.current = true;
-      try {
-        if ('vibrate' in navigator) navigator.vibrate(40);
-      } catch {}
-      onAdd(product, true);
-    }, 450);
+      if (!isMovedRef.current) {
+        isLongPressRef.current = true;
+        try {
+          if ('vibrate' in navigator) navigator.vibrate(40);
+        } catch {}
+        onAdd(product, true);
+      }
+    }, 500);
   }
 
   function clearHold() {
@@ -38,29 +48,77 @@ function ProductGridItem({
     }
   }
 
+  function handleTouchStart(e: React.TouchEvent) {
+    isTouchRef.current = true;
+    const t = e.touches[0];
+    if (t) startHold(t.clientX, t.clientY);
+  }
+
+  function handleTouchMove(e: React.TouchEvent) {
+    const t = e.touches[0];
+    if (t && startPosRef.current) {
+      const dx = Math.abs(t.clientX - startPosRef.current.x);
+      const dy = Math.abs(t.clientY - startPosRef.current.y);
+      // Si el desplazamiento supera los 8px, es scroll y se cancela cualquier tap/hold
+      if (dx > 8 || dy > 8) {
+        isMovedRef.current = true;
+        clearHold();
+      }
+    }
+  }
+
+  function handleTouchEnd(e: React.TouchEvent) {
+    clearHold();
+    if (isLongPressRef.current || isMovedRef.current) {
+      e.preventDefault();
+    }
+  }
+
+  function handleMouseDown(e: React.MouseEvent) {
+    if (isTouchRef.current) return;
+    startHold(e.clientX, e.clientY);
+  }
+
+  function handleMouseUp() {
+    if (isTouchRef.current) return;
+    clearHold();
+  }
+
+  function handleClick(e: React.MouseEvent) {
+    if (isLongPressRef.current || isMovedRef.current) {
+      isLongPressRef.current = false;
+      isMovedRef.current = false;
+      e.preventDefault();
+      return;
+    }
+
+    // Filtrar micro-toques accidentales durante el scroll
+    const elapsed = Date.now() - touchStartTimeRef.current;
+    if (isTouchRef.current && elapsed < 40) {
+      return;
+    }
+
+    onAdd(product, false);
+  }
+
+  const hasBasePrice = Boolean(product.price && Number(product.price) > 0);
+  const activeVariants = (product.variants ?? []).filter((v) => v.is_active === 1);
+  const minVariantPrice = activeVariants.length > 0
+    ? Math.min(...activeVariants.map((v) => Number(v.price) || 0).filter((p) => p > 0))
+    : 0;
+
   return (
     <button
       type="button"
       className="product-btn"
-      onTouchStart={startHold}
-      onTouchEnd={(e) => {
-        clearHold();
-        if (isLongPressRef.current) {
-          e.preventDefault();
-        }
-      }}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
       onTouchCancel={clearHold}
-      onMouseDown={startHold}
-      onMouseUp={clearHold}
+      onMouseDown={handleMouseDown}
+      onMouseUp={handleMouseUp}
       onMouseLeave={clearHold}
-      onClick={(e) => {
-        if (isLongPressRef.current) {
-          isLongPressRef.current = false;
-          e.preventDefault();
-          return;
-        }
-        onAdd(product, false);
-      }}
+      onClick={handleClick}
       style={{ userSelect: 'none', WebkitUserSelect: 'none' }}
     >
       <span className="product-btn__illustration" aria-hidden="true">
@@ -72,20 +130,26 @@ function ProductGridItem({
       </span>
       <span className="product-btn__details">
         <span className="product-btn__name">{product.name}</span>
-      <span className="product-btn__price">{formatARS(product.price)}</span>
-      {product.has_variants === 1 && (
-        <span
-          style={{
-            fontSize: '11px',
-            color: 'var(--muted)',
-            display: 'block',
-            marginTop: '2px',
-            opacity: 0.8,
-          }}
-        >
-          Mantener p/ opciones
+        <span className="product-btn__price">
+          {hasBasePrice
+            ? formatARS(product.price)
+            : minVariantPrice > 0
+            ? `Desde ${formatARS(minVariantPrice)}`
+            : formatARS(product.price)}
         </span>
-      )}
+        {product.has_variants === 1 && (
+          <span
+            style={{
+              fontSize: '11px',
+              color: 'var(--muted)',
+              display: 'block',
+              marginTop: '2px',
+              opacity: 0.8,
+            }}
+          >
+            {hasBasePrice ? 'Mantener p/ opciones' : 'Elegir opción'}
+          </span>
+        )}
       </span>
     </button>
   );

@@ -97,7 +97,15 @@ export function AddRoundSheet({
       return;
     }
     if (product.has_variants === 1) {
-      // Tap común: agregar directamente con queso común (sin extras)
+      const hasBasePrice = Boolean(product.price && Number(product.price) > 0);
+      // Productos sin precio base propio (ej. cerveza o porciones con precio por variante):
+      // abrir directamente el selector de variantes con un tap común sin necesidad de tap largo
+      if (!hasBasePrice) {
+        setVariantFor(product);
+        return;
+      }
+
+      // Tap común para pizzas con precio base: agregar directamente con queso común (sin extras)
       const variants = (product.variants ?? []).filter((v) => v.is_active === 1);
       const defaultVariant =
         variants.find((v) => !/vegan/i.test(v.label) && /com[uú]n|clasic|tradicional/i.test(v.label)) ??
@@ -243,7 +251,11 @@ export function AddRoundSheet({
         </div>
 
         <div className="round-grid">
-          <ProductGrid products={visible} onAdd={add} />
+          <ProductGrid
+            products={visible}
+            onAdd={add}
+            categoryName={categories.find((c) => String(c.id) === tab)?.name}
+          />
         </div>
 
         {lines.length > 0 && (
