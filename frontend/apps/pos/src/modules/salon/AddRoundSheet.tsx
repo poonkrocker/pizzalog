@@ -9,7 +9,8 @@ import { comandaTicket } from '@/print/tickets';
 import { dispatchComandas, getPrinterSettings, isNative, tryPrint } from '@/print/printer';
 
 function isExtrasCategoryName(name: string): boolean {
-  return /^(extras?|agregados?|adicionales?)(\s+.*)?$/i.test(name.trim());
+  if (!name) return false;
+  return /extra|agregado|adicional|topping/i.test(name.trim());
 }
 
 export function AddRoundSheet({
@@ -41,7 +42,7 @@ export function AddRoundSheet({
   }, [allCategories]);
 
   const extraProducts = useMemo(
-    () => allSalonProducts.filter((p) => p.category_id !== null && extraCatIds.has(p.category_id)),
+    () => allSalonProducts.filter((p) => p.is_active === 1 && ((p.category_id !== null && extraCatIds.has(p.category_id)) || (p as any).is_extra === 1)),
     [allSalonProducts, extraCatIds],
   );
 
@@ -92,21 +93,49 @@ export function AddRoundSheet({
     if (p.category_id !== null && extraCatIds.has(p.category_id)) return false;
 
     const cat = allCategories.find((c) => c.id === p.category_id);
-    const catName = cat?.name ?? '';
+    const catName = (cat?.name ?? '').toLowerCase();
+    const prodName = p.name.toLowerCase();
 
+    // 1. Si alguna categoría de extras tiene target_category_ids configurado explícitamente:
+    const extrasCategories = allCategories.filter((c) => isExtrasCategoryName(c.name));
+    const explicitTargets = new Set<number>();
+    let hasExplicitTargets = false;
+    for (const ec of extrasCategories) {
+      const targets = (ec as any).target_category_ids;
+      if (targets) {
+        hasExplicitTargets = true;
+        const arr = Array.isArray(targets)
+          ? targets
+          : String(targets).split(',').map((x) => parseInt(x.trim(), 10)).filter(Boolean);
+        arr.forEach((id: number) => explicitTargets.add(id));
+      }
+    }
+
+    if (hasExplicitTargets && p.category_id !== null) {
+      return explicitTargets.has(p.category_id);
+    }
+
+    // 2. Si la categoría tiene configurado explícitamente allows_extras en el panel
     if (cat && (cat as any).allows_extras === 1) return true;
-    if (cat && (cat as any).allows_extras === 0) return false;
 
-    const n = `${catName} ${p.name}`.toLowerCase();
+    // 3. Exclusiones evidentes
     if (
-      n.includes('porci') ||
-      n.includes('cerve') ||
-      n.includes('bebida') ||
-      n.includes('gaseosa') ||
-      n.includes('postre')
+      catName.includes('cerve') ||
+      catName.includes('bebida') ||
+      catName.includes('gaseosa') ||
+      catName.includes('postre') ||
+      catName.includes('helad') ||
+      catName.includes('cafe') ||
+      prodName.includes('cerve') ||
+      prodName.includes('gaseosa') ||
+      prodName.includes('coca') ||
+      prodName.includes('postre')
     ) {
       return false;
     }
+
+    // 4. Por defecto: Pizzas SIEMPRE admiten extras, al igual que entradas y sánguches
+    const n = `${catName} ${prodName}`;
     return (
       n.includes('pizza') ||
       n.includes('entrada') ||

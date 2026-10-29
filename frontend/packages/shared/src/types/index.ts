@@ -25,6 +25,7 @@ export interface Category {
   product_count?: number;
   products_count?: number;
   allows_extras?: number | boolean;
+  target_category_ids?: number[] | null;
 }
 
 /** Claves de visible_days (lunes a domingo, en inglés como las guarda el back). */

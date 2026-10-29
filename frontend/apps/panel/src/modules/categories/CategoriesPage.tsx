@@ -25,6 +25,7 @@ export function CategoriesPage() {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState('');
   const [allowsExtras, setAllowsExtras] = useState(false);
+  const [targetCategoryIds, setTargetCategoryIds] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const cats = categories.data ?? [];
@@ -43,8 +44,13 @@ export function CategoriesPage() {
     setEditing(null);
     setName('');
     setAllowsExtras(false);
+    setTargetCategoryIds([]);
     setError(null);
     setOpen(true);
+  }
+
+  function isExtrasCategory(categoryName: string): boolean {
+    return /extra|agregado|adicional|topping/i.test(categoryName.trim());
   }
 
   function startEdit(c: Category) {
@@ -52,6 +58,21 @@ export function CategoriesPage() {
     setName(c.name);
     const isEligible = Boolean(c.allows_extras !== undefined && c.allows_extras !== null ? c.allows_extras : /pizza|entrada|s[aá]ngu|sandwich|burger|hamburguesa|lomo/i.test(c.name));
     setAllowsExtras(isEligible);
+
+    const targets = (c as any).target_category_ids;
+    if (Array.isArray(targets)) {
+      setTargetCategoryIds(targets);
+    } else if (typeof targets === 'string' && targets.trim()) {
+      setTargetCategoryIds(targets.split(',').map((x: string) => parseInt(x.trim(), 10)).filter(Boolean));
+    } else if (isExtrasCategory(c.name)) {
+      const defaultIds = cats
+        .filter((x) => x.id !== c.id && /pizza|entrada|s[aá]ngu|sandwich|burger|hamburguesa|lomo/i.test(x.name))
+        .map((x) => x.id);
+      setTargetCategoryIds(defaultIds);
+    } else {
+      setTargetCategoryIds([]);
+    }
+
     setError(null);
     setOpen(true);
   }
@@ -60,7 +81,15 @@ export function CategoriesPage() {
     e.preventDefault();
     setError(null);
     try {
-      await save.mutateAsync({ id: editing?.id, data: { name: name.trim(), allows_extras: allowsExtras ? 1 : 0 } });
+      const isExtrasCat = /extra|agregado|adicional|topping/i.test(name.trim());
+      await save.mutateAsync({
+        id: editing?.id,
+        data: {
+          name: name.trim(),
+          allows_extras: allowsExtras ? 1 : 0,
+          target_category_ids: isExtrasCat ? targetCategoryIds : undefined,
+        },
+      });
       setOpen(false);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'No se pudo guardar la categoría');
@@ -104,8 +133,26 @@ export function CategoriesPage() {
     {
       key: 'allows_extras',
       header: 'Extras',
-      width: '120px',
+      width: '160px',
       render: (c) => {
+        if (/extra|agregado|adicional|topping/i.test(c.name)) {
+          const targets = (c as any).target_category_ids;
+          const targetArr = Array.isArray(targets) ? targets : [];
+          if (targetArr.length > 0) {
+            const names = targetArr.map((id: number) => cats.find((x) => x.id === id)?.name).filter(Boolean).join(', ');
+            return (
+              <span style={{ fontSize: '11px', background: '#e0f2fe', color: '#0369a1', padding: '2px 8px', borderRadius: '4px', fontWeight: 600 }} title={names}>
+                Aplica a {targetArr.length} cat.
+              </span>
+            );
+          }
+          return (
+            <span style={{ fontSize: '11px', background: '#fef3c7', color: '#92400e', padding: '2px 8px', borderRadius: '4px', fontWeight: 600 }}>
+              Configurar destinos
+            </span>
+          );
+        }
+
         const active = Boolean(
           c.allows_extras !== undefined && c.allows_extras !== null
             ? c.allows_extras
@@ -177,16 +224,45 @@ export function CategoriesPage() {
           <Field label="Nombre">
             <Input value={name} onChange={(e) => setName(e.target.value)} required autoFocus />
           </Field>
-          <div style={{ marginTop: '14px', marginBottom: '14px' }}>
-            <Checkbox
-              label="Permitir agregar extras en esta categoría (ej. Pizzas, Entradas, Sánguches)"
-              checked={allowsExtras}
-              onChange={() => setAllowsExtras(!allowsExtras)}
-            />
-            <p style={{ fontSize: '12px', color: '#64748b', margin: '4px 0 0 24px' }}>
-              En la carta web y pedidos, los productos de esta categoría podrán sumar adicionales (como queso extra, salsas o ingredientes).
-            </p>
-          </div>
+          {/extra|agregado|adicional|topping/i.test(name.trim()) ? (
+            <div style={{ marginTop: '16px', marginBottom: '16px', padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+              <strong style={{ display: 'block', marginBottom: '6px', fontSize: '13px', color: '#0f172a' }}>
+                🧀 ¿A qué categorías se pueden sumar estos extras?
+              </strong>
+              <p style={{ fontSize: '12px', color: '#64748b', margin: '0 0 10px 0' }}>
+                Seleccioná las categorías cuyos productos podrán sumar los productos de esta lista (en la app TPV y en la carta web):
+              </p>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '8px', maxHeight: '180px', overflowY: 'auto' }}>
+                {cats.filter((x) => x.id !== editing?.id).map((c) => (
+                  <label key={c.id} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={targetCategoryIds.includes(c.id)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setTargetCategoryIds((prev) => [...prev, c.id]);
+                        } else {
+                          setTargetCategoryIds((prev) => prev.filter((id) => id !== c.id));
+                        }
+                      }}
+                    />
+                    <span>{c.name}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div style={{ marginTop: '14px', marginBottom: '14px' }}>
+              <Checkbox
+                label="Permitir agregar extras a los productos de esta categoría"
+                checked={allowsExtras}
+                onChange={() => setAllowsExtras(!allowsExtras)}
+              />
+              <p style={{ fontSize: '12px', color: '#64748b', margin: '4px 0 0 24px' }}>
+                En la carta web y la TPV, los productos de esta categoría podrán sumar adicionales (como queso extra, salsas o agregados).
+              </p>
+            </div>
+          )}
           {error && (
             <p className="login__error" role="alert">
               {error}

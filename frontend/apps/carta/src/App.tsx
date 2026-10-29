@@ -145,21 +145,54 @@ export function App() {
   function canTakePizzaExtras(p: Product): boolean {
     if (extraProducts.length === 0) return false;
     if (p.is_combo === 1) return false;
-    if (p.category_id !== null && pizzaCatIds.has(p.category_id)) return true;
 
     const cat = (menu?.categories ?? []).find((c) => c.id === p.category_id);
-    const catName = cat?.name ?? '';
+    const catName = (cat?.name ?? '').toLowerCase();
+    const prodName = p.name.toLowerCase();
 
-    // Si la categoría tiene configurado explícitamente allows_extras en el panel
-    if (cat && (cat as any).allows_extras === 1) return true;
-    if (cat && (cat as any).allows_extras === 0) return false;
-
-    // Solo se pueden agregar extras a artículos de categorías particulares: pizzas, entradas y sanguches
-    if (isCategoryEligibleForExtras(catName) || isCategoryEligibleForExtras(p.name)) {
-      return true;
+    // 1. Si alguna categoría de extras tiene target_category_ids configurado explícitamente:
+    const extrasCategories = (menu?.categories ?? []).filter((c) => isExtrasCategoryName(c.name));
+    const explicitTargets = new Set<number>();
+    let hasExplicitTargets = false;
+    for (const ec of extrasCategories) {
+      const targets = (ec as any).target_category_ids;
+      if (targets) {
+        hasExplicitTargets = true;
+        const arr = Array.isArray(targets)
+          ? targets
+          : String(targets).split(',').map((x) => parseInt(x.trim(), 10)).filter(Boolean);
+        arr.forEach((id: number) => explicitTargets.add(id));
+      }
     }
 
-    return false;
+    if (hasExplicitTargets && p.category_id !== null) {
+      return explicitTargets.has(p.category_id);
+    }
+
+    // 2. Si la categoría tiene configurado explícitamente allows_extras en el panel
+    if (cat && (cat as any).allows_extras === 1) return true;
+
+    // 3. Exclusiones
+    if (
+      catName.includes('cerve') ||
+      catName.includes('bebida') ||
+      catName.includes('gaseosa') ||
+      catName.includes('postre') ||
+      catName.includes('helad') ||
+      catName.includes('cafe') ||
+      prodName.includes('cerve') ||
+      prodName.includes('gaseosa') ||
+      prodName.includes('postre')
+    ) {
+      return false;
+    }
+
+    // 4. Por defecto: Pizzas SIEMPRE admiten extras, al igual que entradas y sánguches
+    return (
+      p.category_id !== null && pizzaCatIds.has(p.category_id) ||
+      isCategoryEligibleForExtras(catName) ||
+      isCategoryEligibleForExtras(prodName)
+    );
   }
 
   // El orden lo manda el panel: categorías ordenadas y luego productos por su sort_order.

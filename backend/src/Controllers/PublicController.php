@@ -78,7 +78,7 @@ class PublicController
         $pdo      = Database::pdo();
 
         $cats = $pdo->prepare(
-            'SELECT id, name, sort_order, COALESCE(allows_extras, 0) AS allows_extras FROM categories
+            'SELECT id, name, sort_order, COALESCE(allows_extras, 0) AS allows_extras, target_category_ids FROM categories
               WHERE business_id = ? AND is_active = 1
               ORDER BY sort_order, name'
         );
@@ -126,6 +126,7 @@ class PublicController
                 'name'       => $c['name'],
                 'sort_order' => (int) $c['sort_order'],
                 'allows_extras' => isset($c['allows_extras']) ? (int) $c['allows_extras'] : 0,
+                'target_category_ids' => !empty($c['target_category_ids']) ? json_decode($c['target_category_ids'], true) : null,
             ], $cats->fetchAll()),
             'products' => $this->buildMenuProducts($bid, $prods->fetchAll(), $now),
         ]);
