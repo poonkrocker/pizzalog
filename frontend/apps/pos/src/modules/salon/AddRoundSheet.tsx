@@ -86,9 +86,42 @@ export function AddRoundSheet({
     });
   }
 
+  function canProductTakeExtras(p: Product): boolean {
+    if (extraProducts.length === 0) return false;
+    if (p.is_combo === 1) return false;
+    if (p.category_id !== null && extraCatIds.has(p.category_id)) return false;
+
+    const cat = allCategories.find((c) => c.id === p.category_id);
+    const catName = cat?.name ?? '';
+
+    if (cat && (cat as any).allows_extras === 1) return true;
+    if (cat && (cat as any).allows_extras === 0) return false;
+
+    const n = `${catName} ${p.name}`.toLowerCase();
+    if (
+      n.includes('porci') ||
+      n.includes('cerve') ||
+      n.includes('bebida') ||
+      n.includes('gaseosa') ||
+      n.includes('postre')
+    ) {
+      return false;
+    }
+    return (
+      n.includes('pizza') ||
+      n.includes('entrada') ||
+      n.includes('sangu') ||
+      n.includes('sandw') ||
+      n.includes('burg') ||
+      n.includes('hamburg') ||
+      n.includes('lomito') ||
+      n.includes('calzone')
+    );
+  }
+
   function add(product: Product, isLongPress = false) {
     if (isLongPress) {
-      // Tap sostenido: abrir selector de opciones (queso vegano) y extras
+      // Tap sostenido: abrir selector de opciones (variantes / extras)
       setVariantFor(product);
       return;
     }
@@ -96,16 +129,21 @@ export function AddRoundSheet({
       setKeypadFor(product);
       return;
     }
-    if (product.has_variants === 1) {
-      const hasBasePrice = Boolean(product.price && Number(product.price) > 0);
-      // Productos sin precio base propio (ej. cerveza o porciones con precio por variante):
-      // abrir directamente el selector de variantes con un tap común sin necesidad de tap largo
-      if (!hasBasePrice) {
-        setVariantFor(product);
-        return;
-      }
 
-      // Tap común para pizzas con precio base: agregar directamente con queso común (sin extras)
+    const hasGeneralPrice = Boolean(product.price && Number(product.price) > 0);
+
+    // Artículos sin precio general (solo tienen precio en variantes, ej: cerveza, porciones de pizza porteña):
+    // El tap simple abre directamente el menú de variantes sin necesidad de tap sostenido
+    // y NUNCA agrega ningún artículo al carrito de forma automática
+    if (product.has_variants === 1 && !hasGeneralPrice) {
+      setVariantFor(product);
+      return;
+    }
+
+    // EN TODOS LOS DEMÁS CASOS: el tap simple agrega DIRECTO al carrito o a la cuenta
+    if (product.has_variants === 1) {
+      // Artículos con precio general que además tienen variantes (ej: pizza con queso común / queso vegano):
+      // agregar directamente con queso común (sin extras)
       const variants = (product.variants ?? []).filter((v) => v.is_active === 1);
       const defaultVariant =
         variants.find((v) => !/vegan/i.test(v.label) && /com[uú]n|clasic|tradicional/i.test(v.label)) ??
@@ -117,6 +155,7 @@ export function AddRoundSheet({
         return;
       }
     }
+
     addLine({ key: `p${product.id}`, product, quantity: 1, unitPrice: Number(product.price) || 0, label: product.name });
   }
 
@@ -318,7 +357,7 @@ export function AddRoundSheet({
       {variantFor && (
         <VariantPicker
           product={variantFor}
-          extras={extraProducts}
+          extras={canProductTakeExtras(variantFor) ? extraProducts : []}
           onPick={(v, selectedExtras) => pickVariant(variantFor, v, selectedExtras)}
           onClose={() => setVariantFor(null)}
         />

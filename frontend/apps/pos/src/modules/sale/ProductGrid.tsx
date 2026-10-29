@@ -24,11 +24,34 @@ function ProductGridItem({
   const touchStartTimeRef = useRef<number>(0);
   const isTouchRef = useRef(false);
 
+  const onScrollCancelRef = useRef<(() => void) | null>(null);
+
+  function clearHold() {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    if (onScrollCancelRef.current) {
+      window.removeEventListener('scroll', onScrollCancelRef.current, true);
+      onScrollCancelRef.current = null;
+    }
+  }
+
   function startHold(clientX: number, clientY: number) {
     isLongPressRef.current = false;
     isMovedRef.current = false;
     startPosRef.current = { x: clientX, y: clientY };
     touchStartTimeRef.current = Date.now();
+
+    clearHold();
+
+    // Si la pantalla se scrollea durante el toque, cancelar inmediatamente cualquier tap o hold
+    const onScroll = () => {
+      isMovedRef.current = true;
+      clearHold();
+    };
+    onScrollCancelRef.current = onScroll;
+    window.addEventListener('scroll', onScroll, { passive: true, capture: true });
 
     timerRef.current = setTimeout(() => {
       if (!isMovedRef.current) {
@@ -39,13 +62,6 @@ function ProductGridItem({
         onAdd(product, true);
       }
     }, 500);
-  }
-
-  function clearHold() {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
   }
 
   function handleTouchStart(e: React.TouchEvent) {
