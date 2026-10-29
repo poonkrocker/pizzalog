@@ -49,9 +49,14 @@ export function CategoriesPage() {
     setOpen(true);
   }
 
-  function isExtrasCategory(categoryName: string): boolean {
-    return /extra|agregado|adicional|topping/i.test(categoryName.trim());
+  function isFoodExtrasCategory(categoryName: string): boolean {
+  if (!categoryName) return false;
+  const n = categoryName.trim().toLowerCase();
+  if (/costo|recargo|comisi[oó]n|env[ií]o|flete|delivery|propina|tarifa|diferencia|inter[eé]s|tarjeta|financier/i.test(n)) {
+    return false;
   }
+  return /^(🧀\s*)?(extras?|agregados?|toppings?)(\s+.*)?$/i.test(n);
+}
 
   function startEdit(c: Category) {
     setEditing(c);
@@ -64,7 +69,7 @@ export function CategoriesPage() {
       setTargetCategoryIds(targets);
     } else if (typeof targets === 'string' && targets.trim()) {
       setTargetCategoryIds(targets.split(',').map((x: string) => parseInt(x.trim(), 10)).filter(Boolean));
-    } else if (isExtrasCategory(c.name)) {
+    } else if (isFoodExtrasCategory(c.name)) {
       const defaultIds = cats
         .filter((x) => x.id !== c.id && /pizza|entrada|s[aá]ngu|sandwich|burger|hamburguesa|lomo/i.test(x.name))
         .map((x) => x.id);
@@ -81,7 +86,7 @@ export function CategoriesPage() {
     e.preventDefault();
     setError(null);
     try {
-      const isExtrasCat = /extra|agregado|adicional|topping/i.test(name.trim());
+      const isExtrasCat = isFoodExtrasCategory(name);
       await save.mutateAsync({
         id: editing?.id,
         data: {

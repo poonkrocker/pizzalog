@@ -8,9 +8,21 @@ import { useAddRound } from './hooks';
 import { comandaTicket } from '@/print/tickets';
 import { dispatchComandas, getPrinterSettings, isNative, tryPrint } from '@/print/printer';
 
-function isExtrasCategoryName(name: string): boolean {
+function isFoodExtrasCategoryName(name: string): boolean {
   if (!name) return false;
-  return /extra|agregado|adicional|topping/i.test(name.trim());
+  const n = name.trim().toLowerCase();
+  // Descartar explícitamente costos, recargos, envíos, comisiones, tarifas o propinas
+  if (/costo|recargo|comisi[oó]n|env[ií]o|flete|delivery|propina|tarifa|diferencia|inter[eé]s|tarjeta|financier/i.test(n)) {
+    return false;
+  }
+  return /^(🧀\s*)?(extras?|agregados?|toppings?)(\s+.*)?$/i.test(n);
+}
+
+function isOperationalFeeOrSurcharge(productName: string): boolean {
+  if (!productName) return false;
+  return /env[ií]o|flete|delivery|rappi|pedidosya|uber|comisi[oó]n|inter[eé]s|recargo|propina|descuento|tarjeta|\btc\b|ajuste|diferencia|costo/i.test(
+    productName.trim()
+  );
 }
 
 export function AddRoundSheet({
@@ -36,13 +48,20 @@ export function AddRoundSheet({
   const extraCatIds = useMemo(() => {
     const set = new Set<number>();
     for (const c of allCategories) {
-      if (isExtrasCategoryName(c.name)) set.add(c.id);
+      if (isFoodExtrasCategoryName(c.name)) set.add(c.id);
     }
     return set;
   }, [allCategories]);
 
   const extraProducts = useMemo(
-    () => allSalonProducts.filter((p) => p.is_active === 1 && ((p.category_id !== null && extraCatIds.has(p.category_id)) || (p as any).is_extra === 1)),
+    () =>
+      allSalonProducts.filter(
+        (p) =>
+          p.is_active === 1 &&
+          p.is_open_price !== 1 &&
+          !isOperationalFeeOrSurcharge(p.name) &&
+          ((p.category_id !== null && extraCatIds.has(p.category_id)) || (p as any).is_extra === 1)
+      ),
     [allSalonProducts, extraCatIds],
   );
 
@@ -97,7 +116,7 @@ export function AddRoundSheet({
     const prodName = p.name.toLowerCase();
 
     // 1. Si alguna categoría de extras tiene target_category_ids configurado explícitamente:
-    const extrasCategories = allCategories.filter((c) => isExtrasCategoryName(c.name));
+    const extrasCategories = allCategories.filter((c) => isFoodExtrasCategoryName(c.name));
     const explicitTargets = new Set<number>();
     let hasExplicitTargets = false;
     for (const ec of extrasCategories) {

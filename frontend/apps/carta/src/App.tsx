@@ -8,8 +8,20 @@ import { ProductModal } from './components/ProductModal';
 import { CartPanel } from './components/CartPanel';
 
 /** Identifica si una categoría es de "Extras" para agregar a una pizza y no una categoría separada. */
-function isExtrasCategoryName(name: string): boolean {
-  return /^(extras?|agregados?|adicionales?)(\s+.*)?$/i.test(name.trim());
+function isFoodExtrasCategoryName(name: string): boolean {
+  if (!name) return false;
+  const n = name.trim().toLowerCase();
+  if (/costo|recargo|comisi[oó]n|env[ií]o|flete|delivery|propina|tarifa|diferencia|inter[eé]s|tarjeta|financier/i.test(n)) {
+    return false;
+  }
+  return /^(🧀\s*)?(extras?|agregados?|toppings?)(\s+.*)?$/i.test(n);
+}
+
+function isOperationalFeeOrSurcharge(productName: string): boolean {
+  if (!productName) return false;
+  return /env[ií]o|flete|delivery|rappi|pedidosya|uber|comisi[oó]n|inter[eé]s|recargo|propina|descuento|tarjeta|\btc\b|ajuste|diferencia|costo/i.test(
+    productName.trim()
+  );
 }
 
 /** Identifica si una categoría o producto corresponde a pizzas (para ofrecerle extras). */
@@ -95,7 +107,7 @@ export function App() {
   const extraCatIds = useMemo(() => {
     const set = new Set<number>();
     for (const c of menu?.categories ?? []) {
-      if (isExtrasCategoryName(c.name)) set.add(c.id);
+      if (isFoodExtrasCategoryName(c.name)) set.add(c.id);
     }
     return set;
   }, [menu?.categories]);
@@ -120,7 +132,11 @@ export function App() {
   const extraProducts = useMemo(
     () =>
       allPublicProducts.filter(
-        (p) => p.category_id !== null && extraCatIds.has(p.category_id) && p.is_available_now,
+        (p) =>
+          p.category_id !== null &&
+          extraCatIds.has(p.category_id) &&
+          p.is_available_now &&
+          !isOperationalFeeOrSurcharge(p.name),
       ),
     [allPublicProducts, extraCatIds],
   );
@@ -151,7 +167,7 @@ export function App() {
     const prodName = p.name.toLowerCase();
 
     // 1. Si alguna categoría de extras tiene target_category_ids configurado explícitamente:
-    const extrasCategories = (menu?.categories ?? []).filter((c) => isExtrasCategoryName(c.name));
+    const extrasCategories = (menu?.categories ?? []).filter((c) => isFoodExtrasCategoryName(c.name));
     const explicitTargets = new Set<number>();
     let hasExplicitTargets = false;
     for (const ec of extrasCategories) {
