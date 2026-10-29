@@ -90,17 +90,26 @@ export async function printRaw(payload: string, targetAddress?: string): Promise
     return;
   }
   const s = await getPrinterSettings();
-  const address = targetAddress || s.address;
+  const address = targetAddress || s.address || s.printers?.[0]?.address;
   if (!address) {
-    throw new Error('No hay impresora configurada. Elegila en Ajustes.');
+    throw new Error('No hay ninguna impresora configurada ni seleccionada. Elegila en Ajustes.');
   }
+
   await BluetoothSerial.enable();
+
+  // Si había una conexión previa colgada, desconectar preventivamente antes de reconectar
+  try {
+    await BluetoothSerial.disconnect({ address });
+  } catch {
+    /* ignorar */
+  }
+
+  // Conectar por RFCOMM SPP
   await BluetoothSerial.connect({ address });
   try {
     await BluetoothSerial.write({ address, value: payload });
-    // Esperar a que el búfer de la comandera térmica procese y termine de imprimir
-    // antes de cerrar la conexión RFCOMM (evita que la impresora descarte los bytes).
-    await new Promise((resolve) => setTimeout(resolve, 2200));
+    // Esperar a que el búfer de la comandera térmica termine de imprimir antes de cerrar
+    await new Promise((resolve) => setTimeout(resolve, 2000));
   } finally {
     try {
       await BluetoothSerial.disconnect({ address });
@@ -115,7 +124,7 @@ export async function tryPrint(payload: string, targetAddress?: string): Promise
     await printRaw(payload, targetAddress);
     return null;
   } catch (e) {
-    return e instanceof Error ? e.message : 'No se pudo imprimir';
+    return e instanceof Error ? e.message : 'No se pudo comunicar con la impresora';
   }
 }
 
@@ -135,7 +144,7 @@ export interface DispatchComandasInput {
   isReprint?: boolean;
 }
 
-/** Despacha e imprime comandas, separando por categorías o múltiples impresoras según configuración */
+/** Despacha e imprime comandas, organizando los tickets por comandera física de forma robusta */
 export async function dispatchComandas(input: DispatchComandasInput): Promise<{
   success: boolean;
   ticketsPrinted: number;
@@ -144,31 +153,33 @@ export async function dispatchComandas(input: DispatchComandasInput): Promise<{
   const s = await getPrinterSettings();
   if (input.lines.length === 0) return { success: true, ticketsPrinted: 0 };
 
-  const configuredPrinters = s.printers && s.printers.length > 0 ? s.printers : null;
-  const splitMode =
-    s.comandaSplitMode ??
-    (configuredPrinters && configuredPrinters.length > 1 ? 'by_printer' : 'by_category');
+  const configuredPrinters = s.printers && s.printers.length > 0 ? s.printers : [];
+  const activeAddress = s.address || configuredPrinters[0]?.address || null;
 
   // Si no hay ninguna impresora conectada ni configurada
-  if (!s.address && (!configuredPrinters || configuredPrinters.length === 0)) {
+  if (!activeAddress && configuredPrinters.length === 0) {
     if (!isNative()) {
       return { success: true, ticketsPrinted: 1 };
     }
     return { success: false, ticketsPrinted: 0, error: 'No hay comanderas configuradas en Ajustes' };
   }
 
-  // Agrupador de ítems
+  const splitMode =
+    s.comandaSplitMode ??
+    (configuredPrinters.length > 1 ? 'by_printer' : 'by_category');
+
+  // Grupos lógicos de comanda
   type Group = {
     title: string;
-    targetAddress?: string;
+    targetAddress: string;
     width: number;
     lines: Array<{ qty: number; label: string; note?: string }>;
   };
 
   const groups: Group[] = [];
 
-  if (configuredPrinters && configuredPrinters.length > 1 && splitMode === 'by_printer') {
-    // Modo múltiples comanderas por impresora asignada
+  if (configuredPrinters.length > 1 && splitMode === 'by_printer') {
+    // Múltiples comanderas configuradas específicamente
     for (const p of configuredPrinters) {
       const assigned = input.lines.filter((l) =>
         p.categoryIds && p.categoryIds.length > 0
@@ -179,18 +190,19 @@ export async function dispatchComandas(input: DispatchComandasInput): Promise<{
         groups.push({
           title: p.alias || p.name,
           targetAddress: p.address,
-          width: p.width || s.width,
+          width: p.width || s.width || 32,
           lines: assigned,
         });
       }
     }
-    // Ítems no asignados a ninguna impresora van a la impresora por defecto (o primera)
     const assignedIds = new Set(configuredPrinters.flatMap((p) => p.categoryIds ?? []));
     const unassigned = input.lines.filter(
       (l) => l.categoryId === null || l.categoryId === undefined || !assignedIds.has(l.categoryId),
     );
     if (unassigned.length > 0) {
-      const defaultP = configuredPrinters.find((p) => p.isDefault) ?? configuredPrinters[0]!;
+      const defaultP =
+        configuredPrinters.find((p) => p.isDefault || p.address === activeAddress) ??
+        configuredPrinters[0]!;
       const existing = groups.find((g) => g.targetAddress === defaultP.address);
       if (existing) {
         existing.lines.push(...unassigned);
@@ -198,7 +210,7 @@ export async function dispatchComandas(input: DispatchComandasInput): Promise<{
         groups.push({
           title: defaultP.alias || 'General',
           targetAddress: defaultP.address,
-          width: defaultP.width || s.width,
+          width: defaultP.width || s.width || 32,
           lines: unassigned,
         });
       }
@@ -213,19 +225,23 @@ export async function dispatchComandas(input: DispatchComandasInput): Promise<{
     const cocinaItems = input.lines.filter((l) => !isBarItem(l));
     const barraItems = input.lines.filter((l) => isBarItem(l));
 
+    // Si hay impresoras nombradas específicamente para Barra o Cocina, usarlas; sino activeAddress
+    const barraPrinter = configuredPrinters.find((p) => /barra|bebida/i.test(p.alias || p.name));
+    const cocinaPrinter = configuredPrinters.find((p) => /cocina|horno/i.test(p.alias || p.name));
+
     if (cocinaItems.length > 0) {
       groups.push({
         title: 'Cocina',
-        targetAddress: s.address ?? undefined,
-        width: s.width,
+        targetAddress: cocinaPrinter?.address || activeAddress || '',
+        width: cocinaPrinter?.width || s.width || 32,
         lines: cocinaItems,
       });
     }
     if (barraItems.length > 0) {
       groups.push({
         title: 'Barra / Bebidas',
-        targetAddress: s.address ?? undefined,
-        width: s.width,
+        targetAddress: barraPrinter?.address || activeAddress || '',
+        width: barraPrinter?.width || s.width || 32,
         lines: barraItems,
       });
     }
@@ -233,18 +249,21 @@ export async function dispatchComandas(input: DispatchComandasInput): Promise<{
     // Comanda unificada (todo en un solo ticket)
     groups.push({
       title: '',
-      targetAddress: s.address ?? undefined,
-      width: s.width,
+      targetAddress: activeAddress || '',
+      width: s.width || 32,
       lines: input.lines,
     });
   }
 
-  // Imprimir cada grupo secuencialmente
-  let printedCount = 0;
-  const errors: string[] = [];
+  // Agrupar los tickets por dirección física de destino:
+  // Si varios grupos van a la MISMA impresora (ej: Cocina y Barra en la misma IT01),
+  // se combinan en un único envío para no desconectar y reconectar en milisegundos.
+  const jobsByAddress = new Map<string, { width: number; payloads: string[] }>();
 
-  for (let i = 0; i < groups.length; i++) {
-    const g = groups[i]!;
+  for (const g of groups) {
+    const addr = g.targetAddress || activeAddress;
+    if (!addr) continue;
+
     const payload = comandaTicket({
       place: input.place,
       account: input.account,
@@ -255,15 +274,40 @@ export async function dispatchComandas(input: DispatchComandasInput): Promise<{
       isReprint: input.isReprint,
     });
 
-    const err = await tryPrint(payload, g.targetAddress);
+    if (!jobsByAddress.has(addr)) {
+      jobsByAddress.set(addr, { width: g.width, payloads: [] });
+    }
+    jobsByAddress.get(addr)!.payloads.push(payload);
+  }
+
+  let printedCount = 0;
+  const errors: string[] = [];
+  const entries = Array.from(jobsByAddress.entries());
+
+  for (let i = 0; i < entries.length; i++) {
+    const [addr, job] = entries[i]!;
+    // Concatenar los tickets destinados a esta misma comandera (cada uno tiene su propio .cut())
+    const fullPayload = job.payloads.join('');
+
+    const err = await tryPrint(fullPayload, addr);
     if (err) {
-      errors.push(`${g.title || 'Comanda'}: ${err}`);
+      // Reintento automático en caso de micro-corte o socket ocupado
+      await new Promise((r) => setTimeout(r, 1200));
+      const retryErr = await tryPrint(fullPayload, addr);
+      if (retryErr) {
+        const printerName =
+          configuredPrinters.find((p) => p.address === addr)?.alias || s.name || addr;
+        errors.push(`${printerName}: ${retryErr}`);
+      } else {
+        printedCount += job.payloads.length;
+      }
     } else {
-      printedCount++;
+      printedCount += job.payloads.length;
     }
 
-    if (i < groups.length - 1) {
-      await new Promise((r) => setTimeout(r, 600));
+    // Si hay otra impresora física distinta en la lista, esperar a que Android libere el adaptador
+    if (i < entries.length - 1) {
+      await new Promise((r) => setTimeout(r, 1500));
     }
   }
 

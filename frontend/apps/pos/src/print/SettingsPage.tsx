@@ -129,6 +129,40 @@ export function SettingsPage() {
     setBusy(false);
   }
 
+  async function setAsPrincipal(printer: { address: string; name: string; alias?: string; width?: 32 | 48 }) {
+    if (!settings) return;
+    const existing = settings.printers ?? [];
+    let nextList: ConfiguredPrinter[];
+    if (existing.some((p) => p.address === printer.address)) {
+      nextList = existing.map((p) => ({
+        ...p,
+        isDefault: p.address === printer.address,
+      }));
+    } else {
+      nextList = [
+        ...existing.map((p) => ({ ...p, isDefault: false })),
+        {
+          id: printer.address,
+          address: printer.address,
+          name: printer.name,
+          alias: printer.alias || printer.name,
+          width: printer.width || 32,
+          isDefault: true,
+        },
+      ];
+    }
+    const next: PrinterSettings = {
+      ...settings,
+      address: printer.address,
+      name: printer.alias || printer.name,
+      width: printer.width || settings.width || 32,
+      printers: nextList,
+    };
+    setSettings(next);
+    await savePrinterSettings(next);
+    setMsg(`✓ "${printer.alias || printer.name}" establecida como impresora principal activa.`);
+  }
+
   async function savePrinterConfig(printer: ConfiguredPrinter) {
     if (!settings) return;
     const existing = settings.printers ?? [];
@@ -140,29 +174,58 @@ export function SettingsPage() {
     } else {
       nextList = [...existing, printer];
     }
-    // Si es la primera, marcarla como default y guardar en address
-    const next = {
+
+    const makeDefault =
+      Boolean(printer.isDefault) ||
+      !settings.address ||
+      settings.address === printer.address ||
+      nextList.length === 1;
+
+    if (makeDefault) {
+      nextList = nextList.map((p) => ({ ...p, isDefault: p.address === printer.address }));
+    }
+
+    const next: PrinterSettings = {
       ...settings,
-      address: settings.address || printer.address,
-      name: settings.name || printer.name,
+      address: makeDefault ? printer.address : settings.address,
+      name: makeDefault ? (printer.alias || printer.name) : settings.name,
+      width: makeDefault ? printer.width : settings.width,
       printers: nextList,
     };
     setSettings(next);
     await savePrinterSettings(next);
     setEditingPrinter(null);
+    setMsg(`✓ Comandera "${printer.alias || printer.name}" guardada${makeDefault ? ' (asignada como Principal)' : ''}.`);
   }
 
   async function removePrinter(address: string) {
     if (!settings) return;
     const nextList = (settings.printers ?? []).filter((p) => p.address !== address);
-    const next = {
+    const wasDefault = settings.address === address;
+    const nextDefault = nextList[0] ?? null;
+    const next: PrinterSettings = {
       ...settings,
-      address: settings.address === address ? (nextList[0]?.address ?? null) : settings.address,
-      name: settings.address === address ? (nextList[0]?.name ?? null) : settings.name,
-      printers: nextList,
+      address: wasDefault ? (nextDefault?.address ?? null) : settings.address,
+      name: wasDefault ? (nextDefault?.alias || nextDefault?.name || null) : settings.name,
+      width: wasDefault ? (nextDefault?.width || 32) : settings.width,
+      printers: nextList.map((p, idx) => (wasDefault && idx === 0 ? { ...p, isDefault: true } : p)),
     };
     setSettings(next);
     await savePrinterSettings(next);
+  }
+
+  async function clearAllPrinters() {
+    if (!settings) return;
+    if (!window.confirm('¿Desvincular todas las comanderas guardadas?')) return;
+    const next: PrinterSettings = {
+      ...settings,
+      address: null,
+      name: null,
+      printers: [],
+    };
+    setSettings(next);
+    await savePrinterSettings(next);
+    setMsg('Todas las comanderas fueron desvinculadas.');
   }
 
   if (!settings) return <div className="boot">Cargando ajustes…</div>;
@@ -185,18 +248,53 @@ export function SettingsPage() {
       {/* SECCIÓN: MÚLTIPLES COMANDERAS */}
       <section className="settings__block">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h2 className="settings__subtitle" style={{ margin: 0 }}>
-            Comanderas Configuradas
-          </h2>
-          <button
-            className="t-btn t-btn--primary"
-            style={{ fontSize: 13, minHeight: 34, padding: '0 12px' }}
-            disabled={busy}
-            onClick={() => void search()}
-          >
-            {busy ? 'Buscando…' : '+ Buscar Bluetooth'}
-          </button>
+          <div>
+            <h2 className="settings__subtitle" style={{ margin: 0 }}>
+              Comanderas Configuradas
+            </h2>
+            {settings.address && (
+              <p style={{ margin: '4px 0 0 0', fontSize: 13, color: 'var(--success)' }}>
+                ⭐ Activa por defecto: <strong>{settings.name || settings.address}</strong>
+              </p>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {(settings.printers ?? []).length > 0 && (
+              <button
+                className="t-btn"
+                style={{ fontSize: 12, minHeight: 34, padding: '0 10px', color: '#f0a59b', borderColor: 'rgba(215, 56, 40, 0.4)' }}
+                onClick={() => void clearAllPrinters()}
+              >
+                🗑️ Desvincular todas
+              </button>
+            )}
+            <button
+              className="t-btn t-btn--primary"
+              style={{ fontSize: 13, minHeight: 34, padding: '0 12px' }}
+              disabled={busy}
+              onClick={() => void search()}
+            >
+              {busy ? 'Buscando…' : '+ Buscar Bluetooth'}
+            </button>
+          </div>
         </div>
+
+        {/* Mensaje de estado de comanderas */}
+        {msg && (
+          <div
+            style={{
+              marginTop: 10,
+              padding: '8px 12px',
+              borderRadius: 8,
+              fontSize: 13,
+              background: msg.startsWith('✓') ? 'rgba(108, 192, 112, 0.15)' : 'rgba(253, 183, 64, 0.15)',
+              color: msg.startsWith('✓') ? 'var(--success)' : 'var(--ocre)',
+              border: `1px solid ${msg.startsWith('✓') ? 'rgba(108, 192, 112, 0.3)' : 'rgba(253, 183, 64, 0.3)'}`,
+            }}
+          >
+            {msg}
+          </div>
+        )}
 
         {/* Lista de comanderas configuradas */}
         <div style={{ display: 'grid', gap: 10, marginTop: 14 }}>
@@ -218,85 +316,104 @@ export function SettingsPage() {
             </div>
           )}
 
-          {(settings.printers ?? []).map((p) => (
-            <div
-              key={p.address}
-              style={{
-                background: 'var(--surface)',
-                border: '1px solid var(--line)',
-                borderRadius: '12px',
-                padding: '12px 14px',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-              }}
-            >
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <strong style={{ fontSize: 16, color: 'var(--cream)' }}>
-                    🖨️ {p.alias || p.name}
-                  </strong>
-                  {settings.address === p.address && (
-                    <span
-                      style={{
-                        fontSize: 11,
-                        background: 'rgba(108, 192, 112, 0.2)',
-                        color: 'var(--success)',
-                        padding: '2px 6px',
-                        borderRadius: 6,
-                        fontWeight: 700,
-                      }}
-                    >
-                      Principal
-                    </span>
+          {(settings.printers ?? []).map((p) => {
+            const isPrincipal = settings.address === p.address;
+            return (
+              <div
+                key={p.address}
+                style={{
+                  background: isPrincipal ? 'rgba(108, 192, 112, 0.05)' : 'var(--surface)',
+                  border: isPrincipal ? '1px solid rgba(108, 192, 112, 0.4)' : '1px solid var(--line)',
+                  borderRadius: '12px',
+                  padding: '12px 14px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
+              >
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <strong style={{ fontSize: 16, color: 'var(--cream)' }}>
+                      🖨️ {p.alias || p.name}
+                    </strong>
+                    {isPrincipal && (
+                      <span
+                        style={{
+                          fontSize: 11,
+                          background: 'rgba(108, 192, 112, 0.2)',
+                          color: 'var(--success)',
+                          padding: '2px 6px',
+                          borderRadius: 6,
+                          fontWeight: 700,
+                        }}
+                      >
+                        ⭐ Principal
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
+                    MAC: {p.address} · Papel: {p.width || 32} col. (
+                    {(p.width || 32) === 32 ? '58mm' : '80mm'})
+                  </div>
+                  {p.categoryIds && p.categoryIds.length > 0 && (
+                    <div style={{ fontSize: 12, color: 'var(--ocre)', marginTop: 4 }}>
+                      Categorías:{' '}
+                      {categories
+                        .filter((c) => p.categoryIds?.includes(c.id))
+                        .map((c) => c.name)
+                        .join(', ') || `${p.categoryIds.length} seleccionadas`}
+                    </div>
                   )}
                 </div>
-                <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 2 }}>
-                  MAC: {p.address} · Papel: {p.width || 32} col. (
-                  {(p.width || 32) === 32 ? '58mm' : '80mm'})
-                </div>
-                {p.categoryIds && p.categoryIds.length > 0 && (
-                  <div style={{ fontSize: 12, color: 'var(--ocre)', marginTop: 4 }}>
-                    Categorías:{' '}
-                    {categories
-                      .filter((c) => p.categoryIds?.includes(c.id))
-                      .map((c) => c.name)
-                      .join(', ') || `${p.categoryIds.length} seleccionadas`}
-                  </div>
-                )}
-              </div>
 
-              <div style={{ display: 'flex', gap: 6 }}>
-                <button
-                  className="t-btn"
-                  style={{ minHeight: 32, padding: '0 8px', fontSize: 12 }}
-                  onClick={() => setEditingPrinter(p)}
-                >
-                  Editar
-                </button>
-                <button
-                  className="t-btn"
-                  style={{ minHeight: 32, padding: '0 8px', fontSize: 12 }}
-                  onClick={() => void testPrint(p.address)}
-                >
-                  Probar
-                </button>
-                <button
-                  className="t-btn"
-                  style={{
-                    minHeight: 32,
-                    padding: '0 8px',
-                    fontSize: 12,
-                    color: '#f0a59b',
-                    borderColor: 'rgba(215, 56, 40, 0.4)',
-                  }}
-                  onClick={() => void removePrinter(p.address)}
-                >
-                  ✕
-                </button>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {!isPrincipal && (
+                    <button
+                      className="t-btn"
+                      style={{
+                        minHeight: 32,
+                        padding: '0 8px',
+                        fontSize: 12,
+                        borderColor: 'var(--ocre)',
+                        color: 'var(--ocre)',
+                      }}
+                      title="Establecer como impresora activa principal"
+                      onClick={() => void setAsPrincipal(p)}
+                    >
+                      ⭐ Hacer Principal
+                    </button>
+                  )}
+                  <button
+                    className="t-btn"
+                    style={{ minHeight: 32, padding: '0 8px', fontSize: 12 }}
+                    onClick={() => setEditingPrinter(p)}
+                  >
+                    Editar
+                  </button>
+                  <button
+                    className="t-btn"
+                    style={{ minHeight: 32, padding: '0 8px', fontSize: 12 }}
+                    onClick={() => void testPrint(p.address)}
+                  >
+                    Probar
+                  </button>
+                  <button
+                    className="t-btn"
+                    style={{
+                      minHeight: 32,
+                      padding: '0 8px',
+                      fontSize: 12,
+                      color: '#f0a59b',
+                      borderColor: 'rgba(215, 56, 40, 0.4)',
+                    }}
+                    onClick={() => void removePrinter(p.address)}
+                  >
+                    ✕
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {/* Lista de dispositivos Bluetooth encontrados al buscar */}
@@ -312,44 +429,77 @@ export function SettingsPage() {
               </p>
             ) : (
               <div className="settings__devices">
-                {devices.map((d) => (
-                  <div
-                    key={d.address}
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      background: 'var(--surface-2)',
-                      padding: '10px 14px',
-                      borderRadius: 10,
-                      marginBottom: 8,
-                    }}
-                  >
-                    <div>
-                      <strong style={{ display: 'block', fontSize: 14 }}>{d.name}</strong>
-                      <small style={{ color: 'var(--muted)', fontSize: 12 }}>{d.address}</small>
-                    </div>
-                    <button
-                      className="t-btn t-btn--primary"
-                      style={{ minHeight: 32, padding: '0 12px', fontSize: 12 }}
-                      onClick={() =>
-                        setEditingPrinter({
-                          id: d.address,
-                          address: d.address,
-                          name: d.name,
-                          alias: d.name.toLowerCase().includes('bar')
-                            ? 'Barra / Bebidas'
-                            : 'Cocina / Horno',
-                          width: 32,
-                          categoryIds: [],
-                          isDefault: (settings.printers ?? []).length === 0,
-                        })
-                      }
+                {devices.map((d) => {
+                  const isCurrentPrincipal = settings.address === d.address;
+                  return (
+                    <div
+                      key={d.address}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        background: 'var(--surface-2)',
+                        padding: '10px 14px',
+                        borderRadius: 10,
+                        marginBottom: 8,
+                      }}
                     >
-                      + Configurar
-                    </button>
-                  </div>
-                ))}
+                      <div>
+                        <strong style={{ display: 'block', fontSize: 14 }}>{d.name}</strong>
+                        <small style={{ color: 'var(--muted)', fontSize: 12 }}>{d.address}</small>
+                      </div>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                        {isCurrentPrincipal ? (
+                          <span
+                            style={{
+                              fontSize: 11,
+                              background: 'rgba(108, 192, 112, 0.2)',
+                              color: 'var(--success)',
+                              padding: '4px 8px',
+                              borderRadius: 6,
+                              fontWeight: 700,
+                            }}
+                          >
+                            ⭐ Principal Activa
+                          </span>
+                        ) : (
+                          <button
+                            className="t-btn"
+                            style={{
+                              minHeight: 32,
+                              padding: '0 10px',
+                              fontSize: 12,
+                              borderColor: 'var(--ocre)',
+                              color: 'var(--ocre)',
+                            }}
+                            onClick={() => void setAsPrincipal({ address: d.address, name: d.name })}
+                          >
+                            ⭐ Usar como Principal
+                          </button>
+                        )}
+                        <button
+                          className="t-btn t-btn--primary"
+                          style={{ minHeight: 32, padding: '0 12px', fontSize: 12 }}
+                          onClick={() =>
+                            setEditingPrinter({
+                              id: d.address,
+                              address: d.address,
+                              name: d.name,
+                              alias: d.name.toLowerCase().includes('bar')
+                                ? 'Barra / Bebidas'
+                                : 'Cocina / Horno',
+                              width: 32,
+                              categoryIds: [],
+                              isDefault: settings.address === d.address || (settings.printers ?? []).length === 0,
+                            })
+                          }
+                        >
+                          ⚙ Configurar
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -753,6 +903,17 @@ export function SettingsPage() {
                 })}
               </div>
             </div>
+
+            <label className="settings__toggle" style={{ marginTop: 14 }}>
+              <input
+                type="checkbox"
+                checked={Boolean(editingPrinter.isDefault || settings.address === editingPrinter.address)}
+                onChange={(e) =>
+                  setEditingPrinter({ ...editingPrinter, isDefault: e.target.checked })
+                }
+              />
+              <span>⭐ Usar como impresora principal (pre-cuentas y comandas generales)</span>
+            </label>
 
             <button
               className="t-btn t-btn--primary t-btn--block"
