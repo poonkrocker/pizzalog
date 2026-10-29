@@ -95,8 +95,8 @@ export function HomePage() {
           style={{ cursor: 'pointer' }}
         >
           <img className="home-tile-illustration" src="/category-icons/module-accounts.svg" alt="" aria-hidden="true" />
-          <strong style={{ fontSize: '16px', color: 'var(--text)' }}>Cuentas y Comandas</strong>
-          <small style={{ color: 'var(--muted)', fontSize: '12px' }}>Mesas y salón</small>
+          <strong className="retro-home__tile-title">Cuentas y Comandas</strong>
+          <small className="retro-home__tile-subtitle">Mesas y salón</small>
         </div>
 
         {/* Turno & Caja */}
@@ -106,8 +106,8 @@ export function HomePage() {
           style={{ cursor: 'pointer' }}
         >
           <img className="home-tile-illustration" src="/category-icons/module-cash.svg" alt="" aria-hidden="true" />
-          <strong style={{ fontSize: '16px', color: 'var(--text)' }}>Turno & Caja</strong>
-          <small style={{ color: 'var(--muted)', fontSize: '12px' }}>Apertura, arqueo y cierre</small>
+          <strong className="retro-home__tile-title">Turno & Caja</strong>
+          <small className="retro-home__tile-subtitle">Apertura, arqueo y cierre</small>
         </div>
 
         {/* Cocina */}
@@ -117,8 +117,8 @@ export function HomePage() {
           style={{ cursor: 'pointer' }}
         >
           <img className="home-tile-illustration" src="/category-icons/module-oven.svg" alt="" aria-hidden="true" />
-          <strong style={{ fontSize: '16px', color: 'var(--text)' }}>Cocina</strong>
-          <small style={{ color: 'var(--muted)', fontSize: '12px' }}>Monitor de pedidos</small>
+          <strong className="retro-home__tile-title">Cocina</strong>
+          <small className="retro-home__tile-subtitle">Monitor de pedidos</small>
         </div>
       </div>
     </div>
