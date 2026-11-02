@@ -702,6 +702,8 @@ export interface RecipeIngredient {
   quantity: number;
   unit: string;
   unit_cost: number;
+  cost_unit?: string;
+  unit_mismatch?: boolean;
   total_cost: number;
 }
 
@@ -818,6 +820,8 @@ export interface StudioRecipeComponent {
   quantity: number;
   unit: string;
   unit_cost: number;
+  cost_unit?: string;
+  unit_mismatch?: boolean;
   total_cost: number;
 }
 export interface StudioRecipe {
@@ -831,8 +835,12 @@ export interface StudioRecipe {
   target_food_cost_pct: number;
   batch_cost: number;
   unit_cost: number;
+  cost_unit?: string;
+  unit_mismatch?: boolean;
   suggested_price: number;
   food_cost_pct: number;
+  warnings?: string[];
+  is_incomplete?: boolean;
   components: StudioRecipeComponent[];
 }
 export interface StudioProduct { id: number; name: string; price: number; }
@@ -840,6 +848,7 @@ export interface RecipeStudioResponse {
   recipes: StudioRecipe[];
   supplies: SupplyItem[];
   products: StudioProduct[];
+  legacy_unimported_count?: number;
 }
 export type BusinessCostCategory = 'employees' | 'rent' | 'utilities' | 'services' | 'taxes' | 'maintenance' | 'software' | 'other';
 export type CostPeriod = 'monthly' | 'weekly' | 'daily' | 'yearly';

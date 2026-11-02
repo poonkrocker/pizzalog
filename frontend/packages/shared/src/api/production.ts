@@ -44,6 +44,7 @@ export function productionApi(client: ApiClient) {
         body,
       ),
     recipeStudio: () => client.get<RecipeStudioResponse>('/production/recipe-studio'),
+    importLegacyRecipes: () => client.post<{ success: boolean; imported_count: number }>('/production/recipe-studio/import-legacy', {}),
     saveStudioRecipe: (body: SaveStudioRecipeInput) =>
       client.post<{ success: boolean; id: number }>('/production/recipe-studio/recipes', body),
     businessCosts: () => client.get<BusinessCostsResponse>('/production/business-costs'),

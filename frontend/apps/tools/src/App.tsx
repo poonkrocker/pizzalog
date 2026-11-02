@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   CostEngine,
+  CostEngineValidationError,
   calculatePricingScenario,
   computeUsableIngredientCost,
   createCostSnapshot,
   formatDecimal,
   selectEffectivePurchasePrice,
+  type Dimension,
+  type Recipe,
+  type RecipeComponent,
   type UnitCode,
 } from '@pizzalog/cost-engine';
 import { goldenCases } from '@pizzalog/cost-engine-fixtures';
@@ -13,10 +17,13 @@ import {
   I18N,
   createInitialDemoWorkspace,
   type LocaleCode,
+  type OperatingExpenseItem,
   type ToolsWorkspaceState,
 } from './demoData';
+import { downloadCustomProfitKitXlsx } from './xlsxExporter';
 
-const STORAGE_KEY = 'pizzalog_tools_workspace_v1';
+const STORAGE_KEY = 'pizzalog_tools_workspace_v2';
+const ALL_UNITS: UnitCode[] = ['g', 'kg', 'mg', 'lb', 'oz', 'ml', 'cc', 'L', 'fl_oz_us', 'gal_us', 'unit', 'dozen'];
 
 export function App() {
   const [state, setState] = useState<ToolsWorkspaceState>(() => {
@@ -25,7 +32,11 @@ export function App() {
       if (raw) {
         const parsed = JSON.parse(raw);
         if (parsed && parsed.catalog && Array.isArray(parsed.catalog.ingredients)) {
-          return parsed;
+          return {
+            ...createInitialDemoWorkspace(),
+            ...parsed,
+            productSalesMap: parsed.productSalesMap ?? createInitialDemoWorkspace().productSalesMap,
+          };
         }
       }
     } catch {
@@ -38,6 +49,11 @@ export function App() {
     'ingredients' | 'subrecipes' | 'recipes' | 'expenses' | 'snapshots'
   >('recipes');
   const [importError, setImportError] = useState<string | null>(null);
+
+  // Estado del Constructor Visual Interactivo (Modal)
+  const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
+  const [isDoughMode, setIsDoughMode] = useState<boolean>(false);
+  const [builderError, setBuilderError] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -127,6 +143,149 @@ export function App() {
     }));
   }
 
+  function deleteIngredient(id: string) {
+    setState((prev) => ({
+      ...prev,
+      catalog: {
+        ...prev.catalog,
+        ingredients: prev.catalog.ingredients.filter((i) => i.id !== id),
+        purchase_prices: prev.catalog.purchase_prices.filter((p) => p.ingredient_id !== id),
+      },
+    }));
+  }
+
+  function openNewRecipeBuilder(type: 'product' | 'subrecipe', doughMode = false) {
+    const firstIng = state.catalog.ingredients[0]?.id ?? 'ing_harina';
+    setBuilderError(null);
+    setIsDoughMode(doughMode);
+    if (doughMode) {
+      setEditingRecipe({
+        id: `sub_masa_${Date.now()}`,
+        name: 'Nueva Masa Panadera',
+        recipe_type: 'subrecipe',
+        yield_quantity: 1700,
+        yield_unit: 'g',
+        currency: state.currency,
+        bakers_dough: {
+          total_flour_g: 1000,
+          hydration_pct: 68,
+          yield_basis: 'measured_yield',
+          measured_yield_g: 1700,
+          flours: [{ ingredient_id: firstIng, share_pct: 100 }],
+          biga: {
+            flour_pct: 25,
+            water_pct: 50,
+            yeast_pct: 0.5,
+            yeast_ingredient_id: state.catalog.ingredients[1]?.id ?? firstIng,
+          },
+          salt_pct: 2.7,
+          salt_ingredient_id: state.catalog.ingredients[2]?.id ?? firstIng,
+          water_ingredient_id: state.catalog.ingredients[3]?.id ?? firstIng,
+        },
+      });
+    } else {
+      setEditingRecipe({
+        id: `${type === 'product' ? 'prod' : 'sub'}_${Date.now()}`,
+        name: type === 'product' ? 'Nuevo Producto de Carta' : 'Nueva Subreceta / Salsa',
+        recipe_type: type,
+        yield_quantity: type === 'product' ? 1 : 1000,
+        yield_unit: type === 'product' ? 'unit' : 'g',
+        target_food_cost_pct: state.defaultTargetFoodCostPct,
+        currency: state.currency,
+        components: [
+          {
+            component_type: 'ingredient',
+            ingredient_id: firstIng,
+            quantity: 200,
+            unit: 'g',
+          },
+        ],
+      });
+    }
+  }
+
+  function openEditRecipeBuilder(rec: Recipe) {
+    setBuilderError(null);
+    setIsDoughMode(Boolean(rec.bakers_dough));
+    setEditingRecipe(JSON.parse(JSON.stringify(rec)));
+  }
+
+  function saveEditedRecipe() {
+    if (!editingRecipe) return;
+    setBuilderError(null);
+    if (!editingRecipe.name.trim()) {
+      setBuilderError('El nombre de la receta es obligatorio.');
+      return;
+    }
+
+    // Probar en el motor antes de guardar para validar unidades, mermas y ausencia de ciclos
+    const nextRecipes = state.catalog.recipes.some((r) => r.id === editingRecipe.id)
+      ? state.catalog.recipes.map((r) => (r.id === editingRecipe.id ? editingRecipe : r))
+      : [...state.catalog.recipes, editingRecipe];
+
+    try {
+      const testEngine = new CostEngine({
+        ...state.catalog,
+        recipes: nextRecipes,
+      });
+      testEngine.calculateRecipeCost(editingRecipe.id);
+    } catch (err) {
+      if (err instanceof CostEngineValidationError) {
+        setBuilderError(`[${err.code}] ${err.message}`);
+      } else {
+        setBuilderError(err instanceof Error ? err.message : 'Error de validación en la receta');
+      }
+      return;
+    }
+
+    setState((prev) => ({
+      ...prev,
+      catalog: {
+        ...prev.catalog,
+        recipes: nextRecipes,
+      },
+      productSalesMap:
+        editingRecipe.recipe_type === 'product' && !prev.productSalesMap[editingRecipe.id]
+          ? {
+              ...prev.productSalesMap,
+              [editingRecipe.id]: { monthlyUnitsSold: 150, sellingPrice: null },
+            }
+          : prev.productSalesMap,
+    }));
+    setEditingRecipe(null);
+  }
+
+  function deleteRecipe(id: string) {
+    setState((prev) => ({
+      ...prev,
+      catalog: {
+        ...prev.catalog,
+        recipes: prev.catalog.recipes.filter((r) => r.id !== id),
+      },
+    }));
+  }
+
+  function addOperatingExpense() {
+    const newExp: OperatingExpenseItem = {
+      id: `exp_${Date.now()}`,
+      name: 'Nuevo Gasto Operativo',
+      category: 'other',
+      period: 'monthly',
+      amount: 100000,
+    };
+    setState((prev) => ({
+      ...prev,
+      operatingExpenses: [...prev.operatingExpenses, newExp],
+    }));
+  }
+
+  function deleteOperatingExpense(id: string) {
+    setState((prev) => ({
+      ...prev,
+      operatingExpenses: prev.operatingExpenses.filter((x) => x.id !== id),
+    }));
+  }
+
   function captureAllSnapshots() {
     const products = state.catalog.recipes.filter((r) => r.recipe_type === 'product');
     const newSnaps = products.map((r) =>
@@ -134,6 +293,7 @@ export function App() {
         target_food_cost_pct: r.target_food_cost_pct ?? state.defaultTargetFoodCostPct,
         rounding_increment: state.defaultRoundingIncrement,
         rounding_mode: 'ceil',
+        selling_price: state.productSalesMap?.[r.id]?.sellingPrice || undefined,
         packaging_cost: state.defaultPackagingCost,
         channel_fee_pct: state.defaultChannelFeePct,
       })
@@ -164,18 +324,108 @@ export function App() {
         if (!parsed?.catalog || !Array.isArray(parsed.catalog.ingredients) || !Array.isArray(parsed.catalog.recipes)) {
           throw new Error('Estructura JSON inválida: debe incluir catalog.ingredients y catalog.recipes');
         }
-        // Validar con CostEngine antes de aceptar la importación
         const testEngine = new CostEngine(parsed.catalog);
         for (const r of parsed.catalog.recipes) {
           testEngine.calculateRecipeCost(r.id);
         }
-        setState(parsed);
+        setState({
+          ...createInitialDemoWorkspace(),
+          ...parsed,
+          productSalesMap: parsed.productSalesMap ?? {},
+        });
       } catch (err) {
         setImportError(err instanceof Error ? err.message : 'Error al validar archivo importado');
       }
     };
     reader.readAsText(file);
   }
+
+  // Cálculos mensuales de facturación, CMV, contribución marginal e Ingeniería de Menú
+  const monthlySummary = useMemo(() => {
+    const products = state.catalog.recipes.filter((r) => r.recipe_type === 'product');
+    const rows = products.map((prod) => {
+      const res = recipeResults.get(prod.id);
+      const salesPlan = state.productSalesMap?.[prod.id] ?? { monthlyUnitsSold: 120, sellingPrice: null };
+      const customPrice = salesPlan.sellingPrice && salesPlan.sellingPrice > 0 ? salesPlan.sellingPrice : undefined;
+      const pricing = res
+        ? calculatePricingScenario({
+            unit_cost: res.raw_unit_cost,
+            status: res.status,
+            currency: state.currency,
+            target_food_cost_pct: prod.target_food_cost_pct ?? state.defaultTargetFoodCostPct,
+            rounding_increment: state.defaultRoundingIncrement,
+            rounding_mode: 'ceil',
+            selling_price: customPrice,
+            packaging_cost: state.defaultPackagingCost,
+            channel_fee_pct: state.defaultChannelFeePct,
+          })
+        : null;
+
+      const isComplete = res?.status === 'complete' && pricing?.status === 'complete';
+      const units = Math.max(0, Number(salesPlan.monthlyUnitsSold) || 0);
+      const unitCost = isComplete && res?.raw_unit_cost ? res.raw_unit_cost : 0;
+      const evaluatedPrice = isComplete && pricing?.raw_evaluated_price ? pricing.raw_evaluated_price : 0;
+      const unitGrossProfit = isComplete && pricing?.raw_gross_profit ? pricing.raw_gross_profit : 0;
+
+      return {
+        prod,
+        res,
+        pricing,
+        isComplete,
+        units,
+        customPrice: salesPlan.sellingPrice ?? null,
+        unitCost,
+        evaluatedPrice,
+        unitGrossProfit,
+        monthlyRevenue: isComplete ? evaluatedPrice * units : 0,
+        monthlyCogs: isComplete ? unitCost * units : 0,
+        monthlyContribution: isComplete ? unitGrossProfit * units : 0,
+      };
+    });
+
+    const completeRows = rows.filter((x) => x.isComplete);
+    const totalUnits = completeRows.reduce((a, b) => a + b.units, 0);
+    const avgUnits = completeRows.length > 0 ? totalUnits / completeRows.length : 0;
+    const avgUnitProfit =
+      completeRows.length > 0
+        ? completeRows.reduce((a, b) => a + b.unitGrossProfit, 0) / completeRows.length
+        : 0;
+
+    const totalRevenue = completeRows.reduce((a, b) => a + b.monthlyRevenue, 0);
+    const totalCogs = completeRows.reduce((a, b) => a + b.monthlyCogs, 0);
+    const totalContribution = completeRows.reduce((a, b) => a + b.monthlyContribution, 0);
+    const weightedMarginPct = totalRevenue > 0 ? (totalContribution / totalRevenue) * 100 : 70;
+
+    return {
+      rows: rows.map((r) => {
+        let matrixClass: 'star' | 'horse' | 'puzzle' | 'dog' | null = null;
+        let matrixLabel = '—';
+        if (r.isComplete) {
+          const highPop = r.units >= avgUnits;
+          const highMargin = r.unitGrossProfit >= avgUnitProfit;
+          if (highPop && highMargin) {
+            matrixClass = 'star';
+            matrixLabel = '⭐ Estrella';
+          } else if (highPop && !highMargin) {
+            matrixClass = 'horse';
+            matrixLabel = '🐎 Caballo';
+          } else if (!highPop && highMargin) {
+            matrixClass = 'puzzle';
+            matrixLabel = '🧩 Rompecabezas';
+          } else {
+            matrixClass = 'dog';
+            matrixLabel = '🐕 Perro';
+          }
+        }
+        return { ...r, matrixClass, matrixLabel };
+      }),
+      totalUnits,
+      totalRevenue,
+      totalCogs,
+      totalContribution,
+      weightedMarginPct,
+    };
+  }, [state, recipeResults]);
 
   const totalMonthlyExpenses = useMemo(() => {
     const factor: Record<string, number> = { monthly: 1, weekly: 52 / 12, yearly: 1 / 12 };
@@ -184,6 +434,12 @@ export function App() {
       0
     );
   }, [state.operatingExpenses]);
+
+  const netOperatingProfit = monthlySummary.totalContribution - totalMonthlyExpenses;
+  const breakEvenRevenue =
+    monthlySummary.weightedMarginPct > 0
+      ? totalMonthlyExpenses / (monthlySummary.weightedMarginPct / 100)
+      : 0;
 
   return (
     <div className="tools-shell">
@@ -195,12 +451,20 @@ export function App() {
           <p className="tools-subtitle">{t.subtitle}</p>
         </div>
         <div className="tools-actions">
-          <a
+          <button
+            type="button"
             className="btn btn--ocre"
+            onClick={() => downloadCustomProfitKitXlsx(state)}
+            title="Descarga tu propio archivo .xlsx con todos los insumos, recetas, ventas mensuales y alquileres que armaste en pantalla"
+          >
+            {t.exportCustomExcel}
+          </button>
+          <a
+            className="btn"
             href="/Restaurant_Profit_Kit_v1.xlsx"
             download="Restaurant_Profit_Kit_v1.xlsx"
           >
-            {t.downloadExcel}
+            {t.downloadTemplateExcel}
           </a>
           <button type="button" className="btn btn--primary" onClick={captureAllSnapshots}>
             📸 {t.saveSnapshot}
@@ -289,7 +553,10 @@ export function App() {
             step={1}
             value={state.defaultTargetFoodCostPct}
             onChange={(e) =>
-              setState((s) => ({ ...s, defaultTargetFoodCostPct: Math.max(5, Math.min(95, Number(e.target.value) || 30)) }))
+              setState((s) => ({
+                ...s,
+                defaultTargetFoodCostPct: Math.max(5, Math.min(95, Number(e.target.value) || 30)),
+              }))
             }
           />
         </label>
@@ -301,7 +568,10 @@ export function App() {
             step={50}
             value={state.defaultRoundingIncrement}
             onChange={(e) =>
-              setState((s) => ({ ...s, defaultRoundingIncrement: Math.max(1, Number(e.target.value) || 100) }))
+              setState((s) => ({
+                ...s,
+                defaultRoundingIncrement: Math.max(1, Number(e.target.value) || 100),
+              }))
             }
           />
         </label>
@@ -326,7 +596,10 @@ export function App() {
             step={0.5}
             value={state.defaultChannelFeePct}
             onChange={(e) =>
-              setState((s) => ({ ...s, defaultChannelFeePct: Math.max(0, Math.min(80, Number(e.target.value) || 0)) }))
+              setState((s) => ({
+                ...s,
+                defaultChannelFeePct: Math.max(0, Math.min(80, Number(e.target.value) || 0)),
+              }))
             }
           />
         </label>
@@ -372,7 +645,7 @@ export function App() {
 
       {activeTab === 'ingredients' && (
         <div className="card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
             <div>
               <h2>Catálogo de Insumos, Presentaciones y Rendimiento Utilizable (Merma)</h2>
               <p className="lead">
@@ -380,7 +653,7 @@ export function App() {
               </p>
             </div>
             <button type="button" className="btn btn--primary" onClick={addIngredient}>
-              + Agregar Insumo
+              + Nuevo Insumo
             </button>
           </div>
           <div className="table-wrap">
@@ -388,15 +661,16 @@ export function App() {
               <thead>
                 <tr>
                   <th>Ingrediente</th>
-                  <th>Unidad Base</th>
+                  <th>Dimensión / Base</th>
+                  <th>Densidad (g/ml)</th>
                   <th>Precio Compra ({state.currency})</th>
                   <th>Cant. Envase</th>
                   <th>Unidad Envase</th>
-                  <th>Rendimiento Utilizable (%)</th>
-                  <th>Costo Bruto / Base</th>
+                  <th>Rendimiento (%)</th>
                   <th>Costo Utilizable / Base</th>
                   <th>Costo por kg / L</th>
                   <th>Estado</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -442,11 +716,54 @@ export function App() {
                         />
                       </td>
                       <td>
-                        <strong>{ing.base_unit}</strong> ({ing.base_dimension})
+                        <select
+                          value={`${ing.base_dimension}:${ing.base_unit}`}
+                          onChange={(e) => {
+                            const [dim, unit] = e.target.value.split(':') as [Dimension, UnitCode];
+                            setState((prev) => ({
+                              ...prev,
+                              catalog: {
+                                ...prev.catalog,
+                                ingredients: prev.catalog.ingredients.map((x) =>
+                                  x.id === ing.id ? { ...x, base_dimension: dim, base_unit: unit } : x
+                                ),
+                              },
+                            }));
+                          }}
+                        >
+                          <option value="mass:g">Masa (g)</option>
+                          <option value="mass:kg">Masa (kg)</option>
+                          <option value="volume:ml">Volumen (ml)</option>
+                          <option value="volume:L">Volumen (L)</option>
+                          <option value="count:unit">Conteo (unit)</option>
+                        </select>
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          min={0}
+                          step={0.05}
+                          placeholder="Opcional"
+                          value={ing.density_g_per_ml ?? ''}
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            setState((prev) => ({
+                              ...prev,
+                              catalog: {
+                                ...prev.catalog,
+                                ingredients: prev.catalog.ingredients.map((x) =>
+                                  x.id === ing.id
+                                    ? { ...x, density_g_per_ml: raw === '' ? null : Number(raw) }
+                                    : x
+                                ),
+                              },
+                            }));
+                          }}
+                        />
                       </td>
                       <td>
                         {ing.is_free ? (
-                          <span className="badge badge--ok">Costo $0 explícito</span>
+                          <span className="badge badge--ok">Gratis Explícito</span>
                         ) : (
                           <input
                             type="number"
@@ -483,28 +800,11 @@ export function App() {
                             updatePurchasePrice(ing.id, { pack_unit: e.target.value as UnitCode })
                           }
                         >
-                          {ing.base_dimension === 'mass' && (
-                            <>
-                              <option value="kg">kg</option>
-                              <option value="g">g</option>
-                              <option value="lb">lb</option>
-                              <option value="oz">oz</option>
-                            </>
-                          )}
-                          {ing.base_dimension === 'volume' && (
-                            <>
-                              <option value="L">L</option>
-                              <option value="ml">ml</option>
-                              <option value="gal_us">gal (US)</option>
-                              <option value="fl_oz_us">fl oz (US)</option>
-                            </>
-                          )}
-                          {ing.base_dimension === 'count' && (
-                            <>
-                              <option value="unit">unit</option>
-                              <option value="dozen">docena</option>
-                            </>
-                          )}
+                          {ALL_UNITS.map((u) => (
+                            <option key={u} value={u}>
+                              {u}
+                            </option>
+                          ))}
                         </select>
                       </td>
                       <td>
@@ -520,11 +820,6 @@ export function App() {
                             })
                           }
                         />
-                      </td>
-                      <td>
-                        {isComplete && calcInfo?.grossUnitCostInBase !== null
-                          ? `${state.currency} ${formatDecimal(calcInfo!.grossUnitCostInBase, 4)} / ${ing.base_unit}`
-                          : '—'}
                       </td>
                       <td>
                         {isComplete && calcInfo?.usableUnitCostInBase !== null ? (
@@ -547,6 +842,16 @@ export function App() {
                           <span className="badge badge--warn">{t.statusIncomplete}</span>
                         )}
                       </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="btn btn--sm btn--danger"
+                          onClick={() => deleteIngredient(ing.id)}
+                          title="Eliminar insumo"
+                        >
+                          ✕
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
@@ -558,10 +863,30 @@ export function App() {
 
       {activeTab === 'subrecipes' && (
         <div className="card">
-          <h2>Masas Panaderas (Biga / Poolish) y Subrecetas Reutilizables</h2>
-          <p className="lead">
-            Cada subreceta se calcula por lote (batch) y se prorratea según su rendimiento medido. Cualquier cambio de insumo actualiza todas las recetas finales que la utilizan.
-          </p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+            <div>
+              <h2>Masas Panaderas (Biga / Poolish) y Subrecetas Reutilizables</h2>
+              <p className="lead">
+                Creá o editá masas con porcentaje panadero o subrecetas por lote (salsas, rellenos) usando el constructor visual.
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                type="button"
+                className="btn btn--ocre"
+                onClick={() => openNewRecipeBuilder('subrecipe', true)}
+              >
+                + Nueva Masa Panadera (Biga/Poolish)
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={() => openNewRecipeBuilder('subrecipe', false)}
+              >
+                + Nueva Subreceta / Salsa
+              </button>
+            </div>
+          </div>
           <div className="table-wrap">
             <table className="kit-table">
               <thead>
@@ -573,6 +898,7 @@ export function App() {
                   <th>Costo por Unidad Rendimiento</th>
                   <th>Costo por kg</th>
                   <th>Estado</th>
+                  <th>Acciones</th>
                 </tr>
               </thead>
               <tbody>
@@ -589,7 +915,7 @@ export function App() {
                         <td>
                           {sub.bakers_dough
                             ? `Panificación (${sub.bakers_dough.hydration_pct}% hidr · ${sub.bakers_dough.yield_basis})`
-                            : 'Subreceta por componentes'}
+                            : `Subreceta (${sub.components?.length ?? 0} componentes)`}
                         </td>
                         <td>
                           {sub.yield_quantity} {sub.yield_unit}
@@ -614,6 +940,22 @@ export function App() {
                             {isComplete ? t.statusComplete : t.statusIncomplete}
                           </span>
                         </td>
+                        <td style={{ display: 'flex', gap: 6 }}>
+                          <button
+                            type="button"
+                            className="btn btn--sm"
+                            onClick={() => openEditRecipeBuilder(sub)}
+                          >
+                            ✏️ Editar
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn--sm btn--danger"
+                            onClick={() => deleteRecipe(sub.id)}
+                          >
+                            ✕
+                          </button>
+                        </td>
                       </tr>
                     );
                   })}
@@ -625,127 +967,227 @@ export function App() {
 
       {activeTab === 'recipes' && (
         <div className="card">
-          <h2>Escandallo de Productos, Precio Sugerido, Food Cost %, Margen Bruto % y Markup %</h2>
-          <p className="lead">
-            El motor diferencia estrictamente Food Cost % (Costo ÷ Precio), Margen Bruto % ((Precio − Costo) ÷ Precio) y Markup % ((Precio − Costo) ÷ Costo), y separa los costos de canal.
-          </p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+            <div>
+              <h2>Constructor de Recetas, Precios, Unidades Vendidas / Mes e Ingeniería de Menú</h2>
+              <p className="lead">
+                Cargá las <strong>Unidades Vendidas / Mes</strong> de cada producto para proyectar tu Contribución Marginal Mensual, clasificar platos en la Matriz de Ingeniería de Menú y calcular tu Ganancia Neta descontando alquileres y costos fijos.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={() => openNewRecipeBuilder('product', false)}
+            >
+              + Nueva Receta de Producto
+            </button>
+          </div>
+
           <div className="table-wrap">
             <table className="kit-table">
               <thead>
                 <tr>
                   <th>Producto</th>
-                  <th>Estado</th>
-                  <th>Costo Ingredientes</th>
-                  <th>Precio Mínimo</th>
+                  <th>Matriz Menú</th>
+                  <th>Costo Ingred.</th>
                   <th>Precio Sugerido</th>
+                  <th>Precio Carta ({state.currency})</th>
                   <th>Food Cost %</th>
-                  <th>Ganancia Bruta ($)</th>
-                  <th>Margen Bruto %</th>
+                  <th>Margen Unit. ($)</th>
+                  <th>Margen %</th>
                   <th>Markup %</th>
-                  <th>Neta Delivery (tras envase + {state.defaultChannelFeePct}%)</th>
+                  <th>Unidades / Mes</th>
+                  <th>Contribución Mes ($)</th>
+                  <th>Acciones</th>
                 </tr>
               </thead>
               <tbody>
-                {state.catalog.recipes
-                  .filter((r) => r.recipe_type === 'product')
-                  .map((prod) => {
-                    const res = recipeResults.get(prod.id);
-                    const pricing = res
-                      ? calculatePricingScenario({
-                          unit_cost: res.raw_unit_cost,
-                          status: res.status,
-                          currency: state.currency,
-                          target_food_cost_pct: prod.target_food_cost_pct ?? state.defaultTargetFoodCostPct,
-                          rounding_increment: state.defaultRoundingIncrement,
-                          rounding_mode: 'ceil',
-                          packaging_cost: state.defaultPackagingCost,
-                          channel_fee_pct: state.defaultChannelFeePct,
-                        })
-                      : null;
-
-                    const isComplete = res?.status === 'complete' && pricing?.status === 'complete';
-
-                    return (
-                      <tr key={prod.id}>
-                        <td>
-                          <strong>{prod.name}</strong>
-                          {!isComplete && res && res.missing_inputs.length > 0 && (
-                            <div style={{ fontSize: 11, color: 'var(--warn)', marginTop: 4 }}>
-                              ⚠️ Falta precio de:{' '}
-                              {res.missing_inputs.map((m) => m.ingredient_name).join(', ')} (Costo parcial conocido: {state.currency} {res.partial_batch_cost})
-                            </div>
-                          )}
-                        </td>
-                        <td>
-                          <span className={`badge ${isComplete ? 'badge--ok' : 'badge--warn'}`}>
-                            {isComplete ? t.statusComplete : t.statusIncomplete}
-                          </span>
-                        </td>
-                        <td>
-                          {isComplete && res?.unit_cost ? (
-                            <strong>
-                              {state.currency} {res.unit_cost}
-                            </strong>
-                          ) : (
-                            <span style={{ color: 'var(--warn)', fontWeight: 700 }}>
-                              INCOMPLETO
-                            </span>
-                          )}
-                        </td>
-                        <td>
-                          {isComplete && pricing?.minimum_price
-                            ? `${state.currency} ${pricing.minimum_price}`
-                            : '—'}
-                        </td>
-                        <td>
-                          {isComplete && pricing?.suggested_price ? (
-                            <strong style={{ color: 'var(--brand)' }}>
-                              {state.currency} {pricing.suggested_price}
-                            </strong>
-                          ) : (
-                            <span className="badge badge--warn">BLOQUEADO</span>
-                          )}
-                        </td>
-                        <td>
-                          {isComplete && pricing?.food_cost_pct !== null && pricing?.food_cost_pct !== undefined
-                            ? `${formatDecimal(pricing.food_cost_pct, 1)}%`
-                            : '—'}
-                        </td>
-                        <td>
-                          {isComplete && pricing?.gross_profit
-                            ? `${state.currency} ${pricing.gross_profit}`
-                            : '—'}
-                        </td>
-                        <td>
-                          {isComplete && pricing?.gross_margin_pct !== null && pricing?.gross_margin_pct !== undefined
-                            ? `${formatDecimal(pricing.gross_margin_pct, 1)}%`
-                            : '—'}
-                        </td>
-                        <td>
-                          {isComplete && pricing?.markup_pct !== null && pricing?.markup_pct !== undefined
-                            ? `${formatDecimal(pricing.markup_pct, 1)}%`
-                            : '—'}
-                        </td>
-                        <td>
-                          {isComplete && pricing?.net_contribution_after_channel
-                            ? `${state.currency} ${pricing.net_contribution_after_channel}`
-                            : '—'}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                {monthlySummary.rows.map((row) => {
+                  const { prod, res, pricing, isComplete, units, customPrice, monthlyContribution, matrixClass, matrixLabel } = row;
+                  return (
+                    <tr key={prod.id}>
+                      <td>
+                        <strong>{prod.name}</strong>
+                        {!isComplete && res && res.missing_inputs.length > 0 && (
+                          <div style={{ fontSize: 11, color: 'var(--warn)', marginTop: 4 }}>
+                            ⚠️ Falta precio:{' '}
+                            {res.missing_inputs.map((m) => m.ingredient_name).join(', ')} (Parcial: {state.currency} {res.partial_batch_cost})
+                          </div>
+                        )}
+                      </td>
+                      <td>
+                        {isComplete && matrixClass ? (
+                          <span className={`badge badge--${matrixClass}`}>{matrixLabel}</span>
+                        ) : (
+                          <span className="badge badge--warn">{t.statusIncomplete}</span>
+                        )}
+                      </td>
+                      <td>
+                        {isComplete && res?.unit_cost ? (
+                          <strong>
+                            {state.currency} {res.unit_cost}
+                          </strong>
+                        ) : (
+                          <span style={{ color: 'var(--warn)', fontWeight: 700 }}>INCOMPLETO</span>
+                        )}
+                      </td>
+                      <td>
+                        {isComplete && pricing?.suggested_price ? (
+                          <strong style={{ color: 'var(--brand)' }}>
+                            {state.currency} {pricing.suggested_price}
+                          </strong>
+                        ) : (
+                          <span className="badge badge--warn">BLOQUEADO</span>
+                        )}
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          min={0}
+                          step={100}
+                          placeholder={pricing?.suggested_price ?? 'Sugerido'}
+                          value={customPrice ?? ''}
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            setState((prev) => ({
+                              ...prev,
+                              productSalesMap: {
+                                ...prev.productSalesMap,
+                                [prod.id]: {
+                                  monthlyUnitsSold: prev.productSalesMap?.[prod.id]?.monthlyUnitsSold ?? 120,
+                                  sellingPrice: raw === '' ? null : Number(raw),
+                                },
+                              },
+                            }));
+                          }}
+                        />
+                      </td>
+                      <td>
+                        {isComplete && pricing?.food_cost_pct !== null && pricing?.food_cost_pct !== undefined
+                          ? `${formatDecimal(pricing.food_cost_pct, 1)}%`
+                          : '—'}
+                      </td>
+                      <td>
+                        {isComplete && pricing?.gross_profit
+                          ? `${state.currency} ${pricing.gross_profit}`
+                          : '—'}
+                      </td>
+                      <td>
+                        {isComplete && pricing?.gross_margin_pct !== null && pricing?.gross_margin_pct !== undefined
+                          ? `${formatDecimal(pricing.gross_margin_pct, 1)}%`
+                          : '—'}
+                      </td>
+                      <td>
+                        {isComplete && pricing?.markup_pct !== null && pricing?.markup_pct !== undefined
+                          ? `${formatDecimal(pricing.markup_pct, 1)}%`
+                          : '—'}
+                      </td>
+                      <td>
+                        <input
+                          type="number"
+                          min={0}
+                          step={10}
+                          value={units}
+                          onChange={(e) => {
+                            const nextUnits = Math.max(0, Number(e.target.value) || 0);
+                            setState((prev) => ({
+                              ...prev,
+                              productSalesMap: {
+                                ...prev.productSalesMap,
+                                [prod.id]: {
+                                  ...prev.productSalesMap?.[prod.id],
+                                  monthlyUnitsSold: nextUnits,
+                                },
+                              },
+                            }));
+                          }}
+                        />
+                      </td>
+                      <td>
+                        {isComplete ? (
+                          <strong>
+                            {state.currency} {formatDecimal(monthlyContribution, 0)}
+                          </strong>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                      <td style={{ display: 'flex', gap: 6 }}>
+                        <button
+                          type="button"
+                          className="btn btn--sm"
+                          onClick={() => openEditRecipeBuilder(prod)}
+                        >
+                          ✏️ Receta
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn--sm btn--danger"
+                          onClick={() => deleteRecipe(prod.id)}
+                        >
+                          ✕
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
+          </div>
+
+          <div className="kpi-grid">
+            <div className="kpi-box">
+              <div className="kpi-box__label">Unidades Mensuales Totales</div>
+              <div className="kpi-box__value">{monthlySummary.totalUnits} u/mes</div>
+              <div className="kpi-box__sub">Suma de productos completos</div>
+            </div>
+            <div className="kpi-box">
+              <div className="kpi-box__label">Facturación Mensual Proyectada</div>
+              <div className="kpi-box__value">
+                {state.currency} {formatDecimal(monthlySummary.totalRevenue, 0)}
+              </div>
+              <div className="kpi-box__sub">
+                CMV Ingredientes: {state.currency} {formatDecimal(monthlySummary.totalCogs, 0)}
+              </div>
+            </div>
+            <div className="kpi-box">
+              <div className="kpi-box__label">Contribución Marginal Mensual</div>
+              <div className="kpi-box__value">
+                {state.currency} {formatDecimal(monthlySummary.totalContribution, 0)}
+              </div>
+              <div className="kpi-box__sub">
+                Margen Bruto Ponderado: {formatDecimal(monthlySummary.weightedMarginPct, 1)}%
+              </div>
+            </div>
+            <div className="kpi-box kpi-box--highlight">
+              <div className="kpi-box__label">Ganancia Neta Real (Tras Alquiler y Costos Fijos)</div>
+              <div
+                className="kpi-box__value"
+                style={{ color: netOperatingProfit >= 0 ? '#4ade80' : '#f87171' }}
+              >
+                {state.currency} {formatDecimal(netOperatingProfit, 0)}
+              </div>
+              <div className="kpi-box__sub">
+                Descontando {state.currency} {formatDecimal(totalMonthlyExpenses, 0)} de gastos fijos (Pestaña 4)
+              </div>
+            </div>
           </div>
         </div>
       )}
 
       {activeTab === 'expenses' && (
         <div className="card">
-          <h2>Gastos Operativos Mensuales y Punto de Equilibrio (Break-Even)</h2>
-          <p className="lead">
-            Los gastos de estructura (alquiler, nómina, servicios) se registran por separado y nunca alteran silenciosamente el Food Cost de ingredientes.
-          </p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+            <div>
+              <h2>Gastos Operativos Mensuales (Alquiler, Sueldos, Servicios) y Rentabilidad Neta</h2>
+              <p className="lead">
+                Los costos fijos no distorsionan el Food Cost del plato: se cubren con la Contribución Marginal Mensual generada por las unidades vendidas en la Pestaña 3.
+              </p>
+            </div>
+            <button type="button" className="btn btn--primary" onClick={addOperatingExpense}>
+              + Agregar Costo Fijo
+            </button>
+          </div>
           <div className="table-wrap">
             <table className="kit-table">
               <thead>
@@ -754,6 +1196,7 @@ export function App() {
                   <th>Categoría</th>
                   <th>Frecuencia</th>
                   <th>Importe ({state.currency})</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -774,8 +1217,45 @@ export function App() {
                         }}
                       />
                     </td>
-                    <td>{exp.category}</td>
-                    <td>{exp.period}</td>
+                    <td>
+                      <select
+                        value={exp.category}
+                        onChange={(e) => {
+                          const cat = e.target.value as OperatingExpenseItem['category'];
+                          setState((prev) => ({
+                            ...prev,
+                            operatingExpenses: prev.operatingExpenses.map((x) =>
+                              x.id === exp.id ? { ...x, category: cat } : x
+                            ),
+                          }));
+                        }}
+                      >
+                        <option value="rent">Alquiler</option>
+                        <option value="payroll">Personal / Sueldos</option>
+                        <option value="utilities">Servicios (Luz/Gas/Agua)</option>
+                        <option value="software">Software / Contabilidad</option>
+                        <option value="taxes">Impuestos / Tasas</option>
+                        <option value="other">Otros Fijos</option>
+                      </select>
+                    </td>
+                    <td>
+                      <select
+                        value={exp.period}
+                        onChange={(e) => {
+                          const per = e.target.value as OperatingExpenseItem['period'];
+                          setState((prev) => ({
+                            ...prev,
+                            operatingExpenses: prev.operatingExpenses.map((x) =>
+                              x.id === exp.id ? { ...x, period: per } : x
+                            ),
+                          }));
+                        }}
+                      >
+                        <option value="monthly">Mensual</option>
+                        <option value="weekly">Semanal</option>
+                        <option value="yearly">Anual</option>
+                      </select>
+                    </td>
                     <td>
                       <input
                         type="number"
@@ -793,6 +1273,15 @@ export function App() {
                         }}
                       />
                     </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn btn--sm btn--danger"
+                        onClick={() => deleteOperatingExpense(exp.id)}
+                      >
+                        ✕
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -801,31 +1290,43 @@ export function App() {
 
           <div className="kpi-grid">
             <div className="kpi-box">
-              <div className="kpi-box__label">Total Gastos Fijos Mensuales</div>
+              <div className="kpi-box__label">Total Costos Fijos Mensuales</div>
               <div className="kpi-box__value">
-                {state.currency} {formatDecimal(totalMonthlyExpenses, 2)}
+                {state.currency} {formatDecimal(totalMonthlyExpenses, 0)}
               </div>
-              <div className="kpi-box__sub">Excluye costo de mercadería (ingredientes)</div>
+              <div className="kpi-box__sub">Alquiler + Nómina + Servicios</div>
             </div>
             <div className="kpi-box">
-              <div className="kpi-box__label">Margen Bruto Objetivo</div>
+              <div className="kpi-box__label">Contribución Marginal (Ventas Mes)</div>
               <div className="kpi-box__value">
-                {formatDecimal(100 - state.defaultTargetFoodCostPct, 1)}%
+                {state.currency} {formatDecimal(monthlySummary.totalContribution, 0)}
               </div>
               <div className="kpi-box__sub">
-                Con Food Cost objetivo de {state.defaultTargetFoodCostPct}%
+                Por {monthlySummary.totalUnits} unidades vendidas/mes
               </div>
             </div>
             <div className="kpi-box">
-              <div className="kpi-box__label">Venta Mensual de Equilibrio</div>
+              <div className="kpi-box__label">Venta de Equilibrio (Break-Even)</div>
               <div className="kpi-box__value">
-                {state.currency}{' '}
-                {formatDecimal(
-                  totalMonthlyExpenses / ((100 - state.defaultTargetFoodCostPct) / 100),
-                  2
-                )}
+                {state.currency} {formatDecimal(breakEvenRevenue, 0)}
               </div>
-              <div className="kpi-box__sub">Facturación necesaria para cubrir estructura</div>
+              <div className="kpi-box__sub">
+                Al {formatDecimal(monthlySummary.weightedMarginPct, 1)}% de margen bruto ponderado
+              </div>
+            </div>
+            <div className="kpi-box kpi-box--highlight">
+              <div className="kpi-box__label">Resultado Operativo Neto (EBITDA)</div>
+              <div
+                className="kpi-box__value"
+                style={{ color: netOperatingProfit >= 0 ? '#4ade80' : '#f87171' }}
+              >
+                {state.currency} {formatDecimal(netOperatingProfit, 0)}
+              </div>
+              <div className="kpi-box__sub">
+                {monthlySummary.totalRevenue > 0
+                  ? `${formatDecimal((netOperatingProfit / monthlySummary.totalRevenue) * 100, 1)}% neto sobre facturación`
+                  : 'Cargá unidades en la Pestaña 3'}
+              </div>
             </div>
           </div>
         </div>
@@ -927,6 +1428,312 @@ export function App() {
             </div>
           </div>
         </>
+      )}
+
+      {/* Modal del Constructor Visual Interactivo de Recetas, Subrecetas y Masas */}
+      {editingRecipe && (
+        <div className="modal-backdrop" onClick={() => setEditingRecipe(null)}>
+          <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>
+                {isDoughMode
+                  ? '🥣 Constructor Panadero (Biga / Poolish / Hidratación)'
+                  : editingRecipe.recipe_type === 'product'
+                  ? '🍕 Constructor Visual de Receta de Producto'
+                  : '🥫 Constructor Visual de Subreceta'}
+              </h3>
+              <button type="button" className="btn btn--sm" onClick={() => setEditingRecipe(null)}>
+                ✕ Cerrar
+              </button>
+            </div>
+
+            {builderError && <div className="alert-banner">⚠️ {builderError}</div>}
+
+            <div className="builder-grid">
+              <label className="field">
+                <span>Nombre</span>
+                <input
+                  type="text"
+                  value={editingRecipe.name}
+                  onChange={(e) => setEditingRecipe({ ...editingRecipe, name: e.target.value })}
+                />
+              </label>
+              <label className="field">
+                <span>Rendimiento (Yield)</span>
+                <input
+                  type="number"
+                  min={0.001}
+                  step={1}
+                  value={editingRecipe.yield_quantity}
+                  onChange={(e) =>
+                    setEditingRecipe({
+                      ...editingRecipe,
+                      yield_quantity: Math.max(0.001, Number(e.target.value) || 1),
+                      bakers_dough: editingRecipe.bakers_dough
+                        ? {
+                            ...editingRecipe.bakers_dough,
+                            measured_yield_g: Math.max(1, Number(e.target.value) || 1),
+                          }
+                        : undefined,
+                    })
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Unidad de Rendimiento</span>
+                <select
+                  value={editingRecipe.yield_unit}
+                  onChange={(e) =>
+                    setEditingRecipe({ ...editingRecipe, yield_unit: e.target.value as UnitCode })
+                  }
+                >
+                  {ALL_UNITS.map((u) => (
+                    <option key={u} value={u}>
+                      {u}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {editingRecipe.recipe_type === 'product' && (
+                <label className="field">
+                  <span>Food Cost Objetivo (%)</span>
+                  <input
+                    type="number"
+                    min={5}
+                    max={95}
+                    value={editingRecipe.target_food_cost_pct ?? state.defaultTargetFoodCostPct}
+                    onChange={(e) =>
+                      setEditingRecipe({
+                        ...editingRecipe,
+                        target_food_cost_pct: Math.max(5, Math.min(95, Number(e.target.value) || 30)),
+                      })
+                    }
+                  />
+                </label>
+              )}
+            </div>
+
+            {isDoughMode && editingRecipe.bakers_dough ? (
+              <div className="builder-grid">
+                <label className="field">
+                  <span>Harina Total del Batch (g)</span>
+                  <input
+                    type="number"
+                    min={100}
+                    step={100}
+                    value={editingRecipe.bakers_dough.total_flour_g ?? 1000}
+                    onChange={(e) =>
+                      setEditingRecipe({
+                        ...editingRecipe,
+                        bakers_dough: {
+                          ...editingRecipe.bakers_dough!,
+                          total_flour_g: Math.max(10, Number(e.target.value) || 1000),
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="field">
+                  <span>Hidratación Total (% agua s/ harina)</span>
+                  <input
+                    type="number"
+                    min={30}
+                    max={250}
+                    step={0.5}
+                    value={editingRecipe.bakers_dough.hydration_pct}
+                    onChange={(e) =>
+                      setEditingRecipe({
+                        ...editingRecipe,
+                        bakers_dough: {
+                          ...editingRecipe.bakers_dough!,
+                          hydration_pct: Math.max(0, Number(e.target.value) || 68),
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="field">
+                  <span>Sal (% sobre harina)</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={15}
+                    step={0.1}
+                    value={editingRecipe.bakers_dough.salt_pct ?? 2.5}
+                    onChange={(e) =>
+                      setEditingRecipe({
+                        ...editingRecipe,
+                        bakers_dough: {
+                          ...editingRecipe.bakers_dough!,
+                          salt_pct: Math.max(0, Number(e.target.value) || 0),
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="field">
+                  <span>Insumo Harina Principal</span>
+                  <select
+                    value={editingRecipe.bakers_dough.flours[0]?.ingredient_id ?? ''}
+                    onChange={(e) =>
+                      setEditingRecipe({
+                        ...editingRecipe,
+                        bakers_dough: {
+                          ...editingRecipe.bakers_dough!,
+                          flours: [{ ingredient_id: e.target.value, share_pct: 100 }],
+                        },
+                      })
+                    }
+                  >
+                    {state.catalog.ingredients.map((i) => (
+                      <option key={i.id} value={i.id}>
+                        {i.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            ) : (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <strong>Componentes de la Receta (Insumos y Subrecetas)</strong>
+                  <button
+                    type="button"
+                    className="btn btn--sm btn--primary"
+                    onClick={() => {
+                      const nextComps: RecipeComponent[] = [
+                        ...(editingRecipe.components ?? []),
+                        {
+                          component_type: 'ingredient',
+                          ingredient_id: state.catalog.ingredients[0]?.id ?? '',
+                          quantity: 100,
+                          unit: 'g',
+                        },
+                      ];
+                      setEditingRecipe({ ...editingRecipe, components: nextComps });
+                    }}
+                  >
+                    + Agregar Componente
+                  </button>
+                </div>
+
+                {(editingRecipe.components ?? []).map((comp, idx) => (
+                  <div className="comp-row" key={idx}>
+                    <select
+                      value={comp.component_type}
+                      onChange={(e) => {
+                        const newType = e.target.value as 'ingredient' | 'subrecipe';
+                        const firstSub = state.catalog.recipes.find(
+                          (r) => r.recipe_type === 'subrecipe' && r.id !== editingRecipe.id
+                        );
+                        const updated = [...(editingRecipe.components ?? [])];
+                        updated[idx] =
+                          newType === 'ingredient'
+                            ? {
+                                component_type: 'ingredient',
+                                ingredient_id: state.catalog.ingredients[0]?.id ?? '',
+                                quantity: comp.quantity,
+                                unit: 'g',
+                              }
+                            : {
+                                component_type: 'subrecipe',
+                                recipe_id: firstSub?.id ?? '',
+                                quantity: comp.quantity,
+                                unit: firstSub?.yield_unit ?? 'g',
+                              };
+                        setEditingRecipe({ ...editingRecipe, components: updated });
+                      }}
+                    >
+                      <option value="ingredient">Insumo</option>
+                      <option value="subrecipe">Subreceta</option>
+                    </select>
+
+                    {comp.component_type === 'ingredient' ? (
+                      <select
+                        value={comp.ingredient_id ?? ''}
+                        onChange={(e) => {
+                          const updated = [...(editingRecipe.components ?? [])];
+                          updated[idx] = { ...comp, ingredient_id: e.target.value };
+                          setEditingRecipe({ ...editingRecipe, components: updated });
+                        }}
+                      >
+                        {state.catalog.ingredients.map((ing) => (
+                          <option key={ing.id} value={ing.id}>
+                            {ing.name} (base: {ing.base_unit})
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <select
+                        value={comp.recipe_id ?? ''}
+                        onChange={(e) => {
+                          const updated = [...(editingRecipe.components ?? [])];
+                          updated[idx] = { ...comp, recipe_id: e.target.value };
+                          setEditingRecipe({ ...editingRecipe, components: updated });
+                        }}
+                      >
+                        {state.catalog.recipes
+                          .filter((r) => r.recipe_type === 'subrecipe' && r.id !== editingRecipe.id)
+                          .map((sub) => (
+                            <option key={sub.id} value={sub.id}>
+                              {sub.name} (rinde en {sub.yield_unit})
+                            </option>
+                          ))}
+                      </select>
+                    )}
+
+                    <input
+                      type="number"
+                      min={0.001}
+                      step={10}
+                      value={comp.quantity}
+                      onChange={(e) => {
+                        const updated = [...(editingRecipe.components ?? [])];
+                        updated[idx] = { ...comp, quantity: Math.max(0, Number(e.target.value) || 0) };
+                        setEditingRecipe({ ...editingRecipe, components: updated });
+                      }}
+                    />
+
+                    <select
+                      value={comp.unit}
+                      onChange={(e) => {
+                        const updated = [...(editingRecipe.components ?? [])];
+                        updated[idx] = { ...comp, unit: e.target.value as UnitCode };
+                        setEditingRecipe({ ...editingRecipe, components: updated });
+                      }}
+                    >
+                      {ALL_UNITS.map((u) => (
+                        <option key={u} value={u}>
+                          {u}
+                        </option>
+                      ))}
+                    </select>
+
+                    <button
+                      type="button"
+                      className="btn btn--sm btn--danger"
+                      onClick={() => {
+                        const updated = (editingRecipe.components ?? []).filter((_, i) => i !== idx);
+                        setEditingRecipe({ ...editingRecipe, components: updated });
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18 }}>
+              <button type="button" className="btn" onClick={() => setEditingRecipe(null)}>
+                Cancelar
+              </button>
+              <button type="button" className="btn btn--primary" onClick={saveEditedRecipe}>
+                💾 Validar y Guardar Receta
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

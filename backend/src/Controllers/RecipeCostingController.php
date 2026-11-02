@@ -11,6 +11,9 @@ use Pizzalog\Core\Response;
  */
 class RecipeCostingController
 {
+    /**
+     * Respaldo defensivo de esquema por si la migración 027 aún no corrió en el entorno.
+     */
     private function ensureTables(\PDO $pdo): void
     {
         $pdo->exec("CREATE TABLE IF NOT EXISTS recipe_studio_recipes (
@@ -51,11 +54,29 @@ class RecipeCostingController
     }
 
     /**
+     * Cuenta cuántos productos activos tienen composición en product_ingredients
+     * pero aún no fueron importados a recipe_studio_recipes.
+     */
+    private function countUnimportedLegacyRecipes(\PDO $pdo, int $bid): int
+    {
+        $stmt = $pdo->prepare("SELECT COUNT(*)
+            FROM products p
+            WHERE p.business_id=? AND p.is_active=1
+              AND EXISTS (SELECT 1 FROM product_ingredients pi WHERE pi.product_id=p.id)
+              AND NOT EXISTS (
+                SELECT 1 FROM recipe_studio_recipes rs
+                WHERE rs.business_id=p.business_id AND rs.linked_product_id=p.id AND rs.is_active=1
+              )");
+        $stmt->execute([$bid]);
+        return (int)$stmt->fetchColumn();
+    }
+
+    /**
      * Importa al estudio de recetas los productos que ya tenían composición
      * en product_ingredients (incluidas las recetas cargadas desde Excel).
-     * Se ejecuta de forma idempotente: nunca reemplaza recetas ya editadas en el estudio.
+     * Se ejecuta de forma idempotente únicamente bajo pedido explícito POST (Auditoría P1.2).
      */
-    private function importExistingProductRecipes(\PDO $pdo, int $bid): void
+    private function importExistingProductRecipes(\PDO $pdo, int $bid): int
     {
         $products = $pdo->prepare("SELECT p.id,p.name,p.price
             FROM products p
@@ -80,9 +101,11 @@ class RecipeCostingController
         $insertComponent = $pdo->prepare("INSERT INTO recipe_studio_components
             (business_id,recipe_id,component_type,supply_id,component_recipe_id,quantity,unit,sort_order)
             VALUES (?,?,'supply',?,NULL,?,?,?)");
+        $importedCount = 0;
         foreach ($products->fetchAll(\PDO::FETCH_ASSOC) as $product) {
             $insertRecipe->execute([$bid,(int)$product['id'],(string)$product['name'],(float)$product['price']]);
             $recipeId = (int)$pdo->lastInsertId();
+            $importedCount++;
             $legacyComponents->execute([$bid,(int)$product['id']]);
             $order = 0;
             foreach ($legacyComponents->fetchAll(\PDO::FETCH_ASSOC) as $component) {
@@ -105,6 +128,27 @@ class RecipeCostingController
                 $insertComponent->execute([$bid,$recipeId,$supplyId,$quantity,$unit,$order++]);
             }
         }
+        return $importedCount;
+    }
+
+    /**
+     * POST /production/recipe-studio/import-legacy
+     * Importa explícitamente las recetas del catálogo tradicional a Recipe Studio sin mutar en GET.
+     */
+    public function importLegacyRecipes(Request $req): void
+    {
+        $bid = (int)$req->auth['business_id'];
+        $pdo = Database::pdo();
+        $this->ensureTables($pdo);
+        $pdo->beginTransaction();
+        try {
+            $imported = $this->importExistingProductRecipes($pdo, $bid);
+            $pdo->commit();
+            Response::ok(['success' => true, 'imported_count' => $imported]);
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            Response::error('No se pudieron importar las recetas históricas: ' . $e->getMessage(), 500);
+        }
     }
 
     public function recipesIndex(Request $req): void
@@ -112,7 +156,7 @@ class RecipeCostingController
         $bid = (int)$req->auth['business_id'];
         $pdo = Database::pdo();
         $this->ensureTables($pdo);
-        $this->importExistingProductRecipes($pdo, $bid);
+        $legacyUnimportedCount = $this->countUnimportedLegacyRecipes($pdo, $bid);
         $stmt = $pdo->prepare("SELECT id, name, recipe_type, linked_product_id, yield_quantity, yield_unit, price, target_food_cost_pct
           FROM recipe_studio_recipes WHERE business_id = ? AND is_active = 1 ORDER BY recipe_type, name");
         $stmt->execute([$bid]);
@@ -153,6 +197,9 @@ class RecipeCostingController
                     : ($child ? $calc((int)$c['component_recipe_id'],$path) / max(0.0001,(float)$child['yield_quantity']) : 0.0);
                 $targetUnit = $c['component_type']==='supply' ? (string)($c['unit'] ?? 'kg') : (string)($c['unit'] ?? ($child['yield_unit'] ?? 'kg'));
                 $costUnit = $c['component_type']==='supply' ? (string)($c['supply_unit'] ?? $targetUnit) : (string)($child['yield_unit'] ?? $targetUnit);
+                if (!$this->areUnitsCompatible($targetUnit, $costUnit)) {
+                    continue;
+                }
                 $qty = $this->convertQuantity((float)$c['quantity'], $targetUnit, $costUnit);
                 $sum += $qty * $unitCost;
             }
@@ -163,23 +210,47 @@ class RecipeCostingController
             $id=(int)$r['id']; $cost=$calc($id); $yield=max(0.0001,(float)$r['yield_quantity']);
             $unitCost=$cost/$yield; $target=max(1,min(100,(float)$r['target_food_cost_pct']))/100;
             $price=(float)$r['price'];
+            $warnings=[];
             $r['id']=$id; $r['linked_product_id']=$r['linked_product_id']!==null?(int)$r['linked_product_id']:null;
             $r['yield_quantity']=$yield; $r['price']=$price; $r['target_food_cost_pct']=(float)$r['target_food_cost_pct'];
             $r['batch_cost']=$cost; $r['unit_cost']=round($unitCost,2);
             $r['suggested_price']=$r['recipe_type']==='product' ? (float)(ceil(($unitCost/$target)/100)*100) : 0.0;
             $r['food_cost_pct']=$price>0?round($unitCost/$price*100,1):0.0;
-            $r['components']=array_map(function(array $c) use ($byId,$calc): array {
+            $r['components']=array_map(function(array $c) use ($byId,$calc,&$warnings): array {
                 $type=$c['component_type']; $child=$type==='recipe'?($byId[(int)$c['component_recipe_id']]??null):null;
+                $compName=$type==='supply'?($c['supply_name']??'Insumo'):($child['name']??$c['recipe_name']??'Subreceta');
                 $unitCost=$type==='supply'?(float)$c['supply_cost']:($child?round($calc((int)$child['id'])/max(.0001,(float)$child['yield_quantity']),2):0.0);
                 $costUnit=$type==='supply'?(string)($c['supply_unit']??$c['unit']):(string)($child['yield_unit']??$c['unit']);
-                $qtyForCost=$this->convertQuantity((float)$c['quantity'],(string)$c['unit'],$costUnit);
-                return ['component_type'=>$type,'component_id'=>$type==='supply'?(int)$c['supply_id']:(int)$c['component_recipe_id'],
-                  'name'=>$type==='supply'?$c['supply_name']:($child['name']??$c['recipe_name']??'Subreceta'),
-                  'quantity'=>(float)$c['quantity'],'unit'=>$c['unit'],'unit_cost'=>$unitCost,'total_cost'=>round($qtyForCost*$unitCost,2)];
+                $compatible=$this->areUnitsCompatible((string)$c['unit'],$costUnit);
+                if(!$compatible){
+                    $warnings[]="Unidad incompatible en '{$compName}': receta usa '{$c['unit']}' pero la unidad de costo es '{$costUnit}'.";
+                }
+                if($unitCost<=0){
+                    $warnings[]="El componente '{$compName}' tiene costo \$0 (incompleto).";
+                }
+                $qtyForCost=$compatible ? $this->convertQuantity((float)$c['quantity'],(string)$c['unit'],$costUnit) : 0.0;
+                return [
+                  'component_type'=>$type,
+                  'component_id'=>$type==='supply'?(int)$c['supply_id']:(int)$c['component_recipe_id'],
+                  'name'=>$compName,
+                  'quantity'=>(float)$c['quantity'],
+                  'unit'=>$c['unit'],
+                  'cost_unit'=>$costUnit,
+                  'unit_mismatch'=>!$compatible,
+                  'unit_cost'=>$unitCost,
+                  'total_cost'=>round($qtyForCost*$unitCost,2)
+                ];
             },$byRecipe[$id]??[]);
+            $r['warnings']=array_values(array_unique($warnings));
+            $r['is_incomplete']=!empty($r['warnings']);
             $formatted[]=$r;
         }
-        Response::ok(['recipes'=>$formatted,'supplies'=>$supplies,'products'=>$products]);
+        Response::ok([
+            'recipes'=>$formatted,
+            'supplies'=>$supplies,
+            'products'=>$products,
+            'legacy_unimported_count'=>$legacyUnimportedCount,
+        ]);
     }
 
     public function recipesSave(Request $req): void
@@ -211,21 +282,35 @@ class RecipeCostingController
                 $q->execute([$bid,$linked,$name,$type,$yield,$yieldUnit,$price,$target]);$rid=(int)$pdo->lastInsertId();
             }
             $pdo->prepare('DELETE FROM recipe_studio_components WHERE recipe_id=? AND business_id=?')->execute([$rid,$bid]);
-            $supplyCheck=$pdo->prepare('SELECT id FROM supplies WHERE id=? AND business_id=? AND is_active=1');
-            $recipeCheck=$pdo->prepare('SELECT id FROM recipe_studio_recipes WHERE id=? AND business_id=? AND is_active=1');
+            $supplyCheck=$pdo->prepare('SELECT id, name, unit FROM supplies WHERE id=? AND business_id=? AND is_active=1');
+            $recipeCheck=$pdo->prepare('SELECT id, name, yield_unit FROM recipe_studio_recipes WHERE id=? AND business_id=? AND is_active=1');
             $ins=$pdo->prepare('INSERT INTO recipe_studio_components (business_id,recipe_id,component_type,supply_id,component_recipe_id,quantity,unit,sort_order) VALUES (?,?,?,?,?,?,?,?)');
             foreach($components as $i=>$c){
                 $qty=max(0,(float)($c['quantity']??0)); if($qty<=0) continue;
                 $ct=($c['component_type']??'supply')==='recipe'?'recipe':'supply';$cid=(int)($c['component_id']??0);
-                if($ct==='supply'){$supplyCheck->execute([$cid,$bid]);if(!$supplyCheck->fetchColumn())throw new \RuntimeException('Uno de los insumos no existe o está inactivo.');$sid=$cid;$child=null;}
-                else {
+                $unit=trim((string)($c['unit']??'kg'))?:'kg';
+                if($ct==='supply'){
+                    $supplyCheck->execute([$cid,$bid]);
+                    $supRow=$supplyCheck->fetch(\PDO::FETCH_ASSOC);
+                    if(!$supRow)throw new \RuntimeException('Uno de los insumos no existe o está inactivo.');
+                    $supUnit=trim((string)($supRow['unit']??$unit))?:$unit;
+                    if(!$this->areUnitsCompatible($unit,$supUnit)){
+                        throw new \RuntimeException("Unidad incompatible en '{$supRow['name']}': usaste '{$unit}' pero el insumo cotiza por '{$supUnit}'.");
+                    }
+                    $sid=$cid;$child=null;
+                } else {
                     if($cid===$rid)throw new \RuntimeException('Una receta no puede incluirse a sí misma.');
-                    $recipeCheck->execute([$cid,$bid]);if(!$recipeCheck->fetchColumn())throw new \RuntimeException('Una subreceta seleccionada no existe.');
+                    $recipeCheck->execute([$cid,$bid]);
+                    $recRow=$recipeCheck->fetch(\PDO::FETCH_ASSOC);
+                    if(!$recRow)throw new \RuntimeException('Una subreceta seleccionada no existe.');
+                    $recUnit=trim((string)($recRow['yield_unit']??$unit))?:$unit;
+                    if(!$this->areUnitsCompatible($unit,$recUnit)){
+                        throw new \RuntimeException("Unidad incompatible en subreceta '{$recRow['name']}': usaste '{$unit}' pero rinde en '{$recUnit}'.");
+                    }
                     // Impedir ciclos: ¿la receta actual está dentro de las dependencias de la subreceta?
                     if($this->dependsOn($pdo,$bid,$cid,$rid,[]))throw new \RuntimeException('Esta combinación generaría un ciclo de subrecetas.');
                     $sid=null;$child=$cid;
                 }
-                $unit=trim((string)($c['unit']??'kg'))?:'kg';
                 $ins->execute([$bid,$rid,$ct,$sid,$child,$qty,$unit,(int)$i]);
             }
             // Recalcular todos los productos vinculados; así un cambio en una subreceta
@@ -333,19 +418,34 @@ class RecipeCostingController
         }
     }
 
+    private function areUnitsCompatible(string $from, string $to): bool
+    {
+        $from = strtolower(trim($from)); $to = strtolower(trim($to));
+        if ($from === $to) return true;
+        $groups = [
+            ['kg'=>1.0,'kilo'=>1.0,'kilos'=>1.0,'g'=>0.001,'gr'=>0.001,'gramo'=>0.001,'gramos'=>0.001],
+            ['l'=>1.0,'lt'=>1.0,'litro'=>1.0,'litros'=>1.0,'cc'=>0.001,'ml'=>0.001],
+            ['u'=>1.0,'un'=>1.0,'unidad'=>1.0,'unidades'=>1.0],
+        ];
+        foreach ($groups as $group) {
+            if (isset($group[$from]) && isset($group[$to])) return true;
+        }
+        return false;
+    }
+
     private function convertQuantity(float $quantity, string $from, string $to): float
     {
         $from = strtolower(trim($from)); $to = strtolower(trim($to));
         if ($from === $to) return $quantity;
         $groups = [
-            ['kg'=>1.0,'g'=>0.001],
+            ['kg'=>1.0,'kilo'=>1.0,'kilos'=>1.0,'g'=>0.001,'gr'=>0.001,'gramo'=>0.001,'gramos'=>0.001],
             ['l'=>1.0,'lt'=>1.0,'litro'=>1.0,'litros'=>1.0,'cc'=>0.001,'ml'=>0.001],
+            ['u'=>1.0,'un'=>1.0,'unidad'=>1.0,'unidades'=>1.0],
         ];
         foreach ($groups as $group) {
             if (isset($group[$from]) && isset($group[$to])) return $quantity * $group[$from] / $group[$to];
         }
-        // For units without a valid conversion, avoid silently inventing a ratio.
-        return $quantity;
+        return 0.0;
     }
 
     private function calculateBatchCost(\PDO $pdo, int $bid, int $recipeId, array $path): float

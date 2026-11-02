@@ -1,0 +1,61 @@
+name: Build and publish Pizzalog Tools (tools.pizzalog.net)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "frontend/apps/tools/**"
+      - "frontend/packages/cost-engine/**"
+      - "frontend/packages/cost-engine-fixtures/**"
+      - "frontend/pnpm-lock.yaml"
+      - "frontend/package.json"
+      - "frontend/pnpm-workspace.yaml"
+      - ".github/workflows/build-tools.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-tools:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Pizzalog Tools
+        working-directory: frontend
+        run: pnpm --filter @pizzalog/tools build
+
+      - name: Publish compiled tools to tools/
+        run: |
+          test -f frontend/apps/tools/dist/index.html
+          cp -a frontend/apps/tools/dist/. tools/
+          git add tools
+          if git diff --cached --quiet; then
+            echo "No compiled tools changes to publish."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "build(tools): publish compiled Pizzalog Tools frontend"
+            git push origin HEAD:main
+          fi

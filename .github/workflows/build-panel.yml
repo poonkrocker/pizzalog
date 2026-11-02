@@ -7,6 +7,8 @@ on:
     paths:
       - "frontend/apps/panel/**"
       - "frontend/packages/shared/**"
+      - "frontend/packages/cost-engine/**"
+      - "frontend/packages/cost-engine-fixtures/**"
       - "frontend/pnpm-lock.yaml"
       - "frontend/package.json"
       - "frontend/pnpm-workspace.yaml"

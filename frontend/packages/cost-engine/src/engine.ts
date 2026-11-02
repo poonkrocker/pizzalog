@@ -72,7 +72,7 @@ function resolveCurrencyMultiplier(
   }
 
   candidates.sort((a, b) => b.effective_date.localeCompare(a.effective_date));
-  const best = candidates[0];
+  const best = candidates[0]!;
   if (!Number.isFinite(best.rate) || best.rate <= 0) {
     throw new CostEngineValidationError(
       'CURRENCY_MISMATCH',

@@ -9,6 +9,11 @@ import {
   type StudioRecipe,
   type StudioRecipeComponentInput,
 } from '@pizzalog/shared';
+import {
+  areUnitsCompatible,
+  convertQuantity,
+  calculatePricingScenario,
+} from '@pizzalog/cost-engine';
 import { useApi } from '@/lib/auth';
 import { Field, Input, Loading, Modal } from '@/ui';
 
@@ -52,16 +57,9 @@ const secondaryButton: React.CSSProperties = {
   background: 'var(--c-surface, #fff)', color: 'var(--c-text, #222)', fontWeight: 600, cursor: 'pointer',
 };
 
-function quantityInUnit(quantity: number, from: string, to: string): number {
-  const f = from.trim().toLowerCase();
-  const t = to.trim().toLowerCase();
-  if (f === t) return quantity;
-  const groups: Record<string, number>[] = [
-    { kg: 1, g: 0.001 },
-    { l: 1, lt: 1, litro: 1, litros: 1, cc: 0.001, ml: 0.001 },
-  ];
-  for (const group of groups) if (group[f] !== undefined && group[t] !== undefined) return quantity * group[f] / group[t];
-  return quantity;
+function safeConvertQuantity(quantity: number, from: string, to: string): number {
+  if (!areUnitsCompatible(from, to)) return 0;
+  return convertQuantity(quantity, from, to);
 }
 
 function freshComponent(): ComponentRow {
@@ -101,6 +99,15 @@ export function RecipeStudioPage() {
   const recipes = recipesQuery.data?.recipes ?? [];
   const supplies = recipesQuery.data?.supplies ?? [];
   const products = recipesQuery.data?.products ?? [];
+  const legacyUnimportedCount = recipesQuery.data?.legacy_unimported_count ?? 0;
+
+  const importLegacyMutation = useMutation({
+    mutationFn: () => api.production.importLegacyRecipes(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['production', 'recipe-studio'] });
+    },
+    onError: (e: Error) => setRecipeError(e.message || 'No se pudieron importar las recetas históricas.'),
+  });
 
   const saveRecipe = useMutation({
     mutationFn: (body: SaveStudioRecipeInput) => api.production.saveStudioRecipe(body),
@@ -153,17 +160,28 @@ export function RecipeStudioPage() {
     for (const r of recipes) map.set(`recipe:${r.id}`, r.unit_cost);
     return map;
   }, [supplies, recipes]);
+
   const computedBatchCost = components.reduce((sum, c) => {
     const selectedSupply = c.component_type === 'supply' ? supplies.find((s) => s.id === c.component_id) : null;
     const selectedRecipe = c.component_type === 'recipe' ? recipes.find((r) => r.id === c.component_id) : null;
     const costUnit = selectedSupply?.unit ?? selectedRecipe?.yield_unit ?? c.unit;
-    const quantity = quantityInUnit(Math.max(0, c.quantity || 0), c.unit, costUnit);
+    const quantity = safeConvertQuantity(Math.max(0, c.quantity || 0), c.unit, costUnit);
     return sum + quantity * (componentCostMap.get(`${c.component_type}:${c.component_id}`) ?? 0);
   }, 0);
   const computedUnitCost = computedBatchCost / Math.max(0.0001, yieldQuantity);
-  const suggestedPrice = recipeType === 'product' && computedUnitCost > 0
-    ? Math.ceil((computedUnitCost / (Math.max(1, Math.min(100, targetPct)) / 100)) / 100) * 100 : 0;
-  const foodCost = price > 0 ? computedUnitCost / price * 100 : 0;
+  const pricingScenario = recipeType === 'product' && computedUnitCost > 0
+    ? calculatePricingScenario({
+        unit_cost: computedUnitCost,
+        status: 'complete',
+        currency: 'ARS',
+        target_food_cost_pct: Math.max(1, Math.min(99, targetPct)),
+        rounding_increment: 100,
+        rounding_mode: 'ceil',
+        ...(price > 0 ? { selling_price: price } : {}),
+      })
+    : null;
+  const suggestedPrice = pricingScenario?.raw_suggested_price ?? 0;
+  const foodCost = pricingScenario?.food_cost_pct ?? 0;
 
   const monthlyTotal = costsQuery.data?.monthly_total ?? 0;
   const enteredMonthly = costItems.reduce((sum, item) => {
@@ -171,7 +189,8 @@ export function RecipeStudioPage() {
     return sum + Math.max(0, item.quantity || 0) * Math.max(0, item.amount || 0) * factor[item.period];
   }, 0);
   const monthlyByCategory = (Object.keys(categoryLabels) as BusinessCostCategory[]).map((category) => ({
-    category, value: costItems.filter((item) => item.category === category).reduce((sum, item) => {
+    category,
+    value: costItems.filter((item) => item.category === category).reduce((sum, item) => {
       const factor: Record<CostPeriod, number> = { monthly: 1, weekly: 52 / 12, daily: 365 / 12, yearly: 1 / 12 };
       return sum + Math.max(0, item.quantity || 0) * Math.max(0, item.amount || 0) * factor[item.period];
     }, 0),
@@ -199,8 +218,19 @@ export function RecipeStudioPage() {
   function submitRecipe() {
     setRecipeError('');
     if (!recipeName.trim()) { setRecipeError('Ingresá un nombre para la receta.'); return; }
-    if (!components.some((c) => c.component_id > 0 && c.quantity > 0)) {
+    const validComponents = components.filter((c) => c.component_id > 0 && c.quantity > 0);
+    if (!validComponents.length) {
       setRecipeError('Agregá al menos un ingrediente o una subreceta con cantidad mayor que cero.'); return;
+    }
+    for (const c of validComponents) {
+      const selectedSupply = c.component_type === 'supply' ? supplies.find((s) => s.id === c.component_id) : null;
+      const selectedRecipe = c.component_type === 'recipe' ? recipes.find((r) => r.id === c.component_id) : null;
+      const costUnit = selectedSupply?.unit ?? selectedRecipe?.yield_unit ?? c.unit;
+      const compName = selectedSupply?.name ?? selectedRecipe?.name ?? 'Componente';
+      if (!areUnitsCompatible(c.unit, costUnit)) {
+        setRecipeError(`Unidad incompatible en '${compName}': usaste '${c.unit}' pero cotiza por '${costUnit}'.`);
+        return;
+      }
     }
     const body: SaveStudioRecipeInput = {
       ...(editingId ? { id: editingId } : {}),
@@ -208,7 +238,7 @@ export function RecipeStudioPage() {
       yield_quantity: Math.max(0.0001, yieldQuantity), yield_unit: yieldUnit || 'u',
       price: recipeType === 'product' ? Math.max(0, price) : 0,
       target_food_cost_pct: targetPct,
-      components: components.filter((c) => c.component_id > 0 && c.quantity > 0),
+      components: validComponents,
     };
     saveRecipe.mutate(body);
   }
@@ -223,7 +253,7 @@ export function RecipeStudioPage() {
     <section style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
       <div style={{ ...panelStyle, display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
         <div>
-          <div style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.06em' }}>Herramientas independientes</div>
+          <div style={{ fontSize: '0.75rem', color: '#64748b', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.06em' }}>Motor @pizzalog/cost-engine v1</div>
           <h2 style={{ margin: '0.25rem 0', fontSize: '1.3rem' }}>Recetas y costeo operativo</h2>
           <div style={{ color: '#64748b', fontSize: '.9rem' }}>El precio sugerido de recetas usa ingredientes; los gastos generales se calculan aparte.</div>
         </div>
@@ -235,15 +265,27 @@ export function RecipeStudioPage() {
 
       {view === 'recipes' && (
         <>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.5rem' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.5rem', alignItems: 'center' }}>
             <button type="button" style={primaryButton} onClick={() => newRecipe('product')}>+ Nueva receta de producto</button>
             <button type="button" style={secondaryButton} onClick={() => newRecipe('subrecipe')}>+ Nueva subreceta</button>
+            {legacyUnimportedCount > 0 && (
+              <button
+                type="button"
+                style={{ ...secondaryButton, borderColor: '#f59e0b', background: '#fffbeb', color: '#92400e' }}
+                disabled={importLegacyMutation.isPending}
+                onClick={() => importLegacyMutation.mutate()}
+              >
+                {importLegacyMutation.isPending
+                  ? 'Importando...'
+                  : `📥 Importar recetas históricas del catálogo (${legacyUnimportedCount})`}
+              </button>
+            )}
           </div>
           {recipesQuery.isLoading ? <Loading message="Cargando recetas e insumos..." /> : null}
           {recipesQuery.error ? <p role="alert" style={{ color: '#b91c1c' }}>No se pudieron cargar las recetas. {(recipesQuery.error as Error).message}</p> : null}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '.75rem' }}>
             {recipes.map((recipe) => (
-              <article key={recipe.id} style={{ ...panelStyle, display: 'flex', flexDirection: 'column', gap: '.55rem' }}>
+              <article key={recipe.id} style={{ ...panelStyle, display: 'flex', flexDirection: 'column', gap: '.55rem', borderColor: recipe.is_incomplete ? '#f59e0b' : 'var(--c-border, #ddd)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '.5rem', alignItems: 'start' }}>
                   <div>
                     <div style={{ fontWeight: 800, fontSize: '1rem' }}>{recipe.name}</div>
@@ -251,6 +293,11 @@ export function RecipeStudioPage() {
                   </div>
                   <span style={{ fontSize: '.72rem', padding: '.2rem .45rem', borderRadius: 5, background: recipe.recipe_type === 'subrecipe' ? '#e0f2fe' : '#fef3c7', color: '#334155', whiteSpace: 'nowrap' }}>{recipe.recipe_type === 'subrecipe' ? 'PREPARACIÓN' : 'VENTA'}</span>
                 </div>
+                {recipe.warnings && recipe.warnings.length > 0 && (
+                  <div style={{ fontSize: '.76rem', background: '#fffbeb', color: '#92400e', padding: '.4rem .55rem', borderRadius: 6, border: '1px solid #fde68a' }}>
+                    ⚠️ {recipe.warnings[0]}
+                  </div>
+                )}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '.5rem' }}>
                   <div><div style={{ fontSize: '.75rem', color: '#64748b' }}>Costo total del lote</div><strong>{formatARS(recipe.batch_cost)}</strong></div>
                   <div><div style={{ fontSize: '.75rem', color: '#64748b' }}>Costo por {recipe.yield_unit}</div><strong>{formatARS(recipe.unit_cost)}</strong></div>
@@ -276,7 +323,7 @@ export function RecipeStudioPage() {
             }
           >
             <p style={{ marginTop: 0, color: '#64748b', fontSize: '.88rem' }}>Los componentes se valorizan con costos del catálogo; una subreceta aporta su costo por unidad de rendimiento.</p>
-{recipeError && <div role="alert" style={{ marginBottom: '.8rem', padding: '.7rem', borderRadius: 6, background: '#fee2e2', color: '#991b1b' }}>{recipeError}</div>}
+            {recipeError && <div role="alert" style={{ marginBottom: '.8rem', padding: '.7rem', borderRadius: 6, background: '#fee2e2', color: '#991b1b' }}>{recipeError}</div>}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: '.75rem' }}>
               <Field label="Nombre">
                 <Input value={recipeName} onChange={(e) => setRecipeName(e.target.value)} placeholder="Ej. Salsa de tomate" />
@@ -322,8 +369,9 @@ export function RecipeStudioPage() {
                     : recipes.filter((r) => r.recipe_type === 'subrecipe' && r.id !== editingId).map((r) => ({ id: r.id, name: r.name, unit: r.yield_unit, cost: r.unit_cost }));
                   const unitCost = componentCostMap.get(`${c.component_type}:${c.component_id}`) ?? 0;
                   const costUnit = componentList.find((v) => v.id === c.component_id)?.unit ?? c.unit;
-                  const displayedSubtotal = quantityInUnit(c.quantity, c.unit, costUnit) * unitCost;
-                  return <div key={index} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 145px), 1fr))', gap: '.5rem', alignItems: 'end', padding: '.65rem', border: '1px solid var(--c-border, #ddd)', borderRadius: 7 }}>
+                  const isCompatible = areUnitsCompatible(c.unit, costUnit);
+                  const displayedSubtotal = safeConvertQuantity(c.quantity, c.unit, costUnit) * unitCost;
+                  return <div key={index} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 145px), 1fr))', gap: '.5rem', alignItems: 'end', padding: '.65rem', border: `1px solid ${!isCompatible ? '#ef4444' : 'var(--c-border, #ddd)'}`, borderRadius: 7 }}>
                     <Field label="Tipo"><select value={c.component_type} onChange={(e) => changeComponent(index, { component_type: e.target.value as 'supply' | 'recipe' })} style={controlStyle}><option value="supply">Ingrediente / insumo</option><option value="recipe">Subreceta</option></select></Field>
                     <Field label={c.component_type === 'supply' ? 'Ingrediente' : 'Preparación'}>
                       <select value={c.component_id} onChange={(e) => { const id = Number(e.target.value); const found = componentList.find((v) => v.id === id); changeComponent(index, { component_id: id, unit: found?.unit || c.unit }); }} style={controlStyle}>
@@ -333,7 +381,9 @@ export function RecipeStudioPage() {
                     </Field>
                     <Field label="Cantidad"><Input type="number" min="0" step="0.001" value={c.quantity} onChange={(e) => changeComponent(index, { quantity: Math.max(0, Number(e.target.value) || 0) })} /></Field>
                     <Field label="Unidad"><select value={c.unit} onChange={(e) => changeComponent(index, { unit: e.target.value })} style={controlStyle}>{units.map((u) => <option key={u} value={u}>{u}</option>)}</select></Field>
-                    <div style={{ padding: '.5rem 0', fontWeight: 700 }}>Subtotal: {formatARS(displayedSubtotal)}</div>
+                    <div style={{ padding: '.5rem 0', fontWeight: 700, color: !isCompatible ? '#dc2626' : 'inherit' }}>
+                      {!isCompatible ? `⚠️ Incompatible (${costUnit})` : `Subtotal: ${formatARS(displayedSubtotal)}`}
+                    </div>
                     <button type="button" aria-label="Quitar componente" style={{ ...secondaryButton, color: '#b91c1c' }} onClick={() => setComponents((prev) => prev.filter((_, i) => i !== index))}>Quitar</button>
                   </div>;
                 })}

@@ -10,6 +10,12 @@ export interface OperatingExpenseItem {
   amount: number;
 }
 
+export interface ProductSalesPlan {
+  monthlyUnitsSold: number;
+  /** Si es 0 o null, usa el Precio Sugerido calculado automáticamente */
+  sellingPrice?: number | null;
+}
+
 export interface ToolsWorkspaceState {
   businessName: string;
   currency: string;
@@ -20,6 +26,7 @@ export interface ToolsWorkspaceState {
   defaultPackagingCost: number;
   defaultChannelFeePct: number;
   catalog: CostCatalog;
+  productSalesMap: Record<string, ProductSalesPlan>;
   operatingExpenses: OperatingExpenseItem[];
   snapshots: CostSnapshot[];
 }
@@ -33,7 +40,8 @@ export const I18N: Record<
     tabRecipes: string;
     tabExpenses: string;
     tabSnapshots: string;
-    downloadExcel: string;
+    exportCustomExcel: string;
+    downloadTemplateExcel: string;
     resetDemo: string;
     exportJson: string;
     importJson: string;
@@ -43,47 +51,50 @@ export const I18N: Record<
   }
 > = {
   'es-AR': {
-    subtitle: 'Restaurant Profit Kit v1 — Escandallo, Mermas, Subrecetas y Rentabilidad Gastronómica',
+    subtitle: 'Restaurant Profit Kit v1 — Constructor de Recetas, Mermas, Ingeniería de Menú y Rentabilidad Neta',
     tabIngredients: '1. Insumos y Merma',
     tabSubrecipes: '2. Masas y Subrecetas',
-    tabRecipes: '3. Recetas y Precios',
-    tabExpenses: '4. Gastos Operativos',
+    tabRecipes: '3. Recetas, Precios y Ventas/Mes',
+    tabExpenses: '4. Alquiler, Costos Fijos y Ganancia Neta',
     tabSnapshots: '5. Snapshots y Golden Tests',
-    downloadExcel: '⬇ Descargar Excel Profit Kit (.xlsx)',
-    resetDemo: 'Restaurar Datos Demo',
+    exportCustomExcel: '📊 Exportar Mi Excel (.xlsx)',
+    downloadTemplateExcel: '📘 Plantilla Base',
+    resetDemo: 'Restaurar Demo',
     exportJson: 'Exportar JSON',
     importJson: 'Importar JSON',
-    saveSnapshot: 'Guardar Snapshot de Costos',
+    saveSnapshot: 'Guardar Snapshot',
     statusComplete: 'COMPLETO',
     statusIncomplete: 'INCOMPLETO (FALTA PRECIO)',
   },
   'pt-BR': {
-    subtitle: 'Restaurant Profit Kit v1 — Ficha Técnica, Perdas, Sub-receitas e Lucratividade',
+    subtitle: 'Restaurant Profit Kit v1 — Construtor de Fichas Técnicas, Perdas, Engenharia de Cardápio e Lucro Líquido',
     tabIngredients: '1. Insumos e Perdas',
     tabSubrecipes: '2. Massas e Sub-receitas',
-    tabRecipes: '3. Receitas e Preços',
-    tabExpenses: '4. Custos Operacionais',
+    tabRecipes: '3. Receitas, Preços e Vendas/Mês',
+    tabExpenses: '4. Aluguel, Custos Fixos e Lucro Líquido',
     tabSnapshots: '5. Snapshots e Golden Tests',
-    downloadExcel: '⬇ Baixar Planilha Profit Kit (.xlsx)',
+    exportCustomExcel: '📊 Exportar Meu Excel (.xlsx)',
+    downloadTemplateExcel: '📘 Planilha Base',
     resetDemo: 'Restaurar Demo',
     exportJson: 'Exportar JSON',
     importJson: 'Importar JSON',
-    saveSnapshot: 'Salvar Snapshot de Custos',
+    saveSnapshot: 'Salvar Snapshot',
     statusComplete: 'COMPLETO',
     statusIncomplete: 'INCOMPLETO (SEM PREÇO)',
   },
   en: {
-    subtitle: 'Restaurant Profit Kit v1 — Recipe Costing, Yield, Subrecipes & Menu Profitability',
+    subtitle: 'Restaurant Profit Kit v1 — Interactive Recipe Builder, Yield, Menu Engineering & Net Profit',
     tabIngredients: '1. Ingredients & Yield',
     tabSubrecipes: '2. Dough & Subrecipes',
-    tabRecipes: '3. Recipes & Pricing',
-    tabExpenses: '4. Operating Expenses',
+    tabRecipes: '3. Recipes, Pricing & Monthly Sales',
+    tabExpenses: '4. Rent, Fixed Costs & Net Profit',
     tabSnapshots: '5. Snapshots & Golden Tests',
-    downloadExcel: '⬇ Download Profit Kit Excel (.xlsx)',
-    resetDemo: 'Reset Demo Data',
+    exportCustomExcel: '📊 Export My Excel (.xlsx)',
+    downloadTemplateExcel: '📘 Base Template',
+    resetDemo: 'Reset Demo',
     exportJson: 'Export JSON',
     importJson: 'Import JSON',
-    saveSnapshot: 'Save Cost Snapshot',
+    saveSnapshot: 'Save Snapshot',
     statusComplete: 'COMPLETE',
     statusIncomplete: 'INCOMPLETE (MISSING PRICE)',
   },
@@ -91,7 +102,7 @@ export const I18N: Record<
 
 export function createInitialDemoWorkspace(): ToolsWorkspaceState {
   return {
-    businessName: 'Pizzería Demo — Il Forno (Datos Ficticios)',
+    businessName: 'Pizzería Demo — Il Forno',
     currency: 'ARS',
     locale: 'es-AR',
     unitSystem: 'metric',
@@ -213,6 +224,12 @@ export function createInitialDemoWorkspace(): ToolsWorkspaceState {
           ],
         },
       ],
+    },
+    productSalesMap: {
+      prod_margherita: { monthlyUnitsSold: 950, sellingPrice: null },
+      prod_focaccia_a: { monthlyUnitsSold: 420, sellingPrice: null },
+      prod_pollo_merma: { monthlyUnitsSold: 310, sellingPrice: null },
+      prod_trufa_incompleta: { monthlyUnitsSold: 45, sellingPrice: null },
     },
     operatingExpenses: [
       { id: 'exp_1', name: 'Alquiler del Local (Demo)', category: 'rent', period: 'monthly', amount: 850000 },

@@ -130,6 +130,7 @@ $router->post('/production/recipes', [ProductionController::class, 'saveRecipe']
 $router->post('/production/simulate', [ProductionController::class, 'simulate'], [$auth, $manage]);
 $router->get('/production/recipe-studio', [RecipeCostingController::class, 'recipesIndex'], [$auth, $manage]);
 $router->post('/production/recipe-studio/recipes', [RecipeCostingController::class, 'recipesSave'], [$auth, $manage]);
+$router->post('/production/recipe-studio/import-legacy', [RecipeCostingController::class, 'importLegacyRecipes'], [$auth, $manage]);
 $router->get('/production/business-costs', [RecipeCostingController::class, 'businessCostsGet'], [$auth, $manage]);
 $router->put('/production/business-costs', [RecipeCostingController::class, 'businessCostsSave'], [$auth, $manage]);
 
