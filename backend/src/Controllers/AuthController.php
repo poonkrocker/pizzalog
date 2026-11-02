@@ -6,14 +6,12 @@ use Pizzalog\Core\Database;
 use Pizzalog\Core\Jwt;
 use Pizzalog\Core\Request;
 use Pizzalog\Core\Response;
-use Pizzalog\Services\LoyverseMigrationService;
 
 class AuthController
 {
     public function __construct()
     {
         UserController::ensureSchema();
-        LoyverseMigrationService::ensureMigrated();
     }
 
     /**
@@ -23,26 +21,40 @@ class AuthController
      */
     public function login(Request $req): void
     {
-        $identifier = trim((string) ($req->input('username') ?? $req->input('email') ?? ''));
-        $password   = (string) $req->input('password', '');
-        $app        = (string) $req->input('app', '');
+        $identifier   = trim((string) ($req->input('username') ?? $req->input('email') ?? ''));
+        $password     = (string) $req->input('password', '');
+        $app          = (string) $req->input('app', '');
+        $businessId   = $req->input('business_id') !== null ? (int) $req->input('business_id') : null;
+        $businessSlug = trim((string) ($req->input('business_slug') ?? ''));
 
         if ($identifier === '' || $password === '') {
             Response::error('Usuario y contraseña son obligatorios', 422);
         }
 
-        $pdo  = Database::pdo();
+        $pdo = Database::pdo();
+        $where = ['(LOWER(u.username) = LOWER(?) OR LOWER(u.email) = LOWER(?))'];
+        $params = [$identifier, $identifier];
+
+        if ($businessId !== null && $businessId > 0) {
+            $where[] = 'u.business_id = ?';
+            $params[] = $businessId;
+        } elseif ($businessSlug !== '') {
+            $where[] = 'b.slug = ?';
+            $params[] = $businessSlug;
+        }
+
         $stmt = $pdo->prepare(
             'SELECT u.id, u.business_id, u.name, u.username, u.email, u.password_hash, u.role,
                     u.allowed_modules, u.can_use_pos, u.staff_person_id, u.is_active,
                     sp.code AS staff_code
                FROM users u
+          INNER JOIN businesses b ON b.id = u.business_id
           LEFT JOIN staff_people sp ON sp.id = u.staff_person_id
-              WHERE (LOWER(u.username) = LOWER(?) OR LOWER(u.email) = LOWER(?))
+              WHERE ' . implode(' AND ', $where) . '
               ORDER BY u.is_active DESC, u.id ASC
               LIMIT 1'
         );
-        $stmt->execute([$identifier, $identifier]);
+        $stmt->execute($params);
         $user = $stmt->fetch();
 
         $valid = $user

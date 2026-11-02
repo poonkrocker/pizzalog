@@ -17,7 +17,6 @@ export function Login() {
     void getSavedCredentials().then((creds) => {
       if (creds) {
         setEmail(creds.email);
-        setPassword(creds.password);
         setRemember(true);
       }
     });
@@ -33,7 +32,7 @@ export function Login() {
       const cleanEmail = email.trim();
       await login(cleanEmail, password);
       if (remember) {
-        await saveCredentials(cleanEmail, password);
+        await saveCredentials(cleanEmail);
       } else {
         await clearSavedCredentials();
       }
@@ -93,7 +92,7 @@ export function Login() {
               onChange={(e) => setRemember(e.target.checked)}
               style={{ width: '20px', height: '20px', accentColor: 'var(--red)' }}
             />
-            <span>Guardar usuario y contraseña</span>
+            <span>Recordar mi usuario en este dispositivo</span>
           </label>
           {error && (
             <p className="t-error" role="alert">

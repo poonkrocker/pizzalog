@@ -17,15 +17,41 @@ class Auth
                 Response::error('Token inválido o expirado', 401);
             }
 
-            $req->auth = [
-                'user_id'     => isset($payload['sub']) ? (int) $payload['sub'] : null,
-                'business_id' => isset($payload['business_id']) ? (int) $payload['business_id'] : null,
-                'role'        => $payload['role'] ?? null,
-            ];
+            $userId = isset($payload['sub']) ? (int) $payload['sub'] : null;
+            $businessId = isset($payload['business_id']) ? (int) $payload['business_id'] : null;
 
-            if ($req->auth['user_id'] === null || $req->auth['business_id'] === null) {
+            if ($userId === null || $businessId === null) {
                 Response::error('Token incompleto', 401);
             }
+
+            // Verificar estado activo y permisos autoritativos en el servidor
+            $stmt = Database::pdo()->prepare(
+                'SELECT id, business_id, role, allowed_modules, is_active
+                   FROM users
+                  WHERE id = ? AND business_id = ?
+                  LIMIT 1'
+            );
+            $stmt->execute([$userId, $businessId]);
+            $user = $stmt->fetch();
+
+            if (!$user || (int) $user['is_active'] !== 1) {
+                Response::error('Sesión inválida o usuario desactivado', 401);
+            }
+
+            $allowedModules = null;
+            if (!empty($user['allowed_modules']) && is_string($user['allowed_modules'])) {
+                $decoded = json_decode($user['allowed_modules'], true);
+                if (is_array($decoded)) {
+                    $allowedModules = $decoded;
+                }
+            }
+
+            $req->auth = [
+                'user_id'         => (int) $user['id'],
+                'business_id'     => (int) $user['business_id'],
+                'role'            => (string) $user['role'],
+                'allowed_modules' => $allowedModules,
+            ];
         };
     }
 
@@ -33,27 +59,74 @@ class Auth
     {
         return function (Request $req) use ($roles): void {
             $role = $req->auth['role'] ?? '';
-            if (in_array($role, $roles, true)) {
+            $allowedModules = $req->auth['allowed_modules'] ?? null;
+
+            if ($role === 'admin' && in_array('admin', $roles, true)) {
                 return;
             }
-            // Si el endpoint permite 'manager' y el empleado tiene módulos del panel asignados por el admin, permitir
-            if (in_array('manager', $roles, true) && !empty($req->auth['user_id'])) {
-                try {
-                    $stmt = Database::pdo()->prepare(
-                        'SELECT allowed_modules FROM users WHERE id = ? AND business_id = ? AND is_active = 1 LIMIT 1'
-                    );
-                    $stmt->execute([(int) $req->auth['user_id'], (int) $req->auth['business_id']]);
-                    $raw = $stmt->fetchColumn();
-                    if ($raw && is_string($raw)) {
-                        $mods = json_decode($raw, true);
-                        if (is_array($mods) && count($mods) > 0) {
-                            return;
-                        }
+
+            if (in_array($role, $roles, true)) {
+                // Si es manager con restricción explícita de módulos, verificar el módulo del endpoint
+                if ($role === 'manager' && is_array($allowedModules)) {
+                    if (self::moduleMatchesPath($allowedModules, $req->path)) {
+                        return;
                     }
-                } catch (\Throwable) {
+                    Response::error('No tenés permiso para este módulo', 403);
+                }
+                return;
+            }
+
+            // Si el endpoint permite 'manager' y el empleado tiene asignado el módulo específico
+            if (in_array('manager', $roles, true) && is_array($allowedModules) && count($allowedModules) > 0) {
+                if (self::moduleMatchesPath($allowedModules, $req->path)) {
+                    return;
                 }
             }
+
             Response::error('No tenés permiso para esta acción', 403);
         };
+    }
+
+    private static function moduleMatchesPath(array $allowedModules, string $path): bool
+    {
+        if (in_array('*', $allowedModules, true)) {
+            return true;
+        }
+        $map = [
+            '/analytics'        => ['dashboard', 'analytics-details'],
+            '/orders'           => ['orders'],
+            '/delivery-drivers' => ['drivers', 'orders'],
+            '/staff'            => ['staff'],
+            '/attendance'       => ['staff'],
+            '/products'         => ['products', 'production'],
+            '/uploads'          => ['products'],
+            '/categories'       => ['categories', 'products'],
+            '/production'       => ['production'],
+            '/recipe-studio'    => ['production'],
+            '/supplies'         => ['supplies', 'production'],
+            '/inventory'        => ['supplies', 'production'],
+            '/suppliers'        => ['suppliers', 'supplies', 'production'],
+            '/sales'            => ['sales', 'sales-items', 'sales-categories', 'sales-employees', 'sales-payments', 'sales-discounts', 'sales-taxes', 'cash', 'sales-cash'],
+            '/reports/sales'    => ['sales', 'sales-items', 'sales-categories', 'sales-employees', 'sales-payments', 'sales-discounts', 'sales-taxes'],
+            '/fiscal'           => ['sales', 'cash', 'sales-cash'],
+            '/cash'             => ['cash', 'sales-cash', 'sales'],
+            '/tables'           => ['salon'],
+            '/table-areas'      => ['salon'],
+            '/table-sessions'   => ['salon'],
+            '/customers'        => ['customers', 'orders', 'sales'],
+            '/business'         => ['business', 'products'],
+        ];
+
+        foreach ($map as $prefix => $validMods) {
+            if ($path === $prefix || str_starts_with($path, $prefix . '/')) {
+                foreach ($validMods as $m) {
+                    if (in_array($m, $allowedModules, true)) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+        }
+        return false;
     }
 }

@@ -26,13 +26,28 @@ spl_autoload_register(function (string $class): void {
 
 // --- Configuración ----------------------------------------------------
 $configFile = BASE_PATH . '/config/config.php';
-if (!is_file($configFile)) {
+$localConfigFile = BASE_PATH . '/config/config.local.php';
+if (!is_file($configFile) && !is_file($localConfigFile)) {
     http_response_code(500);
     header('Content-Type: application/json; charset=utf-8');
-    echo json_encode(['ok' => false, 'error' => 'Falta config/config.php (copialo desde config.example.php)']);
+    echo json_encode(['ok' => false, 'error' => 'Falta archivo de configuración (config.local.php o config.php)']);
     exit;
 }
-$config = require $configFile;
+$config = is_file($configFile) ? (require $configFile) : [];
+if (is_file($localConfigFile)) {
+    $localConfig = require $localConfigFile;
+    if (is_array($localConfig)) {
+        $config = array_replace_recursive($config, $localConfig);
+    }
+}
+// Permitir sobreescritura por variables de entorno del servidor
+if ($envHost = getenv('PIZZALOG_DB_HOST')) $config['db']['host'] = $envHost;
+if ($envName = getenv('PIZZALOG_DB_NAME')) $config['db']['name'] = $envName;
+if ($envUser = getenv('PIZZALOG_DB_USER')) $config['db']['user'] = $envUser;
+if ($envPass = getenv('PIZZALOG_DB_PASS')) $config['db']['pass'] = $envPass;
+if ($envJwt  = getenv('PIZZALOG_JWT_SECRET')) $config['jwt']['secret'] = $envJwt;
+if ($envDs   = getenv('PIZZALOG_DEEPSEEK_API_KEY')) $config['deepseek']['api_key'] = $envDs;
+
 \Pizzalog\Core\Config::load($config);
 
 // --- CORS (responde el preflight OPTIONS y corta) ---------------------

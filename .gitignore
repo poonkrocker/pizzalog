@@ -4,6 +4,7 @@ vendor/
 
 # Builds locales de desarrollo (los deployables viven en / y /app)
 frontend/apps/*/dist/
+frontend/packages/*/dist/
 .vite/
 
 # Capacitor build artifacts (se generan al compilar en Android Studio / Gradle)
@@ -17,6 +18,7 @@ frontend/apps/pos/ios/
 
 # Configuración sensible (NUNCA subir)
 backend/config/config.php
+backend/config/config.local.php
 .env
 .env.*
 *.local

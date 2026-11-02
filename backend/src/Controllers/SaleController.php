@@ -17,33 +17,22 @@ class SaleController
 
     public function __construct()
     {
-        LoyverseMigrationService::ensureMigrated();
         $this->stock = new StockRepository();
         $this->sales = new SaleService();
     }
 
-    /** POST /sales/migrate-loyverse */
+    /** POST /sales/migrate-loyverse (solo admin autenticado) */
     public function migrateLoyverse(Request $req): void
     {
-        $force = (bool) $req->input('force', false);
-        $res   = LoyverseMigrationService::ensureMigrated($force);
-        Response::ok(['migration' => $res]);
-    }
-
-    /** GET /public/run-loyverse-migration?key=pizzalog2026&force=1 */
-    public function publicMigrateLoyverse(Request $req): void
-    {
-        $key = $req->query['key'] ?? '';
-        if ($key !== 'pizzalog2026') {
-            Response::error('Clave de seguridad inválida', 403);
+        if (($req->auth['role'] ?? '') !== 'admin') {
+            Response::error('Solo un administrador puede ejecutar migraciones históricas', 403);
         }
-        $force = !empty($req->query['force']);
-        $res   = LoyverseMigrationService::ensureMigrated($force);
-        Response::ok([
-            'status'      => 'success',
-            'migrated_to' => 'Pizzería Arrabbiata (business_id = 1)',
-            'migration'   => $res,
-        ]);
+        $force = (bool) $req->input('force', false);
+        if ($force && $req->input('confirm') !== 'CONFIRMAR_MIGRACION_HISTORICA') {
+            Response::error('Para forzar la reimportación debe enviar confirm = CONFIRMAR_MIGRACION_HISTORICA', 422);
+        }
+        $res = LoyverseMigrationService::ensureMigrated($force);
+        Response::ok(['migration' => $res]);
     }
 
     /** GET /sales?from=YYYY-MM-DD&to=YYYY-MM-DD&channel=&without_cash_session=&limit=&offset= */
