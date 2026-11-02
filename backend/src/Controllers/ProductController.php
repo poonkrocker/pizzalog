@@ -20,7 +20,7 @@ class ProductController
 
     private static bool $ensuredColumns = false;
 
-    private static function ensureColumns(): void
+    public static function ensureColumns(): void
     {
         if (self::$ensuredColumns) return;
         try {

@@ -46,6 +46,8 @@ class PublicController
 
     public function __construct()
     {
+        CategoryController::ensureSchema();
+        ProductController::ensureColumns();
         $this->orders     = new OrderService();
         $this->variants   = new VariantRepository();
         $this->combos     = new ComboRepository();
@@ -77,26 +79,53 @@ class PublicController
         $now      = new DateTimeImmutable('now');
         $pdo      = Database::pdo();
 
-        $cats = $pdo->prepare(
-            'SELECT id, name, sort_order, COALESCE(allows_extras, 0) AS allows_extras, target_category_ids FROM categories
-              WHERE business_id = ? AND is_active = 1
-              ORDER BY sort_order, name'
-        );
-        $cats->execute([$bid]);
+        try {
+            $cats = $pdo->prepare(
+                'SELECT id, name, sort_order, COALESCE(allows_extras, 0) AS allows_extras, target_category_ids FROM categories
+                  WHERE business_id = ? AND is_active = 1
+                  ORDER BY sort_order, name'
+            );
+            $cats->execute([$bid]);
+            $catRows = $cats->fetchAll();
+        } catch (\Throwable) {
+            $cats = $pdo->prepare(
+                'SELECT id, name, sort_order FROM categories
+                  WHERE business_id = ? AND is_active = 1
+                  ORDER BY sort_order, name'
+            );
+            $cats->execute([$bid]);
+            $catRows = $cats->fetchAll();
+        }
 
         $extraWhere = '';
         if ($mode === 'mesa' || $mode === 'salon') {
             $extraWhere = ' AND (p.show_in_salon = 1 OR p.show_in_salon IS NULL)';
         }
 
-        $prods = $pdo->prepare(
-            'SELECT ' . self::PRODUCT_FIELDS . '
-               FROM products p
-          LEFT JOIN categories c ON c.id = p.category_id
-              WHERE p.business_id = ? AND p.is_active = 1 AND p.show_online = 1 AND p.is_available = 1 AND p.is_secret = ?' . $extraWhere . '
-              ORDER BY COALESCE(c.sort_order, 999999) ASC, c.name ASC, p.sort_order ASC, p.id ASC'
-        );
-        $prods->execute([$bid, $secret ? 1 : 0]);
+        try {
+            $prods = $pdo->prepare(
+                'SELECT ' . self::PRODUCT_FIELDS . '
+                   FROM products p
+              LEFT JOIN categories c ON c.id = p.category_id
+                  WHERE p.business_id = ? AND p.is_active = 1 AND p.show_online = 1 AND p.is_available = 1 AND p.is_secret = ?' . $extraWhere . '
+                  ORDER BY COALESCE(c.sort_order, 999999) ASC, c.name ASC, p.sort_order ASC, p.id ASC'
+            );
+            $prods->execute([$bid, $secret ? 1 : 0]);
+            $prodRows = $prods->fetchAll();
+        } catch (\Throwable) {
+            $fallbackFields = 'p.id, p.category_id, p.sort_order, p.name, p.description, p.price, p.image_url,
+                               p.has_variants, p.is_combo, p.is_open_price, p.is_vegan_opt, p.badge_text,
+                               p.visible_days, p.visible_from, p.visible_until';
+            $prods = $pdo->prepare(
+                'SELECT ' . $fallbackFields . '
+                   FROM products p
+              LEFT JOIN categories c ON c.id = p.category_id
+                  WHERE p.business_id = ? AND p.is_active = 1 AND p.show_online = 1 AND p.is_available = 1 AND p.is_secret = ?
+                  ORDER BY COALESCE(c.sort_order, 999999) ASC, c.name ASC, p.sort_order ASC, p.id ASC'
+            );
+            $prods->execute([$bid, $secret ? 1 : 0]);
+            $prodRows = $prods->fetchAll();
+        }
 
         Response::ok([
             'business' => [
@@ -127,8 +156,8 @@ class PublicController
                 'sort_order' => (int) $c['sort_order'],
                 'allows_extras' => isset($c['allows_extras']) ? (int) $c['allows_extras'] : 0,
                 'target_category_ids' => !empty($c['target_category_ids']) ? json_decode($c['target_category_ids'], true) : null,
-            ], $cats->fetchAll()),
-            'products' => $this->buildMenuProducts($bid, $prods->fetchAll(), $now),
+            ], $catRows),
+            'products' => $this->buildMenuProducts($bid, $prodRows, $now),
         ]);
     }
 
