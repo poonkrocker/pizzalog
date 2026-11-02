@@ -45,3 +45,7 @@ jobs:
       - name: Run Cost Engine v1 Golden Tests (CE-001..CE-008)
         working-directory: frontend
         run: pnpm run test
+
+      - name: Build Pizzalog Tools Web Companion
+        working-directory: frontend
+        run: pnpm --filter @pizzalog/tools build
