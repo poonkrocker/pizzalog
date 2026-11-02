@@ -1,0 +1,301 @@
+{
+  "version": "1.0.0",
+  "description": "Pizzalog Cost Engine v1 — Batería de 8 pruebas golden (CE-001 a CE-008)",
+  "cases": {
+    "CE_001": {
+      "id": "CE-001",
+      "title": "Masa pizza Arrabbiata 220 g con biga: regresión histórica (Masas!D43)",
+      "source_workbook": "Calculadora de masa y costos.xlsx (hojas Masas y Precios)",
+      "currency": "ARS",
+      "tolerance": 0.01,
+      "ingredients": [
+        { "id": "harina_blanca", "name": "Harina", "base_dimension": "mass", "base_unit": "kg", "is_active": true },
+        { "id": "semola", "name": "Sémola rimacinata", "base_dimension": "mass", "base_unit": "kg", "is_active": true },
+        { "id": "harina_integral", "name": "Harina integral", "base_dimension": "mass", "base_unit": "kg", "is_active": true },
+        { "id": "levadura", "name": "Levadura", "base_dimension": "mass", "base_unit": "kg", "is_active": true },
+        { "id": "sal", "name": "Sal", "base_dimension": "mass", "base_unit": "kg", "is_active": true },
+        { "id": "agua", "name": "Agua", "base_dimension": "volume", "base_unit": "L", "density_g_per_ml": 1.0, "is_free": true, "is_active": true }
+      ],
+      "purchase_prices": [
+        { "ingredient_id": "harina_blanca", "purchase_price": 37500, "currency": "ARS", "pack_quantity": 25, "pack_unit": "kg", "yield_pct": 100 },
+        { "ingredient_id": "semola", "purchase_price": 45000, "currency": "ARS", "pack_quantity": 25, "pack_unit": "kg", "yield_pct": 100 },
+        { "ingredient_id": "harina_integral", "purchase_price": 41000, "currency": "ARS", "pack_quantity": 25, "pack_unit": "kg", "yield_pct": 100 },
+        { "ingredient_id": "levadura", "purchase_price": 10000, "currency": "ARS", "pack_quantity": 1, "pack_unit": "kg", "yield_pct": 100 },
+        { "ingredient_id": "sal", "purchase_price": 650, "currency": "ARS", "pack_quantity": 1, "pack_unit": "kg", "yield_pct": 100 }
+      ],
+      "dough_profile": {
+        "unit_weight_g": 220,
+        "units_count": 1,
+        "hydration_pct": 67.9,
+        "yield_basis": "flour_plus_water",
+        "flour_blend_reference_total_kg": 8.22,
+        "flours": [
+          { "ingredient_id": "semola", "weight_kg": 0.5 },
+          { "ingredient_id": "harina_integral", "weight_kg": 1.0 },
+          { "ingredient_id": "harina_blanca", "weight_kg": 6.72 }
+        ],
+        "biga": {
+          "flour_pct": 25,
+          "water_pct": 50,
+          "yeast_pct": 0.5,
+          "yeast_ingredient_id": "levadura"
+        },
+        "salt_pct": 2.7,
+        "salt_ingredient_id": "sal",
+        "water_ingredient_id": "agua"
+      },
+      "expected": {
+        "cost_per_kg": 932.298871562119,
+        "cost_per_bollo_220g": 205.105751743666
+      }
+    },
+    "CE_002": {
+      "id": "CE-002",
+      "title": "Masa con poolish: fixture sintético",
+      "currency": "ARS",
+      "tolerance": 0.0001,
+      "ingredients": [
+        { "id": "harina", "name": "Harina 000", "base_dimension": "mass", "base_unit": "g", "is_active": true },
+        { "id": "levadura", "name": "Levadura fresca", "base_dimension": "mass", "base_unit": "g", "is_active": true },
+        { "id": "sal", "name": "Sal fina", "base_dimension": "mass", "base_unit": "g", "is_active": true },
+        { "id": "agua", "name": "Agua", "base_dimension": "mass", "base_unit": "g", "is_free": true, "is_active": true }
+      ],
+      "purchase_prices": [
+        { "ingredient_id": "harina", "purchase_price": 1000, "currency": "ARS", "pack_quantity": 1, "pack_unit": "kg", "yield_pct": 100 },
+        { "ingredient_id": "levadura", "purchase_price": 5000, "currency": "ARS", "pack_quantity": 1, "pack_unit": "kg", "yield_pct": 100 },
+        { "ingredient_id": "sal", "purchase_price": 300, "currency": "ARS", "pack_quantity": 1, "pack_unit": "kg", "yield_pct": 100 }
+      ],
+      "dough_profile": {
+        "total_flour_g": 1000,
+        "hydration_pct": 70,
+        "yield_basis": "measured_yield",
+        "measured_yield_g": 1728,
+        "flours": [
+          { "ingredient_id": "harina", "share_pct": 100 }
+        ],
+        "poolish": {
+          "flour_pct": 30,
+          "water_pct": 100,
+          "yeast_pct": 1.0,
+          "yeast_ingredient_id": "levadura"
+        },
+        "salt_pct": 2.5,
+        "salt_ingredient_id": "sal",
+        "water_ingredient_id": "agua"
+      },
+      "expected": {
+        "batch_cost": 1022.5,
+        "cost_per_kg": 591.724537037037,
+        "yeast_cost": 15.0,
+        "salt_cost": 7.5,
+        "flour_cost": 1000.0,
+        "yield_g": 1728
+      }
+    },
+    "CE_003": {
+      "id": "CE-003",
+      "title": "Fainá: fixture sintético con masa y volumen sin densidad cruzada",
+      "currency": "ARS",
+      "tolerance": 0.001,
+      "ingredients": [
+        { "id": "harina_garbanzo", "name": "Harina de garbanzo", "base_dimension": "mass", "base_unit": "g", "is_active": true },
+        { "id": "agua", "name": "Agua", "base_dimension": "volume", "base_unit": "ml", "is_free": true, "is_active": true },
+        { "id": "sal", "name": "Sal", "base_dimension": "mass", "base_unit": "g", "is_active": true },
+        { "id": "aceite", "name": "Aceite de oliva", "base_dimension": "volume", "base_unit": "ml", "is_active": true }
+      ],
+      "purchase_prices": [
+        { "ingredient_id": "harina_garbanzo", "purchase_price": 3500, "currency": "ARS", "pack_quantity": 1, "pack_unit": "kg", "yield_pct": 100 },
+        { "ingredient_id": "sal", "purchase_price": 650, "currency": "ARS", "pack_quantity": 1, "pack_unit": "kg", "yield_pct": 100 },
+        { "ingredient_id": "aceite", "purchase_price": 22500, "currency": "ARS", "pack_quantity": 1, "pack_unit": "L", "yield_pct": 100 }
+      ],
+      "recipe": {
+        "id": "rec_faina",
+        "name": "Fainá Sintético",
+        "recipe_type": "subrecipe",
+        "yield_quantity": 1.75,
+        "yield_unit": "kg",
+        "currency": "ARS",
+        "components": [
+          { "component_type": "ingredient", "ingredient_id": "harina_garbanzo", "quantity": 500, "unit": "g" },
+          { "component_type": "ingredient", "ingredient_id": "agua", "quantity": 1250, "unit": "ml" },
+          { "component_type": "ingredient", "ingredient_id": "sal", "quantity": 12.5, "unit": "g" },
+          { "component_type": "ingredient", "ingredient_id": "aceite", "quantity": 50, "unit": "ml" }
+        ]
+      },
+      "expected": {
+        "batch_cost": 2883.125,
+        "cost_per_kg": 1647.5
+      }
+    },
+    "CE_004": {
+      "id": "CE-004",
+      "title": "Receta final con unidades distintas y presentaciones de compra",
+      "currency": "ARS",
+      "tolerance": 0.01,
+      "ingredients": [
+        { "id": "harina", "name": "Harina", "base_dimension": "mass", "base_unit": "g", "is_active": true },
+        { "id": "queso", "name": "Queso", "base_dimension": "mass", "base_unit": "g", "is_active": true }
+      ],
+      "purchase_prices": [
+        { "ingredient_id": "harina", "purchase_price": 3000, "currency": "ARS", "pack_quantity": 2, "pack_unit": "kg", "yield_pct": 100 },
+        { "ingredient_id": "queso", "purchase_price": 2000, "currency": "ARS", "pack_quantity": 500, "pack_unit": "g", "yield_pct": 100 }
+      ],
+      "recipe": {
+        "id": "rec_ce004",
+        "name": "Producto CE-004",
+        "recipe_type": "product",
+        "yield_quantity": 1,
+        "yield_unit": "unit",
+        "currency": "ARS",
+        "components": [
+          { "component_type": "ingredient", "ingredient_id": "harina", "quantity": 250, "unit": "g" },
+          { "component_type": "ingredient", "ingredient_id": "queso", "quantity": 150, "unit": "g" }
+        ]
+      },
+      "expected": {
+        "batch_cost": 975,
+        "unit_cost": 975
+      }
+    },
+    "CE_005": {
+      "id": "CE-005",
+      "title": "Una subreceta utilizada en dos recetas finales",
+      "currency": "ARS",
+      "tolerance": 0.01,
+      "ingredients": [
+        { "id": "tomate", "name": "Tomate", "base_dimension": "mass", "base_unit": "g", "is_active": true },
+        { "id": "aceite", "name": "Aceite", "base_dimension": "volume", "base_unit": "ml", "is_active": true },
+        { "id": "queso", "name": "Queso", "base_dimension": "mass", "base_unit": "g", "is_active": true },
+        { "id": "masa", "name": "Masa", "base_dimension": "mass", "base_unit": "g", "is_active": true }
+      ],
+      "purchase_prices": [
+        { "ingredient_id": "tomate", "purchase_price": 1000, "currency": "ARS", "pack_quantity": 1, "pack_unit": "kg", "yield_pct": 100 },
+        { "ingredient_id": "aceite", "purchase_price": 2000, "currency": "ARS", "pack_quantity": 1, "pack_unit": "L", "yield_pct": 100 },
+        { "ingredient_id": "queso", "purchase_price": 4000, "currency": "ARS", "pack_quantity": 1, "pack_unit": "kg", "yield_pct": 100 },
+        { "ingredient_id": "masa", "purchase_price": 1000, "currency": "ARS", "pack_quantity": 1, "pack_unit": "kg", "yield_pct": 100 }
+      ],
+      "recipes": [
+        {
+          "id": "sub_salsa",
+          "name": "Subreceta Salsa",
+          "recipe_type": "subrecipe",
+          "yield_quantity": 1000,
+          "yield_unit": "g",
+          "currency": "ARS",
+          "components": [
+            { "component_type": "ingredient", "ingredient_id": "tomate", "quantity": 800, "unit": "g" },
+            { "component_type": "ingredient", "ingredient_id": "aceite", "quantity": 100, "unit": "ml" }
+          ]
+        },
+        {
+          "id": "prod_a",
+          "name": "Producto A",
+          "recipe_type": "product",
+          "yield_quantity": 1,
+          "yield_unit": "unit",
+          "currency": "ARS",
+          "components": [
+            { "component_type": "subrecipe", "recipe_id": "sub_salsa", "quantity": 100, "unit": "g" },
+            { "component_type": "ingredient", "ingredient_id": "queso", "quantity": 150, "unit": "g" }
+          ]
+        },
+        {
+          "id": "prod_b",
+          "name": "Producto B",
+          "recipe_type": "product",
+          "yield_quantity": 1,
+          "yield_unit": "unit",
+          "currency": "ARS",
+          "components": [
+            { "component_type": "subrecipe", "recipe_id": "sub_salsa", "quantity": 200, "unit": "g" },
+            { "component_type": "ingredient", "ingredient_id": "masa", "quantity": 220, "unit": "g" }
+          ]
+        }
+      ],
+      "expected": {
+        "sub_salsa_batch_cost": 1000,
+        "sub_salsa_cost_per_kg": 1000,
+        "prod_a_cost": 700,
+        "prod_b_cost": 420
+      }
+    },
+    "CE_006": {
+      "id": "CE-006",
+      "title": "Compra con 10% de merma (rendimiento utilizable 90%)",
+      "currency": "ARS",
+      "tolerance": 0.01,
+      "ingredients": [
+        { "id": "pollo_crudo", "name": "Pollo crudo", "base_dimension": "mass", "base_unit": "g", "is_active": true }
+      ],
+      "purchase_prices": [
+        { "ingredient_id": "pollo_crudo", "purchase_price": 1000, "currency": "ARS", "pack_quantity": 1, "pack_unit": "kg", "yield_pct": 90 }
+      ],
+      "recipe": {
+        "id": "rec_pollo",
+        "name": "Porción Pollo",
+        "recipe_type": "product",
+        "yield_quantity": 1,
+        "yield_unit": "unit",
+        "currency": "ARS",
+        "components": [
+          { "component_type": "ingredient", "ingredient_id": "pollo_crudo", "quantity": 180, "unit": "g" }
+        ]
+      },
+      "expected": {
+        "gross_cost_per_kg": 1000,
+        "usable_cost_per_kg": 1111.111111111111,
+        "recipe_cost": 200
+      }
+    },
+    "CE_007": {
+      "id": "CE-007",
+      "title": "Ingrediente sin precio produce estado incomplete, nunca cero silencioso",
+      "currency": "ARS",
+      "ingredients": [
+        { "id": "harina", "name": "Harina", "base_dimension": "mass", "base_unit": "g", "is_active": true },
+        { "id": "mozzarella", "name": "Mozzarella", "base_dimension": "mass", "base_unit": "g", "is_active": true }
+      ],
+      "purchase_prices": [
+        { "ingredient_id": "harina", "purchase_price": 1500, "currency": "ARS", "pack_quantity": 1, "pack_unit": "kg", "yield_pct": 100 }
+      ],
+      "recipe": {
+        "id": "rec_incompleta",
+        "name": "Pizza con insumo sin precio",
+        "recipe_type": "product",
+        "yield_quantity": 1,
+        "yield_unit": "unit",
+        "currency": "ARS",
+        "components": [
+          { "component_type": "ingredient", "ingredient_id": "harina", "quantity": 200, "unit": "g" },
+          { "component_type": "ingredient", "ingredient_id": "mozzarella", "quantity": 100, "unit": "g" }
+        ]
+      },
+      "expected": {
+        "status": "incomplete",
+        "partial_batch_cost": 300,
+        "batch_cost": null,
+        "unit_cost": null,
+        "missing_ingredient_id": "mozzarella"
+      }
+    },
+    "CE_008": {
+      "id": "CE-008",
+      "title": "Precio sugerido, food cost, margen bruto y markup con redondeo configurable",
+      "currency": "ARS",
+      "inputs": {
+        "unit_cost": 1200,
+        "target_food_cost_pct": 30,
+        "rounding_increment": 500,
+        "rounding_mode": "ceil"
+      },
+      "expected": {
+        "minimum_price": 4000,
+        "suggested_price": 4000,
+        "gross_profit": 2800,
+        "food_cost_pct": 30,
+        "gross_margin_pct": 70,
+        "markup_pct": 233.33333333333334
+      }
+    }
+  }
+}

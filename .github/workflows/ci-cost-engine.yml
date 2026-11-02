@@ -1,0 +1,47 @@
+name: CI — Cost Engine Golden Tests & Typecheck
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up PHP 8.2 & Lint Backend
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+
+      - name: PHP Syntax Check
+        run: |
+          find backend -name "*.php" -print0 | xargs -0 -n1 php -l
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.12.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck all packages and apps
+        working-directory: frontend
+        run: pnpm run typecheck
+
+      - name: Run Cost Engine v1 Golden Tests (CE-001..CE-008)
+        working-directory: frontend
+        run: pnpm run test
