@@ -7,7 +7,6 @@ namespace Pizzalog\Controllers;
 use Pizzalog\Core\Database;
 use Pizzalog\Core\Request;
 use Pizzalog\Core\Response;
-use Pizzalog\Services\LoyverseMigrationService;
 
 final class SalesReportController
 {
@@ -473,7 +472,6 @@ final class SalesReportController
      */
     private function ctx(Request $req): array
     {
-        LoyverseMigrationService::ensureMigrated();
         $bid  = (int)$req->auth['business_id'];
         $from = $req->query['from'] ?? date('Y-m-d', strtotime('-29 days'));
         $to   = $req->query['to']   ?? date('Y-m-d');

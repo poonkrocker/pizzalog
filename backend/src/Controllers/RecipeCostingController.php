@@ -12,48 +12,6 @@ use Pizzalog\Core\Response;
 class RecipeCostingController
 {
     /**
-     * Respaldo defensivo de esquema por si la migración 027 aún no corrió en el entorno.
-     */
-    private function ensureTables(\PDO $pdo): void
-    {
-        $pdo->exec("CREATE TABLE IF NOT EXISTS recipe_studio_recipes (
-          id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, business_id BIGINT UNSIGNED NOT NULL,
-          linked_product_id BIGINT UNSIGNED NULL, name VARCHAR(160) NOT NULL,
-          recipe_type ENUM('product','subrecipe') NOT NULL DEFAULT 'product',
-          yield_quantity DECIMAL(12,4) NOT NULL DEFAULT 1, yield_unit VARCHAR(24) NOT NULL DEFAULT 'u',
-          price DECIMAL(12,2) NOT NULL DEFAULT 0, target_food_cost_pct DECIMAL(5,2) NOT NULL DEFAULT 30,
-          is_active TINYINT(1) NOT NULL DEFAULT 1, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-          PRIMARY KEY (id), KEY idx_recipe_studio_business (business_id),
-          CONSTRAINT fk_recipe_studio_business FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-        $pdo->exec("CREATE TABLE IF NOT EXISTS recipe_studio_components (
-          id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, business_id BIGINT UNSIGNED NOT NULL,
-          recipe_id BIGINT UNSIGNED NOT NULL, component_type ENUM('supply','recipe') NOT NULL,
-          supply_id BIGINT UNSIGNED NULL, component_recipe_id BIGINT UNSIGNED NULL,
-          quantity DECIMAL(12,4) NOT NULL, unit VARCHAR(24) NOT NULL DEFAULT 'kg', sort_order INT NOT NULL DEFAULT 0,
-          PRIMARY KEY (id), KEY idx_recipe_components_recipe (business_id, recipe_id),
-          KEY idx_recipe_components_subrecipe (business_id, component_recipe_id),
-          CONSTRAINT fk_recipe_component_business FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE,
-          CONSTRAINT fk_recipe_component_parent FOREIGN KEY (recipe_id) REFERENCES recipe_studio_recipes(id) ON DELETE CASCADE,
-          CONSTRAINT fk_recipe_component_supply FOREIGN KEY (supply_id) REFERENCES supplies(id) ON DELETE RESTRICT,
-          CONSTRAINT fk_recipe_component_child FOREIGN KEY (component_recipe_id) REFERENCES recipe_studio_recipes(id) ON DELETE RESTRICT
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-        $pdo->exec("CREATE TABLE IF NOT EXISTS business_cost_items (
-          id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, business_id BIGINT UNSIGNED NOT NULL,
-          name VARCHAR(160) NOT NULL,
-          category ENUM('employees','rent','utilities','services','taxes','maintenance','software','other') NOT NULL DEFAULT 'other',
-          quantity DECIMAL(12,3) NOT NULL DEFAULT 1, amount DECIMAL(12,2) NOT NULL DEFAULT 0,
-          period ENUM('monthly','weekly','daily','yearly') NOT NULL DEFAULT 'monthly',
-          is_active TINYINT(1) NOT NULL DEFAULT 1, notes VARCHAR(500) NULL,
-          created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-          PRIMARY KEY (id), KEY idx_business_cost_items_business (business_id, is_active),
-          CONSTRAINT fk_business_cost_items_business FOREIGN KEY (business_id) REFERENCES businesses(id) ON DELETE CASCADE
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-    }
-
-    /**
      * Cuenta cuántos productos activos tienen composición en product_ingredients
      * pero aún no fueron importados a recipe_studio_recipes.
      */
@@ -139,7 +97,6 @@ class RecipeCostingController
     {
         $bid = (int)$req->auth['business_id'];
         $pdo = Database::pdo();
-        $this->ensureTables($pdo);
         $pdo->beginTransaction();
         try {
             $imported = $this->importExistingProductRecipes($pdo, $bid);
@@ -155,7 +112,6 @@ class RecipeCostingController
     {
         $bid = (int)$req->auth['business_id'];
         $pdo = Database::pdo();
-        $this->ensureTables($pdo);
         $legacyUnimportedCount = $this->countUnimportedLegacyRecipes($pdo, $bid);
         $stmt = $pdo->prepare("SELECT id, name, recipe_type, linked_product_id, yield_quantity, yield_unit, price, target_food_cost_pct
           FROM recipe_studio_recipes WHERE business_id = ? AND is_active = 1 ORDER BY recipe_type, name");
@@ -255,7 +211,7 @@ class RecipeCostingController
 
     public function recipesSave(Request $req): void
     {
-        $bid=(int)$req->auth['business_id']; $b=$req->body; $pdo=Database::pdo(); $this->ensureTables($pdo);
+        $bid=(int)$req->auth['business_id']; $b=$req->body; $pdo=Database::pdo();
         $id=!empty($b['id'])?(int)$b['id']:null; $name=trim((string)($b['name']??''));
         $type=($b['recipe_type']??'product')==='subrecipe'?'subrecipe':'product';
         $yield=max(0.0001,(float)($b['yield_quantity']??1)); $yieldUnit=trim((string)($b['yield_unit']??'u')) ?: 'u';
@@ -489,7 +445,7 @@ class RecipeCostingController
 
     public function businessCostsGet(Request $req): void
     {
-        $bid=(int)$req->auth['business_id'];$pdo=Database::pdo();$this->ensureTables($pdo);
+        $bid=(int)$req->auth['business_id'];$pdo=Database::pdo();
         $q=$pdo->prepare("SELECT id,name,category,quantity,amount,period,notes FROM business_cost_items WHERE business_id=? AND is_active=1 ORDER BY category,name");
         $q->execute([$bid]);$items=[];
         $factor=['monthly'=>1,'weekly'=>52/12,'daily'=>365/12,'yearly'=>1/12];$total=0.0;
@@ -503,7 +459,7 @@ class RecipeCostingController
 
     public function businessCostsSave(Request $req): void
     {
-        $bid=(int)$req->auth['business_id'];$b=$req->body;$pdo=Database::pdo();$this->ensureTables($pdo);
+        $bid=(int)$req->auth['business_id'];$b=$req->body;$pdo=Database::pdo();
         $items=is_array($b['items']??null)?$b['items']:[];
         $allowed=['employees','rent','utilities','services','taxes','maintenance','software','other'];
         $periods=['monthly','weekly','daily','yearly'];

@@ -293,7 +293,8 @@ export function downloadCustomProfitKitXlsx(state: ToolsWorkspaceState): void {
       info = null;
     }
     const isComplete = info?.status === 'complete';
-    const numPrice = ing.is_free ? 0 : Number(priceRec?.purchase_price ?? 0);
+    // Keep absent prices blank in the workbook. Zero is reserved for explicitly free ingredients.
+    const numPrice = ing.is_free ? 0 : priceRec?.purchase_price == null ? '' : Number(priceRec.purchase_price);
     const yieldPct = priceRec?.yield_pct ?? 100;
 
     sheet2.push([

@@ -5,7 +5,6 @@ use Pizzalog\Core\Database;
 use Pizzalog\Core\Request;
 use Pizzalog\Core\Response;
 use Pizzalog\Repositories\StockRepository;
-use Pizzalog\Services\LoyverseMigrationService;
 use Pizzalog\Services\SaleService;
 
 class SaleController
@@ -19,20 +18,6 @@ class SaleController
     {
         $this->stock = new StockRepository();
         $this->sales = new SaleService();
-    }
-
-    /** POST /sales/migrate-loyverse (solo admin autenticado) */
-    public function migrateLoyverse(Request $req): void
-    {
-        if (($req->auth['role'] ?? '') !== 'admin') {
-            Response::error('Solo un administrador puede ejecutar migraciones históricas', 403);
-        }
-        $force = (bool) $req->input('force', false);
-        if ($force && $req->input('confirm') !== 'CONFIRMAR_MIGRACION_HISTORICA') {
-            Response::error('Para forzar la reimportación debe enviar confirm = CONFIRMAR_MIGRACION_HISTORICA', 422);
-        }
-        $res = LoyverseMigrationService::ensureMigrated($force);
-        Response::ok(['migration' => $res]);
     }
 
     /** GET /sales?from=YYYY-MM-DD&to=YYYY-MM-DD&channel=&without_cash_session=&limit=&offset= */

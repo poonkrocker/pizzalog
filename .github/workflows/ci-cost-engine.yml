@@ -13,6 +13,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Ensure local secrets are not tracked
+        shell: bash
+        run: |
+          if git ls-files --error-unmatch backend/config/config.php >/dev/null 2>&1; then
+            echo "backend/config/config.php must not be tracked. Use backend/config/config.example.php as the template."
+            exit 1
+          fi
+
       - name: Set up PHP 8.2 & Lint Backend
         uses: shivammathur/setup-php@v2
         with:

@@ -9,11 +9,6 @@ use Pizzalog\Core\Response;
 
 class AuthController
 {
-    public function __construct()
-    {
-        UserController::ensureSchema();
-    }
-
     /**
      * POST /auth/login
      * Body: { "email"?: "...", "username"?: "...", "password": "...", "app"?: "pos"|"panel"|"portal" }
@@ -51,11 +46,19 @@ class AuthController
           INNER JOIN businesses b ON b.id = u.business_id
           LEFT JOIN staff_people sp ON sp.id = u.staff_person_id
               WHERE ' . implode(' AND ', $where) . '
-              ORDER BY u.is_active DESC, u.id ASC
-              LIMIT 1'
+              ORDER BY u.is_active DESC, u.id ASC'
         );
         $stmt->execute($params);
-        $user = $stmt->fetch();
+        $matches = $stmt->fetchAll();
+        if ($businessId === null && $businessSlug === '') {
+            $activeMatches = array_values(array_filter($matches, static fn(array $row): bool => (int) $row['is_active'] === 1));
+            if (count($activeMatches) > 1) {
+                Response::error('Este usuario existe en más de un negocio. Ingresá el identificador del negocio para continuar.', 422);
+            }
+            $user = $activeMatches[0] ?? null;
+        } else {
+            $user = $matches[0] ?? null;
+        }
 
         $valid = $user
             && (int) $user['is_active'] === 1

@@ -64,6 +64,10 @@ export function App() {
   }, [state]);
 
   const t = I18N[state.locale] ?? I18N['es-AR'];
+  const canChangeCurrency =
+    state.catalog.recipes.length === 0 &&
+    !state.catalog.purchase_prices.some((p) => Number(p.purchase_price) > 0) &&
+    !state.operatingExpenses.some((expense) => expense.amount > 0);
 
   const engine = useMemo(() => new CostEngine(state.catalog), [state.catalog]);
 
@@ -524,16 +528,13 @@ export function App() {
           <span>Moneda</span>
           <select
             value={state.currency}
+            disabled={!canChangeCurrency}
+            title={canChangeCurrency ? undefined : 'No cambies la moneda mientras haya importes cargados; se necesita conversión explícita.'}
             onChange={(e) => {
               const curr = e.target.value;
               setState((s) => ({
                 ...s,
                 currency: curr,
-                catalog: {
-                  ...s.catalog,
-                  purchase_prices: s.catalog.purchase_prices.map((p) => ({ ...p, currency: curr })),
-                  recipes: s.catalog.recipes.map((r) => ({ ...r, currency: curr })),
-                },
               }));
             }}
           >
@@ -543,6 +544,7 @@ export function App() {
             <option value="EUR">EUR (€)</option>
             <option value="MXN">MXN ($)</option>
           </select>
+          {!canChangeCurrency && <small>Para evitar reinterpretar importes, la moneda se fija cuando hay precios, recetas o gastos. La conversión cambiaria explícita todavía no está disponible en Tools.</small>}
         </label>
         <label className="field">
           <span>Food Cost Objetivo (%)</span>
@@ -681,6 +683,7 @@ export function App() {
                     state.catalog.as_of_date
                   );
                   let calcInfo: ReturnType<typeof computeUsableIngredientCost> | null = null;
+                  let calcError: string | null = null;
                   try {
                     calcInfo = computeUsableIngredientCost(
                       ing,
@@ -689,8 +692,9 @@ export function App() {
                       state.catalog.exchange_rates,
                       state.catalog.as_of_date
                     );
-                  } catch {
+                  } catch (error) {
                     calcInfo = null;
+                    calcError = error instanceof Error ? error.message : 'No se pudo validar la moneda o unidad.';
                   }
                   const isComplete = calcInfo?.status === 'complete';
                   const factor1000 = ing.base_unit === 'g' || ing.base_unit === 'ml' ? 1000 : 1;
@@ -839,7 +843,9 @@ export function App() {
                         {isComplete ? (
                           <span className="badge badge--ok">{t.statusComplete}</span>
                         ) : (
-                          <span className="badge badge--warn">{t.statusIncomplete}</span>
+                          <span className="badge badge--warn" title={calcError ?? undefined}>
+                            {calcError ? 'Revisar moneda/unidad' : t.statusIncomplete}
+                          </span>
                         )}
                       </td>
                       <td>

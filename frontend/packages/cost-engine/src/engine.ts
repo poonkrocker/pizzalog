@@ -635,6 +635,9 @@ export class CostEngine {
     const snapshotHash = computeSnapshotHash({
       engine_version: ENGINE_VERSION,
       recipe,
+      as_of_date: this.asOfDate ?? null,
+      purchase_prices: this.purchasePrices,
+      exchange_rates: this.exchangeRates,
       breakdowns: breakdowns.map((b) => ({
         id: b.id,
         qty: b.normalized_quantity,
@@ -831,8 +834,8 @@ export function createCostSnapshot(
 
   const snapshot: CostSnapshot = JSON.parse(
     JSON.stringify({
-      snapshot_id: `snap_${recipeId}_${costResult.input_snapshot_hash}`,
-      input_snapshot_hash: costResult.input_snapshot_hash,
+      snapshot_id: `snap_${recipeId}_${computeSnapshotHash({ cost_input_hash: costResult.input_snapshot_hash, pricing_options: pricingOptions ?? null })}`,
+      input_snapshot_hash: computeSnapshotHash({ cost_input_hash: costResult.input_snapshot_hash, pricing_options: pricingOptions ?? null }),
       created_at: costResult.calculated_at,
       engine_version: ENGINE_VERSION,
       recipe_id: recipeId,
@@ -842,6 +845,9 @@ export function createCostSnapshot(
         recipe,
         ingredients: catalog.ingredients,
         purchase_prices: catalog.purchase_prices,
+        exchange_rates: catalog.exchange_rates ?? [],
+        as_of_date: catalog.as_of_date ?? null,
+        pricing_options: pricingOptions ?? null,
       },
     })
   );

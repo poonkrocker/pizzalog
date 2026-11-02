@@ -4,7 +4,6 @@ namespace Pizzalog\Controllers;
 use Pizzalog\Core\Database;
 use Pizzalog\Core\Request;
 use Pizzalog\Core\Response;
-use Pizzalog\Services\LoyverseMigrationService;
 
 /**
  * Caja / arqueo.
@@ -18,10 +17,6 @@ use Pizzalog\Services\LoyverseMigrationService;
  */
 class CashController
 {
-    public function __construct()
-    {
-        LoyverseMigrationService::ensureMigrated();
-    }
     /** POST /cash/open   Body: { opening_amount, note? } */
     public function open(Request $req): void
     {
