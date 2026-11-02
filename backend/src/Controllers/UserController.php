@@ -14,6 +14,11 @@ class UserController
     private const ROLES = ['admin', 'manager', 'cashier', 'kitchen'];
     private static bool $ensured = false;
 
+    public function __construct()
+    {
+        self::ensureSchema();
+    }
+
     public static function ensureSchema(): void
     {
         if (self::$ensured) {

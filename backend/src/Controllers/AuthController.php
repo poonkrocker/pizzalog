@@ -9,6 +9,10 @@ use Pizzalog\Core\Response;
 
 class AuthController
 {
+    public function __construct()
+    {
+        UserController::ensureSchema();
+    }
     /**
      * POST /auth/login
      * Body: { "email"?: "...", "username"?: "...", "password": "...", "app"?: "pos"|"panel"|"portal" }

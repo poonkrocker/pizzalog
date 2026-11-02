@@ -127,6 +127,24 @@ class PublicController
             $prodRows = $prods->fetchAll();
         }
 
+        $socialLinks = [];
+        try {
+            $socialLinks = array_map(static fn (array $l): array => [
+                'platform' => $l['platform'],
+                'url'      => $l['url'],
+            ], $this->businesses->socialLinks($bid));
+        } catch (\Throwable) {}
+
+        $hours = [];
+        try {
+            $hours = $this->businesses->hours($bid);
+        } catch (\Throwable) {}
+
+        $isOpenForOrders = true;
+        try {
+            $isOpenForOrders = $this->businesses->isOpenForOrders($business, $now);
+        } catch (\Throwable) {}
+
         Response::ok([
             'business' => [
                 'name'              => $business['name'],
@@ -139,12 +157,9 @@ class PublicController
                 'theme'             => $business['theme'] !== null
                     ? json_decode((string) $business['theme'], true)
                     : null,
-                'social_links'      => array_map(static fn (array $l): array => [
-                    'platform' => $l['platform'],
-                    'url'      => $l['url'],
-                ], $this->businesses->socialLinks($bid)),
-                'is_open_for_orders' => $this->businesses->isOpenForOrders($business, $now),
-                'hours'              => $this->businesses->hours($bid),
+                'social_links'      => $socialLinks,
+                'is_open_for_orders' => $isOpenForOrders,
+                'hours'              => $hours,
                 'transfer_alias'     => $business['transfer_alias'],
                 'card_surcharge_pct' => (float) $business['card_surcharge_pct'],
                 'pay_methods_pickup'   => $this->decodeMethods($business['pay_methods_pickup']),
@@ -182,12 +197,21 @@ class PublicController
                 'is_available_now' => ProductVisibility::isVisibleNow($p, $now),
             ];
             if ((int) $p['has_variants'] === 1) {
-                $data = $this->variants->forProduct($bid, (int) $p['id']);
-                $item['options']  = $data['options'];
-                $item['variants'] = $data['variants'];
+                try {
+                    $data = $this->variants->forProduct($bid, (int) $p['id']);
+                    $item['options']  = $data['options'];
+                    $item['variants'] = $data['variants'];
+                } catch (\Throwable) {
+                    $item['options']  = [];
+                    $item['variants'] = [];
+                }
             }
             if ((int) $p['is_combo'] === 1) {
-                $item['combo'] = $this->combos->forProduct($bid, (int) $p['id']);
+                try {
+                    $item['combo'] = $this->combos->forProduct($bid, (int) $p['id']);
+                } catch (\Throwable) {
+                    $item['combo'] = ['groups' => []];
+                }
             }
             $out[] = $item;
         }
