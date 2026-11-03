@@ -1,5 +1,5 @@
 <?php
-namespace Pizzalog\\Core;
+namespace Pizzalog\Core;
 
 class ToolsAuth
 {
@@ -33,7 +33,7 @@ class ToolsAuth
                         u.email AS app_user_email
                    FROM tools_accounts ta
               LEFT JOIN users u ON u.id = ta.app_user_id
-                  WHERE ta.id = ?
+                  WHERE ta.id = ? AND ta.environment = ?
                   LIMIT 1'
             );
             $stmt->execute([(int) $payload['sub'], (string)$payload['env']]);
@@ -45,18 +45,6 @@ class ToolsAuth
             if ($account['expires_at'] !== null && strtotime($account['expires_at']) <= time()) {
                 Response::error('El acceso a Pizzalog Tools ha vencido', 403);
             }
-            if (
-                $account['app_user_id'] !== null
-                && (
-                    $account['app_user_active'] === null
-                    || (int)$account['app_user_active'] !== 1
-                    || $account['app_user_role'] !== 'admin'
-                    || strtolower((string)$account['app_user_email']) !== strtolower((string)$account['email'])
-                )
-            ) {
-                Response::error('El usuario vinculado de Pizzalog App ya no tiene permisos para acceder a Tools', 403);
-            }
-
             if (
                 $account['app_user_id'] !== null
                 && (
