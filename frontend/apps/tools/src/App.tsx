@@ -21,6 +21,8 @@ import {
   type ToolsWorkspaceState,
 } from './demoData';
 import { downloadCustomProfitKitXlsx } from './xlsxExporter';
+import { parseImportFile, type ParsedImportSheet } from './importFileParser';
+import { applyImportMappings, type ImportSheetMapping } from './importNormalization';
 
 const ALL_UNITS: UnitCode[] = ['g', 'kg', 'mg', 'lb', 'oz', 'ml', 'cc', 'L', 'fl_oz_us', 'gal_us', 'unit', 'dozen'];
 
@@ -45,6 +47,13 @@ export function App({
     'ingredients' | 'subrecipes' | 'recipes' | 'expenses' | 'snapshots'
   >('recipes');
   const [importError, setImportError] = useState<string | null>(null);
+  const [isSmartImporting, setIsSmartImporting] = useState(false);
+  const [smartImportPreview, setSmartImportPreview] = useState<{
+    fileName: string;
+    sheets: ParsedImportSheet[];
+    mappings: ImportSheetMapping[];
+    remaining: number;
+  } | null>(null);
 
   // Estado del Constructor Visual Interactivo (Modal)
   const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
@@ -327,6 +336,58 @@ export function App({
     a.download = `pizzalog-profit-kit-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  async function handleSmartImport(file: File) {
+    setImportError(null);
+    setIsSmartImporting(true);
+    try {
+      const sheets = await parseImportFile(file);
+      const response = await fetch(`${API_URL}/tools/import/preview`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ sheets }),
+      });
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        data?: { sheets: ImportSheetMapping[]; ai_previews_remaining_today: number };
+      };
+      if (!response.ok || !payload.ok || !payload.data) {
+        throw new Error(payload.error ?? 'No se pudo analizar el archivo');
+      }
+      setSmartImportPreview({
+        fileName: file.name,
+        sheets,
+        mappings: payload.data.sheets,
+        remaining: payload.data.ai_previews_remaining_today,
+      });
+    } catch (err) {
+      setImportError(err instanceof Error ? err.message : 'Error al importar la planilla');
+    } finally {
+      setIsSmartImporting(false);
+    }
+  }
+
+  function confirmSmartImport() {
+    if (!smartImportPreview) return;
+    const result = applyImportMappings(state, smartImportPreview.sheets, smartImportPreview.mappings);
+    const total = Object.values(result.counts).reduce((sum, count) => sum + count, 0);
+    if (total === 0) {
+      setImportError('No se importó ningún registro. Revisá las columnas detectadas y las unidades requeridas.');
+      setSmartImportPreview(null);
+      return;
+    }
+    setState(result.workspace);
+    const summary = [
+      `Importados: ${result.counts.ingredients} insumos, ${result.counts.prices} precios, ${result.counts.recipes} recetas y ${result.counts.expenses} gastos.`,
+      ...result.warnings,
+    ];
+    setImportError(summary.join(' '));
+    setSmartImportPreview(null);
   }
 
   function handleImportJson(file: File) {
