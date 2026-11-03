@@ -47,6 +47,7 @@ return [
             'http://localhost:5173',       // desarrollo local panel (Vite)
             'http://localhost:5174',       // desarrollo local TPV (Vite)
             'http://localhost:5175',       // desarrollo local carta (Vite)
+            'http://localhost:5176',       // desarrollo local Pizzalog Tools (Vite)
             'http://localhost',            // app Android (Capacitor)
             'https://localhost',           // app Android (Capacitor, scheme https)
             'capacitor://localhost',       // app Android (Capacitor, scheme nativo)
