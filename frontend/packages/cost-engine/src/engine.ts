@@ -356,7 +356,7 @@ export function expandBakersDoughSpec(spec: BakersDoughSpec): {
         'Cada harina debe declarar un share_pct finito no negativo o todas deben declarar weight_kg.'
       );
     }
-    const shareSum = shareValues.reduce((sum, value) => sum + (value ?? 0), 0);
+    const shareSum = shareValues.reduce<number>((sum, value) => sum + (value ?? 0), 0);
     if (Math.abs(shareSum - 100) > 0.01) {
       throw new CostEngineValidationError(
         'INVALID_DOUGH_SPEC',
