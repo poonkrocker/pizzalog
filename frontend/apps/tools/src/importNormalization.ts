@@ -109,6 +109,12 @@ function unitValue(raw: string): UnitCode | null {
   return UNITS.includes(value as UnitCode) ? (value as UnitCode) : null;
 }
 
+function currencyValue(raw: string, fallback: string): string | null {
+  const value = raw.trim().toUpperCase();
+  if (!value) return fallback;
+  return /^[A-Z]{3}$/.test(value) ? value : null;
+}
+
 export function applyImportMappings(
   current: ToolsWorkspaceState,
   sheets: ParsedImportSheet[],
@@ -178,15 +184,16 @@ export function applyImportMappings(
         const price = parseNumber(cell(row, mapping, 'purchase_price'));
         const packQuantity = parseNumber(cell(row, mapping, 'pack_quantity'));
         const packUnit = unitValue(cell(row, mapping, 'pack_unit'));
+        const currency = currencyValue(cell(row, mapping, 'currency'), current.currency);
         const yieldPct = parseNumber(cell(row, mapping, 'yield_pct')) ?? 100;
-        if (price !== null && price > 0 && packQuantity !== null && packQuantity > 0 && packUnit &&
+        if (price !== null && price > 0 && packQuantity !== null && packQuantity > 0 && packUnit && currency &&
             Number.isFinite(yieldPct) && yieldPct > 0 && yieldPct <= 100) {
           pendingPrices.push({
             name,
             price: {
               ingredient_id: ingredient.id,
               purchase_price: price,
-              currency: cell(row, mapping, 'currency') || current.currency,
+              currency,
               pack_quantity: packQuantity,
               pack_unit: packUnit,
               yield_pct: yieldPct,
@@ -205,8 +212,9 @@ export function applyImportMappings(
         const packQuantity = parseNumber(cell(row, mapping, 'pack_quantity'));
         const packUnit = unitValue(cell(row, mapping, 'pack_unit'));
         const ingredient = knownIngredients.get(normalizedName(name));
-        if (!name || !ingredient || price === null || price <= 0 || packQuantity === null || packQuantity <= 0 || !packUnit) {
-          warnings.push(`${mapping.name}, fila ${sourceRow}: no se pudo vincular el precio a un insumo con presentación válida.`);
+        const currency = currencyValue(cell(row, mapping, 'currency'), current.currency);
+        if (!name || !ingredient || price === null || price <= 0 || packQuantity === null || packQuantity <= 0 || !packUnit || !currency) {
+          warnings.push(`${mapping.name}, fila ${sourceRow}: no se pudo vincular el precio a un insumo con presentación o moneda válida.`);
           return;
         }
         const yieldPct = parseNumber(cell(row, mapping, 'yield_pct')) ?? 100;
@@ -219,7 +227,7 @@ export function applyImportMappings(
           price: {
             ingredient_id: ingredient.id,
             purchase_price: price,
-            currency: cell(row, mapping, 'currency') || current.currency,
+            currency,
             pack_quantity: packQuantity,
             pack_unit: packUnit,
             yield_pct: yieldPct,
