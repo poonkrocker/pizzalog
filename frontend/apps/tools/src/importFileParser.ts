@@ -191,7 +191,7 @@ function elementText(element: Element, localName: string): string {
 
 
 function normalizeRecipeMatrix(rows: string[][]): string[][] | null {
-  const norm = (value: string) => value.normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase().trim();
+  const norm = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
   const productRowIndex = rows.findIndex((row) => norm(row[1] ?? row[0] ?? '') === 'producto');
   const ingredientHeaderIndex = rows.findIndex((row) =>
     norm(row[1] ?? row[0] ?? '') === 'ingrediente' &&
@@ -233,7 +233,7 @@ function normalizeRecipeMatrix(rows: string[][]): string[][] | null {
 
 
 function normalizeIngredientPriceRows(rows: string[][]): string[][] | null {
-  const norm = (value: string) => value.normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase().trim();
+  const norm = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
   const headerIndex = rows.findIndex((row) =>
     row.some((value) => norm(value) === 'ingrediente') &&
     row.some((value) => norm(value) === 'unidad') &&
@@ -349,7 +349,7 @@ export async function parseImportFile(file: File): Promise<ParsedImportSheet[]> 
   if (extension === 'csv') {
     const sample = new Uint8Array(await file.slice(0, 4096).arrayBuffer());
     if (sample.some((byte) => byte === 0)) throw new Error('El archivo CSV parece contener datos binarios');
-    const csvText = (await file.text()).replace(/^\\uFEFF/, '');
+    const csvText = (await file.text()).replace(/^\uFEFF/, '');
     const rows = parseCsv(csvText);
     if (rows.length > MAX_ROWS) throw new Error(`El CSV supera el límite de ${MAX_ROWS} filas`);
     return [{ name: file.name, rows }];
