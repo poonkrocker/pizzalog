@@ -159,7 +159,7 @@ export function applyImportMappings(
   const warnings: string[] = [];
   const counts = { ingredients: 0, prices: 0, recipes: 0, expenses: 0 };
   const pendingPrices: Array<{ name: string; price: PurchasePrice }> = [];
-  const recipeRows = new Map<string, { name: string; type: Recipe['recipe_type']; yieldQuantity: number; yieldUnit: UnitCode; components: Recipe['components'] }>();
+  const recipeRows = new Map<string, { name: string; type: Recipe['recipe_type']; yieldQuantity: number; yieldUnit: UnitCode; components: NonNullable<Recipe['components']> }>();
   const invalidRecipeKeys = new Set<string>();
 
   const orderedMappings = [...mappings].sort((a, b) => {
@@ -324,13 +324,12 @@ export function applyImportMappings(
         const componentQuantity = parseNumber(cell(row, mapping, 'component_quantity'));
         const componentUnit = unitValue(cell(row, mapping, 'component_unit'));
         const ingredient = knownIngredients.get(normalizedName(componentName));
-        const lineIsValid = Boolean(
-          name && recipeType && yieldQuantity !== null && yieldQuantity > 0 && yieldUnit &&
-          componentName && componentQuantity !== null && componentQuantity > 0 &&
-          componentUnit && ingredient &&
-          areUnitsCompatible(componentUnit, ingredient.base_unit, ingredient)
-        );
-        if (!lineIsValid) {
+        if (
+          !name || !recipeType || yieldQuantity === null || yieldQuantity <= 0 || !yieldUnit ||
+          !componentName || componentQuantity === null || componentQuantity <= 0 ||
+          !componentUnit || !ingredient ||
+          !areUnitsCompatible(componentUnit, ingredient.base_unit, ingredient)
+        ) {
           if (key) invalidRecipeKeys.add(key);
           warnings.push(`${mapping.name}, fila ${sourceRow}: receta incompleta o componente sin insumo coincidente; se omitirá la receta completa para evitar un costo parcial.`);
           return;
@@ -342,19 +341,25 @@ export function applyImportMappings(
           warnings.push(`${mapping.name}, fila ${sourceRow}: datos de rendimiento inconsistentes para ${name}; se omitirá la receta completa.`);
           return;
         }
-        const target = existing ?? {
+        const target: {
+          name: string;
+          type: Recipe['recipe_type'];
+          yieldQuantity: number;
+          yieldUnit: UnitCode;
+          components: NonNullable<Recipe['components']>;
+        } = existing ?? {
           name,
           type: recipeType,
           yieldQuantity,
           yieldUnit,
           components: [],
         };
-        target.components = [...(target.components ?? []), {
+        target.components.push({
           component_type: 'ingredient',
           ingredient_id: ingredient.id,
           quantity: componentQuantity,
           unit: componentUnit,
-        }];
+        });
         recipeRows.set(key, target);
       }
     });
