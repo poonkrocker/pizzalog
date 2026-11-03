@@ -10,11 +10,23 @@ const MAX_COLUMNS = 25;
 
 function detectDelimiter(line: string): string {
   const candidates = [',', ';', '\t'];
+  const countOutsideQuotes = (delimiter: string) => {
+    let quoted = false;
+    let count = 0;
+    for (let index = 0; index < line.length; index += 1) {
+      if (line[index] === '"') {
+        if (quoted && line[index + 1] === '"') index += 1;
+        else quoted = !quoted;
+      } else if (!quoted && line[index] === delimiter) {
+        count += 1;
+      }
+    }
+    return count;
+  };
   return candidates
-    .map((delimiter) => ({ delimiter, count: line.split(delimiter).length }))
+    .map((delimiter) => ({ delimiter, count: countOutsideQuotes(delimiter) }))
     .sort((a, b) => b.count - a.count)[0]?.delimiter ?? ',';
 }
-
 function parseCsv(text: string): string[][] {
   const firstLine = text.split(/\r?\n/, 1)[0] ?? '';
   const delimiter = detectDelimiter(firstLine);
