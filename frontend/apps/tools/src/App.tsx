@@ -30,6 +30,31 @@ type ToolsAccount = { id: number; email: string; name: string; expires_at?: stri
 
 const API_URL = ((import.meta.env.VITE_API_URL as string | undefined) ?? 'https://api.pizzalog.net').replace(/\/+$/, '');
 
+const IMPORT_FIELD_LABELS: Record<ImportSheetMapping['kind'], Array<[string, string]>> = {
+  ingredients: [
+    ['name', 'Nombre del insumo'], ['base_unit', 'Unidad base'], ['base_dimension', 'Dimensión'],
+    ['purchase_price', 'Precio de compra'], ['currency', 'Moneda'], ['pack_quantity', 'Cantidad del envase'],
+    ['pack_unit', 'Unidad del envase'], ['yield_pct', 'Rendimiento utilizable (%)'],
+    ['density_g_per_ml', 'Densidad (g/ml)'], ['unit_weight_g', 'Peso por unidad (g)'], ['supplier', 'Proveedor'],
+    ['purchase_date', 'Fecha del precio'],
+  ],
+  purchase_prices: [
+    ['ingredient_name', 'Nombre del insumo'], ['purchase_price', 'Precio de compra'], ['currency', 'Moneda'],
+    ['pack_quantity', 'Cantidad del envase'], ['pack_unit', 'Unidad del envase'],
+    ['yield_pct', 'Rendimiento utilizable (%)'], ['supplier', 'Proveedor'], ['purchase_date', 'Fecha del precio'],
+  ],
+  recipes: [
+    ['recipe_name', 'Nombre de receta'], ['recipe_type', 'Tipo de receta'], ['yield_quantity', 'Rendimiento'],
+    ['yield_unit', 'Unidad de rendimiento'], ['component_name', 'Ingrediente del componente'],
+    ['component_quantity', 'Cantidad del componente'], ['component_unit', 'Unidad del componente'],
+  ],
+  operating_expenses: [
+    ['expense_name', 'Concepto del gasto'], ['expense_category', 'Categoría'], ['expense_period', 'Período'],
+    ['expense_amount', 'Importe'],
+  ],
+  unknown: [],
+};
+
 export function App({
   token,
   account,
@@ -384,6 +409,18 @@ export function App({
     } finally {
       setIsSmartImporting(false);
     }
+  }
+
+  function updateSmartImportMapping(
+    sheetIndex: number,
+    update: (mapping: ImportSheetMapping) => ImportSheetMapping
+  ) {
+    setSmartImportPreview((current) => current ? ({
+      ...current,
+      mappings: current.mappings.map((mapping) =>
+        mapping.sheet_index === sheetIndex ? update(mapping) : mapping
+      ),
+    }) : current);
   }
 
   function confirmSmartImport() {
