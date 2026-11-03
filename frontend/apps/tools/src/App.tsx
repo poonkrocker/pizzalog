@@ -1592,15 +1592,15 @@ export function App({
           <div className="modal-panel smart-import-panel">
             <div className="modal-header">
               <div>
-                <h3>Revisar importación inteligente</h3>
+                <h3>Revisar importación</h3>
                 <small>{smartImportPreview.fileName} · {smartImportPreview.mappingMode === 'local' ? 'mapeo local, sin IA' : `${smartImportPreview.remaining} previsualizaciones con IA restantes hoy`}</small>
               </div>
               <button type="button" className="btn" onClick={() => setSmartImportPreview(null)}>Cerrar</button>
             </div>
             <p className="smart-import-note">
               {smartImportPreview.mappingMode === 'local'
-                ? 'El mapeo se realizó localmente en el servidor. No se envió información a servicios externos. Revisá las columnas, unidades y advertencias; nada se guarda hasta tu confirmación.'
-                : 'Se envían a DeepSeek hasta 20 filas por hoja para proponer el mapeo de columnas. Revisá que esa muestra no incluya información sensible. Los valores no se modifican y nada se guarda hasta tu confirmación.'}
+                ? (smartImportPreview.note || 'El mapeo se realizó localmente en el servidor. No se envió información a servicios externos. Revisá las columnas, unidades y advertencias; nada se guarda hasta tu confirmación.')
+                : (smartImportPreview.note || 'Se envían a DeepSeek hasta 20 filas por hoja para proponer el mapeo de columnas. Revisá que esa muestra no incluya información sensible. Los valores no se modifican y nada se guarda hasta tu confirmación.')}
             </p>
             {smartImportPreview.mappings.map((mapping) => {
               const sheet = smartImportPreview.sheets[mapping.sheet_index];
