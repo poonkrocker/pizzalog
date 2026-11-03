@@ -6,6 +6,7 @@ import {
   type CostResult,
   type CostSnapshot,
   type ExchangeRate,
+  type FainaSpec,
   type Ingredient,
   type MissingInput,
   type PricingScenarioInput,
@@ -533,6 +534,58 @@ export function expandBakersDoughSpec(spec: BakersDoughSpec): {
       waterG: waterTotalG - bigaWaterG - poolishWaterG,
     },
     direct: { yeastG: directYeastG, saltG, sugarG, oilG },
+  };
+}
+
+/**
+ * Expande la fórmula operativa de fainá en componentes explícitos.
+ * Los parámetros de receta histórica viven en Cost Engine, no en controladores/UI.
+ */
+export function expandFainaSpec(spec: FainaSpec): {
+  components: RecipeComponent[];
+  chickpeaFlourG: number;
+  waterG: number;
+  saltG: number;
+  oilMl: number;
+  totalWeightG: number;
+} {
+  if (!Number.isFinite(spec.units_count) || spec.units_count <= 0) {
+    throw new CostEngineValidationError('INVALID_DOUGH_SPEC', 'La cantidad de moldes de fainá debe ser mayor a cero.');
+  }
+  for (const [field, value] of [
+    ['chickpea_flour_ingredient_id', spec.chickpea_flour_ingredient_id],
+    ['salt_ingredient_id', spec.salt_ingredient_id],
+    ['oil_ingredient_id', spec.oil_ingredient_id],
+  ] as Array<[string, string]>) {
+    if (!value || !value.trim()) {
+      throw new CostEngineValidationError('INVALID_DOUGH_SPEC', `Falta asignar el insumo "${field}" para fainá.`);
+    }
+  }
+
+  const chickpeaFlourG = spec.units_count * 185;
+  const waterG = chickpeaFlourG * 2.25;
+  const saltG = chickpeaFlourG * 0.05;
+  const oilMl = spec.units_count * 12;
+  const components: RecipeComponent[] = [
+    { component_type: 'ingredient', ingredient_id: spec.chickpea_flour_ingredient_id, quantity: chickpeaFlourG, unit: 'g' },
+    { component_type: 'ingredient', ingredient_id: spec.salt_ingredient_id, quantity: saltG, unit: 'g' },
+    { component_type: 'ingredient', ingredient_id: spec.oil_ingredient_id, quantity: oilMl, unit: 'ml' },
+  ];
+  if (spec.water_ingredient_id) {
+    components.push({
+      component_type: 'ingredient',
+      ingredient_id: spec.water_ingredient_id,
+      quantity: waterG,
+      unit: 'g',
+    });
+  }
+  return {
+    components,
+    chickpeaFlourG,
+    waterG,
+    saltG,
+    oilMl,
+    totalWeightG: chickpeaFlourG + waterG,
   };
 }
 
