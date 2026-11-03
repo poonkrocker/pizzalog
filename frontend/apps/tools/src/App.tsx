@@ -1594,31 +1594,92 @@ export function App({
               <button type="button" className="btn" onClick={() => setSmartImportPreview(null)}>Cerrar</button>
             </div>
             <p className="smart-import-note">
-              DeepSeek propuso cómo interpretar las columnas. Los valores originales no fueron modificados y ningún dato se guardará hasta que confirmes.
+              Se envían a DeepSeek hasta 20 filas por hoja para proponer el mapeo de columnas. Revisá que esa muestra no incluya información sensible. Los valores no se modifican y nada se guarda hasta tu confirmación.
             </p>
             {smartImportPreview.mappings.map((mapping) => {
               const sheet = smartImportPreview.sheets[mapping.sheet_index];
               if (!sheet) return null;
-              const mappedColumns = Object.entries(mapping.columns).filter(([, index]) => index !== null);
+              const fieldLabels = IMPORT_FIELD_LABELS[mapping.kind];
               const previewRows = sheet.rows.slice(mapping.header_row_index + 1, mapping.header_row_index + 4);
               return (
                 <section className="smart-import-sheet" key={mapping.sheet_index}>
                   <div className="smart-import-sheet__heading">
                     <strong>{mapping.name}</strong>
-                    <span>{mapping.kind} · {Math.round(mapping.confidence * 100)}% confianza · {mapping.row_count} filas</span>
+                    <span>{Math.round(mapping.confidence * 100)}% confianza · {mapping.row_count} filas</span>
                   </div>
+                  {sheet.warnings?.map((warning, index) => (
+                    <p className="smart-import-warning-note" key={index}>{warning}</p>
+                  ))}
                   {mapping.warnings.length > 0 && (
                     <ul className="smart-import-warnings">
                       {mapping.warnings.map((warning, index) => <li key={index}>{warning}</li>)}
                     </ul>
                   )}
-                  <div className="smart-import-mappings">
-                    {mappedColumns.length === 0 ? (
-                      <span>No se detectaron columnas confiables.</span>
-                    ) : mappedColumns.map(([field, index]) => (
-                      <span key={field}><b>{field}</b>: {mapping.headers[index as number] ?? `Columna ${Number(index) + 1}`}</span>
-                    ))}
+                  <div className="smart-import-edit-grid">
+                    <label className="field">
+                      <span>Tipo de hoja</span>
+                      <select
+                        value={mapping.kind}
+                        onChange={(e) => updateSmartImportMapping(mapping.sheet_index, (current) => ({
+                          ...current,
+                          kind: e.target.value as ImportSheetMapping['kind'],
+                        }))}
+                      >
+                        <option value="ingredients">Insumos</option>
+                        <option value="purchase_prices">Precios de compra</option>
+                        <option value="recipes">Recetas</option>
+                        <option value="operating_expenses">Gastos operativos</option>
+                        <option value="unknown">No importar esta hoja</option>
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>Fila de encabezados</span>
+                      <select
+                        value={mapping.header_row_index}
+                        onChange={(e) => {
+                          const nextIndex = Number(e.target.value);
+                          updateSmartImportMapping(mapping.sheet_index, (current) => ({
+                            ...current,
+                            header_row_index: nextIndex,
+                            headers: sheet.rows[nextIndex] ?? [],
+                            columns: Object.fromEntries(Object.keys(current.columns).map((key) => [key, null])),
+                          }));
+                        }}
+                      >
+                        {sheet.rows.slice(0, 50).map((row, index) => (
+                          <option key={index} value={index}>
+                            Fila {index + 1}: {row.slice(0, 3).filter(Boolean).join(' · ').slice(0, 70) || '(sin texto)'}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                   </div>
+                  {mapping.kind !== 'unknown' && (
+                    <div className="smart-import-field-map">
+                      {fieldLabels.map(([field, label]) => (
+                        <label className="field" key={field}>
+                          <span>{label}</span>
+                          <select
+                            value={mapping.columns[field] ?? ''}
+                            onChange={(e) => {
+                              const value = e.target.value === '' ? null : Number(e.target.value);
+                              updateSmartImportMapping(mapping.sheet_index, (current) => ({
+                                ...current,
+                                columns: { ...current.columns, [field]: value },
+                              }));
+                            }}
+                          >
+                            <option value="">Sin asignar</option>
+                            {mapping.headers.map((header, index) => (
+                              <option key={index} value={index}>
+                                {header || `Columna ${index + 1}`}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ))}
+                    </div>
+                  )}
                   <div className="table-wrap">
                     <table className="data-table">
                       <thead>
@@ -1643,7 +1704,6 @@ export function App({
           </div>
         </div>
       )}
-
       {editingRecipe && (
         <div className="modal-backdrop" onClick={() => setEditingRecipe(null)}>
           <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
