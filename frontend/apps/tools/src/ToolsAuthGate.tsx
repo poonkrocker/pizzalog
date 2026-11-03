@@ -5,6 +5,16 @@ import { App } from './App';
 const API_URL = ((import.meta.env.VITE_API_URL as string | undefined) ?? 'https://api.pizzalog.net').replace(/\/+$/, '');
 const TOKEN_KEY = 'pizzalog_tools_session';
 
+function readSessionToken(): string | null {
+  try { return sessionStorage.getItem(TOKEN_KEY); } catch { return null; }
+}
+function writeSessionToken(token: string): void {
+  try { sessionStorage.setItem(TOKEN_KEY, token); } catch { /* Keep the current login in memory for this tab. */ }
+}
+function clearSessionToken(): void {
+  try { sessionStorage.removeItem(TOKEN_KEY); } catch { /* Storage may be disabled. */ }
+}
+
 type Account = { id: number; email: string; name: string; expires_at?: string | null };
 type ApiResponse<T> = { ok: boolean; data?: T; error?: string };
 
@@ -32,7 +42,7 @@ export function ToolsAuthGate() {
   useEffect(() => {
     // Elimina el cache local de la versión previa, que ya no es una fuente de datos.
     try { localStorage.removeItem('pizzalog_tools_workspace_v2'); } catch { /* storage may be disabled */ }
-    const saved = sessionStorage.getItem(TOKEN_KEY);
+    const saved = readSessionToken();
     if (!saved) {
       setLoading(false);
       return;
@@ -45,7 +55,7 @@ export function ToolsAuthGate() {
         setWorkspace(data.workspace ?? createInitialDemoWorkspace());
       })
       .catch(() => {
-        sessionStorage.removeItem(TOKEN_KEY);
+        clearSessionToken();
       })
       .finally(() => setLoading(false));
   }, []);
@@ -60,7 +70,7 @@ export function ToolsAuthGate() {
         body: JSON.stringify({ email, password }),
       });
       const data = await api<{ workspace: ToolsWorkspaceState | null }>('/tools/workspace', result.token);
-      sessionStorage.setItem(TOKEN_KEY, result.token);
+      writeSessionToken(result.token);
       setToken(result.token);
       setAccount(result.account);
       setWorkspace(data.workspace ?? createInitialDemoWorkspace());
@@ -72,7 +82,7 @@ export function ToolsAuthGate() {
   }
 
   function logout() {
-    sessionStorage.removeItem(TOKEN_KEY);
+    clearSessionToken();
     setToken(null);
     setAccount(null);
     setWorkspace(null);
