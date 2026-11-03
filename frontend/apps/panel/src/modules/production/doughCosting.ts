@@ -57,9 +57,17 @@ function buildCatalog(supplies: SupplyItem[]): CostCatalog {
   return { ingredients, purchase_prices, recipes: [] };
 }
 
-function supplyRef(profile: DoughProfile, key: keyof NonNullable<DoughProfile['ingredient_map']>): string {
+function supplyRef(
+  profile: DoughProfile,
+  key: keyof NonNullable<DoughProfile['ingredient_map']>,
+  supplies: SupplyItem[],
+  requiredDimension: Ingredient['base_dimension'],
+): string {
   const id = profile.ingredient_map?.[key];
-  return typeof id === 'number' && id > 0 ? `supply_${id}` : `missing_${key}`;
+  if (typeof id !== 'number' || id <= 0) return `missing_${key}`;
+  const supply = supplies.find((item) => item.id === id);
+  const unit = supply ? toEngineUnit(supply.unit) : null;
+  return unit && dimensionForUnit(unit) === requiredDimension ? `supply_${id}` : `missing_${key}`;
 }
 
 function makeCostEngineResult(
@@ -99,12 +107,14 @@ export function calculateDoughWithCostEngine(
     const saltGrams = flourKg * 50;
     const oilMl = safeUnits * 12;
     const components: RecipeComponent[] = [
-      { component_type: 'ingredient', ingredient_id: supplyRef(profile, 'chickpea_flour_id'), quantity: flourKg, unit: 'kg' },
-      { component_type: 'ingredient', ingredient_id: supplyRef(profile, 'salt_id'), quantity: saltGrams, unit: 'g' },
-      { component_type: 'ingredient', ingredient_id: supplyRef(profile, 'oil_id'), quantity: oilMl, unit: 'ml' },
+      { component_type: 'ingredient', ingredient_id: supplyRef(profile, 'chickpea_flour_id', supplies, 'mass'), quantity: flourKg, unit: 'kg' },
+      { component_type: 'ingredient', ingredient_id: supplyRef(profile, 'salt_id', supplies, 'mass'), quantity: saltGrams, unit: 'g' },
+      { component_type: 'ingredient', ingredient_id: supplyRef(profile, 'oil_id', supplies, 'volume'), quantity: oilMl, unit: 'ml' },
     ];
     const waterId = profile.ingredient_map?.water_id;
-    if (typeof waterId === 'number' && waterId > 0) {
+    const waterSupply = supplies.find((item) => item.id === waterId);
+    const waterUnit = waterSupply ? toEngineUnit(waterSupply.unit) : null;
+    if (typeof waterId === 'number' && waterId > 0 && waterUnit && dimensionForUnit(waterUnit) === 'volume') {
       components.push({ component_type: 'ingredient', ingredient_id: `supply_${waterId}`, quantity: waterLiters, unit: 'L' });
     }
     const result = makeCostEngineResult(profile, supplies, components, safeUnits, 'unit');
@@ -151,9 +161,9 @@ export function calculateDoughWithCostEngine(
   }
 
   const flours = [
-    { ingredient_id: supplyRef(profile, 'flour_white_id'), share_pct: profile.flour_white_pct },
-    { ingredient_id: supplyRef(profile, 'flour_integral_id'), share_pct: profile.flour_integral_pct },
-    { ingredient_id: supplyRef(profile, 'flour_semola_id'), share_pct: profile.flour_semola_pct },
+    { ingredient_id: supplyRef(profile, 'flour_white_id', supplies, 'mass'), share_pct: profile.flour_white_pct },
+    { ingredient_id: supplyRef(profile, 'flour_integral_id', supplies, 'mass'), share_pct: profile.flour_integral_pct },
+    { ingredient_id: supplyRef(profile, 'flour_semola_id', supplies, 'mass'), share_pct: profile.flour_semola_pct },
   ];
   const spec = {
     unit_weight_g: profile.unit_weight_grams,
@@ -166,7 +176,7 @@ export function calculateDoughWithCostEngine(
         flour_pct: profile.biga_pct,
         water_pct: profile.biga_water_pct,
         yeast_pct: profile.biga_yeast_pct,
-        yeast_ingredient_id: supplyRef(profile, 'biga_yeast_id'),
+        yeast_ingredient_id: supplyRef(profile, 'biga_yeast_id', supplies, 'mass'),
       },
     } : {}),
     ...(profile.poolish_pct > 0 ? {
@@ -174,20 +184,19 @@ export function calculateDoughWithCostEngine(
         flour_pct: profile.poolish_pct,
         water_pct: profile.poolish_water_pct,
         yeast_pct: profile.poolish_yeast_pct,
-        yeast_ingredient_id: supplyRef(profile, 'poolish_yeast_id'),
+        yeast_ingredient_id: supplyRef(profile, 'poolish_yeast_id', supplies, 'mass'),
       },
     } : {}),
     direct_yeast_pct: profile.direct_yeast_pct,
-    yeast_ingredient_id: supplyRef(profile, 'direct_yeast_id'),
+    yeast_ingredient_id: supplyRef(profile, 'direct_yeast_id', supplies, 'mass'),
     salt_pct: profile.salt_pct,
-    salt_ingredient_id: supplyRef(profile, 'salt_id'),
+    salt_ingredient_id: supplyRef(profile, 'salt_id', supplies, 'mass'),
     sugar_pct: profile.sugar_pct,
-    sugar_ingredient_id: supplyRef(profile, 'sugar_id'),
+    sugar_ingredient_id: supplyRef(profile, 'sugar_id', supplies, 'mass'),
     oil_pct: profile.oil_pct,
-    oil_ingredient_id: supplyRef(profile, 'oil_id'),
+    oil_ingredient_id: supplyRef(profile, 'oil_id', supplies, 'mass'),
   };
   const expanded = expandBakersDoughSpec(spec);
-  const result = makeCostEngineResult(profile, supplies, [], expanded.yieldQuantityG, 'g');
   // CostEngine expands bakers_dough specs on Recipe; attach the exact spec used above.
   const catalog = buildCatalog(supplies);
   const engineRecipe: Recipe = {
@@ -246,7 +255,6 @@ export function calculateDoughWithCostEngine(
     ...(sugarG > 0 ? [`• Azúcar: ${sugarG.toFixed(1)} g`] : []),
     ...(oilG > 0 ? [`• Aceite: ${oilG.toFixed(1)} g`] : []),
   ].join('\n');
-  void result;
   return {
     type: 'pizza',
     total_weight_kg: totalWeightKg,
