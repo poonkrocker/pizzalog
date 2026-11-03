@@ -14,15 +14,19 @@ class ToolsAuthController
         $email = strtolower(trim((string) $req->input('email', '')));
         $password = (string) $req->input('password', '');
 
-        if ($email === '' || $password === '' || strlen($email) > 190) {
-            Response::error('Ingresá email y contraseña', 422);
+        if ($email === '' || $password === '' || strlen($email) > 190 || strlen($password) > 1024) {
+            Response::error('Ingresá un email válido y una contraseña de hasta 1024 caracteres', 422);
         }
 
         $pdo = Database::pdo();
         $jwtConfig = Config::get('jwt', []);
-        $emailHash = hash_hmac('sha256', $email, (string)($jwtConfig['secret'] ?? ''));
+        $jwtSecret = (string)($jwtConfig['secret'] ?? '');
+        if (strlen($jwtSecret) < 32 || str_contains($jwtSecret, 'CAMBIAR')) {
+            Response::error('La autenticación de Pizzalog Tools no está configurada con una clave segura en el servidor', 503);
+        }
+        $emailHash = hash_hmac('sha256', $email, $jwtSecret);
         $clientIp = (string)($_SERVER['REMOTE_ADDR'] ?? 'unknown');
-        $ipHash = hash_hmac('sha256', $clientIp, (string)($jwtConfig['secret'] ?? ''));
+        $ipHash = hash_hmac('sha256', $clientIp, $jwtSecret);
         $pdo->prepare(
             'DELETE FROM tools_login_attempts
               WHERE window_started_at < NOW() - INTERVAL 1 DAY'
@@ -77,8 +81,8 @@ class ToolsAuthController
                 'sub' => (int) $account['id'],
                 'aud' => 'pizzalog-tools',
             ],
-            (string) ($jwt['secret'] ?? ''),
-            min((int) ($jwt['ttl'] ?? 28800), 43200),
+            $jwtSecret,
+            max(300, min((int) ($jwt['ttl'] ?? 28800), 43200)),
             (string) ($jwt['issuer'] ?? 'pizzalog')
         );
 
