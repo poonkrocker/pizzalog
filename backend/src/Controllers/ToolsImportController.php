@@ -42,9 +42,17 @@ class ToolsImportController
             }
         }
 
-        $inputJson = json_encode($sheets, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
-        if ($inputJson === false || strlen($inputJson) > 4 * 1024 * 1024) {
-            Response::error('El contenido importado supera el límite de 4 MB', 413);
+        // DeepSeek solo necesita una muestra acotada para identificar encabezados y columnas.
+        // El resto de las filas permanece en el navegador y nunca se envía al proveedor de IA.
+        $aiSample = array_map(static function(array $sheet): array {
+            return [
+                'name' => substr((string)($sheet['name'] ?? 'Hoja'), 0, 80),
+                'rows' => array_slice($sheet['rows'], 0, 20),
+            ];
+        }, $sheets);
+        $inputJson = json_encode($aiSample, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+        if ($inputJson === false || strlen($inputJson) > 512 * 1024) {
+            Response::error('La muestra de encabezados supera el límite de 512 KB', 413);
         }
 
         $accountId = (int) $req->auth['tools_account_id'];
