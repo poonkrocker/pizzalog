@@ -266,7 +266,7 @@ export function AnalyticsDetailsPage() {
       </div>
       <div style={card}>
         <h3 style={{marginTop:0}}>Rentabilidad por producto</h3><p style={muted}>Estimación con el costo actual del catálogo; no representa necesariamente el costo histórico de cada venta.</p>
-        {margins.slice(0,10).map(p=><div key={p.product_id} style={{display:'flex',justifyContent:'space-between',gap:'.75rem',padding:'.5rem 0',borderBottom:'1px solid #eee'}}><div><strong>{p.name}</strong><div style={muted}>{p.units} u. · Venta {formatARS(p.revenue)}</div></div><div style={{textAlign:'right'}}><strong>{p.has_cost ? formatARS(p.profit) : 'Costo desactualizado o faltante'}</strong><div style={muted}>{p.has_cost && p.margin_pct !== null ? `Margen ${p.margin_pct}%` : 'No comparable'}</div></div></div>)}
+        {margins.slice(0,10).map(p=><div key={p.product_id} style={{display:'flex',justifyContent:'space-between',gap:'.75rem',padding:'.5rem 0',borderBottom:'1px solid #eee'}}><div><strong>{p.name}</strong><div style={muted}>{p.units} u. · Venta {formatARS(p.revenue)}</div></div><div style={{textAlign:'right'}}><strong>{p.has_cost && p.profit !== null ? formatARS(p.profit) : 'Costo desactualizado o faltante'}</strong><div style={muted}>{p.has_cost && p.margin_pct !== null ? `Margen ${p.margin_pct}%` : 'No comparable'}</div></div></div>)}
       </div>
     </div>
     <div style={grid}>
