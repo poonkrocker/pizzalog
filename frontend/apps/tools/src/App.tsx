@@ -1683,12 +1683,12 @@ export function App({
                   <div className="table-wrap">
                     <table className="data-table">
                       <thead>
-                        <tr>{mapping.headers.slice(0, 8).map((header, index) => <th key={index}>{header || `Col. ${index + 1}`}</th>)}</tr>
+                        <tr>{mapping.headers.slice(0, 12).map((header, index) => <th key={index}>{header || `Col. ${index + 1}`}</th>)}</tr>
                       </thead>
                       <tbody>
                         {previewRows.map((row, rowIndex) => (
                           <tr key={rowIndex}>
-                            {mapping.headers.slice(0, 8).map((_, columnIndex) => <td key={columnIndex}>{row[columnIndex] ?? ''}</td>)}
+                            {mapping.headers.slice(0, 12).map((_, columnIndex) => <td key={columnIndex}>{row[columnIndex] ?? ''}</td>)}
                           </tr>
                         ))}
                       </tbody>
