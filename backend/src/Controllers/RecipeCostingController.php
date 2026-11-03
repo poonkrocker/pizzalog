@@ -242,6 +242,16 @@ class RecipeCostingController
         $price=max(0,(float)($b['price']??0)); $target=max(1,min(100,(float)($b['target_food_cost_pct']??30)));
         $linked=!empty($b['linked_product_id'])?(int)$b['linked_product_id']:null;
         $components=is_array($b['components']??null)?$b['components']:[];
+        $costByProduct = [];
+        foreach (is_array($b['cost_snapshots'] ?? null) ? $b['cost_snapshots'] : [] as $snapshot) {
+            if (!is_array($snapshot)) continue;
+            $productId = (int)($snapshot['linked_product_id'] ?? 0);
+            $unitCost = $snapshot['unit_cost'] ?? null;
+            if ($productId <= 0 || !is_numeric($unitCost) || !is_finite((float)$unitCost) || (float)$unitCost < 0) {
+                Response::error('El snapshot de costo enviado por Cost Engine no es válido.', 422);
+            }
+            $costByProduct[$productId] = round((float)$unitCost, 2);
+        }
         if($name===''){Response::error('El nombre de la receta es obligatorio.',422);return;}
         if(!$components){Response::error('Agregá al menos un ingrediente o componente.',422);return;}
         if($type==='subrecipe'){$linked=null;$price=0;}
@@ -299,11 +309,19 @@ class RecipeCostingController
                 FROM recipe_studio_recipes WHERE business_id=? AND is_active=1 AND recipe_type=\'product\' AND linked_product_id IS NOT NULL');
             $linkedRecipes->execute([$bid]);
             $updateProduct = $pdo->prepare('UPDATE products SET name=?, price=? WHERE id=? AND business_id=?');
-            foreach ($linkedRecipes->fetchAll(\PDO::FETCH_ASSOC) as $linkedRow) {
+            $updateProductWithCost = $pdo->prepare('UPDATE products SET name=?, price=?, cost=? WHERE id=? AND business_id=?');
+            foreach ($linkedRecipes->fetchAll(\\PDO::FETCH_ASSOC) as $linkedRow) {
                 $linkedProduct = (int)$linkedRow['linked_product_id'];
                 $linkedYield = max(0.0001, (float)$linkedRow['yield_quantity']);
-                // El backend sincroniza la proyección de ingredientes, pero no recalcula costos.
-                $updateProduct->execute([$linkedRow['name'], (float)$linkedRow['price'], $linkedProduct, $bid]);
+                if (array_key_exists($linkedProduct, $costByProduct)) {
+                    $updateProductWithCost->execute([
+                        $linkedRow['name'], (float)$linkedRow['price'], $costByProduct[$linkedProduct], $linkedProduct, $bid,
+                    ]);
+                } else {
+                    // Sin resultado completo no se reemplaza el costo previo por cero ni por una estimación parcial.
+                    $updateProduct->execute([$linkedRow['name'], (float)$linkedRow['price'], $linkedProduct, $bid]);
+                }
+                // Proyección operativa de ingredientes; no realiza cálculos de costo.
                 $this->syncLinkedProductIngredients($pdo, $bid, $linkedProduct, (int)$linkedRow['id'], $linkedYield);
             }
             $pdo->commit();
