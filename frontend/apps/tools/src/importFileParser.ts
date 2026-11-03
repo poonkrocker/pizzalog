@@ -60,7 +60,8 @@ function xmlDocument(source: string, name: string): XMLDocument {
 }
 
 async function inflateRaw(data: Uint8Array): Promise<Uint8Array> {
-  const stream = new Blob([data]).stream().pipeThrough(
+  const bytes = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
+  const stream = new Blob([bytes]).stream().pipeThrough(
     new DecompressionStream('deflate-raw' as CompressionFormat)
   );
   return new Uint8Array(await new Response(stream).arrayBuffer());
