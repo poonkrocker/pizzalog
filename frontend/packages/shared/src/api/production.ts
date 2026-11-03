@@ -17,11 +17,6 @@ export function productionApi(client: ApiClient) {
       client.put<{ profile: DoughProfile }>(`/production/dough-profiles/${id}`, body),
     deleteDoughProfile: (id: number) =>
       client.delete<{ deleted: boolean }>(`/production/dough-profiles/${id}`),
-    doughCalculate: (body: DoughCalculateParams) =>
-      client.post<{ profile: DoughProfile; units: number; batches: number; calculation: DoughCalculation }>(
-        '/production/dough-calculate',
-        body,
-      ),
     recipeStudio: () => client.get<RecipeStudioResponse>('/production/recipe-studio'),
     importLegacyRecipes: () => client.post<{ success: boolean; imported_count: number }>('/production/recipe-studio/import-legacy', {}),
     saveStudioRecipe: (body: SaveStudioRecipeInput) =>
