@@ -64,14 +64,7 @@ class ToolsImportController
         $deepseek = Config::get('deepseek', []);
         $apiKey = trim((string) ($deepseek['api_key'] ?? ''));
         if ($apiKey === '') {
-            // El mapeo local permite importar formatos reconocibles sin depender de un proveedor de IA.
-            Response::ok([
-                'sheets' => $this->buildLocalMappings($sheets),
-                'ai_previews_remaining_today' => 0,
-                'note' => 'Mapeo automático local: no se envió información a ningún servicio externo.',
-                'mapping_mode' => 'local',
-            ]);
-            return;
+            Response::error('DeepSeek no está configurado en el servidor. Agregá DEEPSEEK_API_KEY a la configuración local para usar el importador inteligente.', 503);
         }
 
         $accountId = (int) $req->auth['tools_account_id'];
