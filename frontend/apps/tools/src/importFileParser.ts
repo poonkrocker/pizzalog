@@ -4,10 +4,10 @@ export interface ParsedImportSheet {
   warnings?: string[];
 }
 
-const MAX_FILE_BYTES = 8 * 1024 * 1024;
-const MAX_SHEETS = 5;
-const MAX_ROWS = 500;
-const MAX_COLUMNS = 25;
+const MAX_FILE_BYTES = 20 * 1024 * 1024;
+const MAX_SHEETS = 30;
+const MAX_ROWS = 10_000;
+const MAX_COLUMNS = 200;
 
 function detectDelimiter(line: string): string {
   const candidates = [',', ';', '\t'];
@@ -67,8 +67,9 @@ function parseCsv(text: string): string[][] {
   if (row.some((value) => value.trim() !== '')) rows.push(row);
 
   if (rows.some((values) => values.length > MAX_COLUMNS)) {
-    throw new Error('El CSV supera el límite de 25 columnas; no se recortaron datos.');
+    throw new Error(`El CSV supera el límite de ${MAX_COLUMNS} columnas; no se recortaron datos.`);
   }
+  if (rows.length > MAX_ROWS) throw new Error(`El CSV supera el límite de ${MAX_ROWS} filas.`);
   return rows.map((values) => values.map((value) => value.trim()));
 }
 
@@ -93,9 +94,9 @@ async function inflateRaw(data: Uint8Array): Promise<Uint8Array> {
       const { done, value } = await reader.read();
       if (done) break;
       total += value.byteLength;
-      if (total > 8 * 1024 * 1024) {
+      if (total > 16 * 1024 * 1024) {
         await reader.cancel();
-        throw new Error('Una entrada interna del XLSX supera 8 MB descomprimidos');
+        throw new Error('Una entrada interna del XLSX supera 16 MB descomprimidos');
       }
       chunks.push(value);
     }
@@ -124,7 +125,7 @@ async function unzip(buffer: ArrayBuffer): Promise<Map<string, Uint8Array>> {
   if (eocd < 0) throw new Error('El archivo no parece ser un XLSX válido');
 
   const entryCount = view.getUint16(eocd + 10, true);
-  if (entryCount > 2000) throw new Error('El XLSX contiene demasiadas entradas internas');
+  if (entryCount > 4000) throw new Error('El XLSX contiene demasiadas entradas internas');
   const centralOffset = view.getUint32(eocd + 16, true);
   const decoder = new TextDecoder();
   const files = new Map<string, Uint8Array>();
@@ -139,8 +140,8 @@ async function unzip(buffer: ArrayBuffer): Promise<Map<string, Uint8Array>> {
     const compressedSize = view.getUint32(offset + 20, true);
     const uncompressedSize = view.getUint32(offset + 24, true);
     totalUncompressed += uncompressedSize;
-    if (uncompressedSize > 8 * 1024 * 1024 || totalUncompressed > 32 * 1024 * 1024) {
-      throw new Error('El XLSX supera el límite de contenido descomprimido');
+    if (uncompressedSize > 16 * 1024 * 1024 || totalUncompressed > 128 * 1024 * 1024) {
+      throw new Error('El XLSX supera el límite seguro de contenido descomprimido (128 MB)');
     }
     const nameLength = view.getUint16(offset + 28, true);
     const extraLength = view.getUint16(offset + 30, true);
@@ -213,7 +214,7 @@ async function parseXlsx(buffer: ArrayBuffer): Promise<ParsedImportSheet[]> {
   }
 
   const allSheetNodes = Array.from(workbook.getElementsByTagNameNS('*', 'sheet'));
-  if (allSheetNodes.length > MAX_SHEETS) throw new Error('El XLSX supera el límite de 5 hojas; no se omitieron hojas automáticamente.');
+  if (allSheetNodes.length > MAX_SHEETS) throw new Error(`El XLSX supera el límite seguro de ${MAX_SHEETS} hojas; no se omitieron hojas automáticamente.`);
   const sheetNodes = allSheetNodes;
   const sheets: ParsedImportSheet[] = [];
   let totalRows = 0;
@@ -236,18 +237,21 @@ async function parseXlsx(buffer: ArrayBuffer): Promise<ParsedImportSheet[]> {
       for (const cell of Array.from(rowNode.getElementsByTagNameNS('*', 'c'))) {
         const index = columnIndex(cell.getAttribute('r') ?? '');
         if (index < 0) continue;
-        if (index >= MAX_COLUMNS) throw new Error('El XLSX supera el límite de 25 columnas; no se recortaron datos.');
         const type = cell.getAttribute('t');
-        if (cell.getElementsByTagNameNS('*', 'f').length > 0) hasFormulaCells = true;
+        const hasFormula = cell.getElementsByTagNameNS('*', 'f').length > 0;
         const valueNode = cell.getElementsByTagNameNS('*', 'v')[0];
+        const inlineText = type === 'inlineStr' ? elementText(cell, 't') : '';
+        if (!hasFormula && !valueNode?.textContent && !inlineText) continue;
+        if (index >= MAX_COLUMNS) throw new Error(`El XLSX supera el límite seguro de ${MAX_COLUMNS} columnas; no se recortaron datos.`);
+        if (hasFormula) hasFormulaCells = true;
         let value = valueNode?.textContent ?? '';
         if (type === 's' && value !== '') value = sharedStrings[Number(value)] ?? '';
-        else if (type === 'inlineStr') value = elementText(cell, 't');
+        else if (type === 'inlineStr') value = inlineText;
         if (type === 'b') value = value === '1' ? 'TRUE' : 'FALSE';
         values[index] = value;
       }
       if (values.some((value) => (value ?? '').trim() !== '')) {
-        if (totalRows >= MAX_ROWS) throw new Error('El XLSX supera el límite de 500 filas; no se truncó información.');
+        if (totalRows >= MAX_ROWS) throw new Error(`El XLSX supera el límite seguro de ${MAX_ROWS} filas; no se truncó información.`);
         rows.push(Array.from({ length: values.length }, (_, index) => (values[index] ?? '').trim()));
         totalRows += 1;
       }
@@ -271,7 +275,7 @@ export async function parseImportFile(file: File): Promise<ParsedImportSheet[]> 
     if (sample.some((byte) => byte === 0)) throw new Error('El archivo CSV parece contener datos binarios');
     const csvText = (await file.text()).replace(/^\\uFEFF/, '');
     const rows = parseCsv(csvText);
-    if (rows.length > MAX_ROWS) throw new Error('El CSV supera el límite de 500 filas');
+    if (rows.length > MAX_ROWS) throw new Error(`El CSV supera el límite de ${MAX_ROWS} filas`);
     return [{ name: file.name, rows }];
   }
   if (extension === 'xlsx') {
