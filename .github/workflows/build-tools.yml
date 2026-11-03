@@ -45,6 +45,8 @@ jobs:
 
       - name: Build Pizzalog Tools
         working-directory: frontend
+        env:
+          VITE_TOOLS_ENV: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
         run: pnpm --filter @pizzalog/tools build
 
       - name: Publish compiled tools to tools/
