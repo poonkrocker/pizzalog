@@ -1,9 +1,9 @@
 <?php
-namespace Pizzalog\\Controllers;
+namespace Pizzalog\Controllers;
 
-use Pizzalog\\Core\\Database;
-use Pizzalog\\Core\\Request;
-use Pizzalog\\Core\\Response;
+use Pizzalog\Core\Database;
+use Pizzalog\Core\Request;
+use Pizzalog\Core\Response;
 
 class ToolsAdminController
 {
