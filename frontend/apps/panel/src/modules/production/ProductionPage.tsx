@@ -873,7 +873,7 @@ export function ProductionPage() {
                                           </div>
                                         </div>
                                         <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#1e293b' }}>
-                                          {formatARS(ing.total_cost)}
+                                          {ing.total_cost !== null ? formatARS(ing.total_cost) : '—'}
                                         </div>
                                       </div>
                                     ))}
