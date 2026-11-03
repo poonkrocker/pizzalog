@@ -82,6 +82,8 @@ export function App({
     sheets: ParsedImportSheet[];
     mappings: ImportSheetMapping[];
     remaining: number;
+    note: string;
+    mappingMode: 'local' | 'ai';
   } | null>(null);
 
   // Estado del Constructor Visual Interactivo (Modal)
@@ -393,7 +395,7 @@ export function App({
       const payload = (await response.json()) as {
         ok?: boolean;
         error?: string;
-        data?: { sheets: ImportSheetMapping[]; ai_previews_remaining_today: number };
+        data?: { sheets: ImportSheetMapping[]; ai_previews_remaining_today: number; note?: string; mapping_mode?: 'local' | 'ai' };
       };
       if (!response.ok || !payload.ok || !payload.data) {
         throw new Error(payload.error ?? 'No se pudo analizar el archivo');
@@ -403,6 +405,8 @@ export function App({
         sheets,
         mappings: payload.data.sheets,
         remaining: payload.data.ai_previews_remaining_today,
+        note: payload.data.note ?? '',
+        mappingMode: payload.data.mapping_mode === 'local' ? 'local' : 'ai',
       });
     } catch (err) {
       setImportError(err instanceof Error ? err.message : 'Error al importar la planilla');
@@ -1589,12 +1593,14 @@ export function App({
             <div className="modal-header">
               <div>
                 <h3>Revisar importación inteligente</h3>
-                <small>{smartImportPreview.fileName} · {smartImportPreview.remaining} previsualizaciones con IA restantes hoy</small>
+                <small>{smartImportPreview.fileName} · {smartImportPreview.mappingMode === 'local' ? 'mapeo local, sin IA' : `${smartImportPreview.remaining} previsualizaciones con IA restantes hoy`}</small>
               </div>
               <button type="button" className="btn" onClick={() => setSmartImportPreview(null)}>Cerrar</button>
             </div>
             <p className="smart-import-note">
-              Se envían a DeepSeek hasta 20 filas por hoja para proponer el mapeo de columnas. Revisá que esa muestra no incluya información sensible. Los valores no se modifican y nada se guarda hasta tu confirmación.
+              {smartImportPreview.mappingMode === 'local'
+                ? 'El mapeo se realizó localmente en el servidor. No se envió información a servicios externos. Revisá las columnas, unidades y advertencias; nada se guarda hasta tu confirmación.'
+                : 'Se envían a DeepSeek hasta 20 filas por hoja para proponer el mapeo de columnas. Revisá que esa muestra no incluya información sensible. Los valores no se modifican y nada se guarda hasta tu confirmación.'}
             </p>
             {smartImportPreview.mappings.map((mapping) => {
               const sheet = smartImportPreview.sheets[mapping.sheet_index];
