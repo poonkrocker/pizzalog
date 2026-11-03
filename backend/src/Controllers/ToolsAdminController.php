@@ -21,8 +21,8 @@ class ToolsAdminController
         if ($name === '' || strlen($name) > 120) {
             Response::error('El nombre es obligatorio (máximo 120 caracteres)', 422);
         }
-        if (strlen($password) < 12) {
-            Response::error('La contraseña inicial debe tener al menos 12 caracteres', 422);
+        if (strlen($password) < 12 || strlen($password) > 1024) {
+            Response::error('La contraseña inicial debe tener entre 12 y 1024 caracteres', 422);
         }
         if ($expiresAt !== null && $expiresAt !== '') {
             $date = \DateTimeImmutable::createFromFormat('Y-m-d H:i:s', (string) $expiresAt);
