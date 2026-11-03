@@ -50,6 +50,8 @@ $router->post('/tools/auth/login', [ToolsAuthController::class, 'login']);
 $router->get('/tools/auth/me', [ToolsAuthController::class, 'me'], [$toolsAuth]);
 $router->get('/tools/workspace', [ToolsWorkspaceController::class, 'show'], [$toolsAuth]);
 $router->put('/tools/workspace', [ToolsWorkspaceController::class, 'save'], [$toolsAuth]);
+$router->post('/tools/import/preview', [ToolsImportController::class, 'preview'], [$toolsAuth]);
+$router->post('/tools/admin/accounts', [ToolsAdminController::class, 'createAccount'], [$auth, $admin]);
 
 // --- Salud ------------------------------------------------------------
 $router->get('/', fn() => \Pizzalog\Core\Response::ok(['service' => 'pizzalog-api', 'status' => 'up']));
