@@ -223,7 +223,7 @@ export function applyImportMappings(
         const yieldPct = parseNumber(cell(row, mapping, 'yield_pct')) ?? 100;
         const compatiblePack = Boolean(packUnit && areUnitsCompatible(packUnit, ingredient.base_unit, ingredient));
         const compatibleCurrency = Boolean(currency && hasCurrencyRate(
-          currency, current.currency, current.catalog.exchange_rates, purchaseDate
+          currency, current.currency, current.catalog.exchange_rates, current.catalog.as_of_date
         ));
         if (price !== null && price > 0 && packQuantity !== null && packQuantity > 0 && packUnit && currency &&
             purchaseDate !== null && Number.isFinite(yieldPct) && yieldPct > 0 && yieldPct <= 100 &&
