@@ -52,22 +52,20 @@ class ToolsImportController
             'INSERT IGNORE INTO tools_ai_usage (account_id, usage_date, request_count)
              VALUES (?, CURDATE(), 0)'
         )->execute([$accountId]);
-        $pdo->prepare(
+        $quotaUpdate = $pdo->prepare(
             'UPDATE tools_ai_usage
                 SET request_count = request_count + 1
               WHERE account_id = ? AND usage_date = CURDATE() AND request_count < ?'
-        )->execute([$accountId, self::DAILY_AI_LIMIT]);
-        if ($pdo->query('SELECT 1')->fetchColumn() === false) {
-            Response::error('No se pudo validar el cupo de importación', 500);
+        );
+        $quotaUpdate->execute([$accountId, self::DAILY_AI_LIMIT]);
+        if ($quotaUpdate->rowCount() !== 1) {
+            Response::error('Alcanzaste el límite diario de 20 previsualizaciones con IA', 429);
         }
         $quota = $pdo->prepare(
             'SELECT request_count FROM tools_ai_usage WHERE account_id = ? AND usage_date = CURDATE()'
         );
         $quota->execute([$accountId]);
         $used = (int) $quota->fetchColumn();
-        if ($used > self::DAILY_AI_LIMIT || $used === 0) {
-            Response::error('Alcanzaste el límite diario de 20 previsualizaciones con IA', 429);
-        }
 
         $deepseek = Config::get('deepseek', []);
         $apiKey = (string) ($deepseek['api_key'] ?? '');
