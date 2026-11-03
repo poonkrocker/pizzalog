@@ -12,7 +12,11 @@ class ToolsAuth
             }
 
             $jwt = Config::get('jwt', []);
-            $payload = Jwt::decode($token, (string) ($jwt['secret'] ?? ''));
+            $secret = (string)($jwt['secret'] ?? '');
+            if (strlen($secret) < 32 || str_contains($secret, 'CAMBIAR')) {
+                Response::error('La autenticación de Pizzalog Tools no está configurada con una clave segura en el servidor', 503);
+            }
+            $payload = Jwt::decode($token, $secret);
             if (
                 $payload === null
                 || ($payload['iss'] ?? null) !== ($jwt['issuer'] ?? 'pizzalog')
