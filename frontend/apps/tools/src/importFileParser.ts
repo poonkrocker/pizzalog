@@ -257,16 +257,16 @@ function normalizeIngredientPriceRows(rows: string[][]): string[][] | null {
 
 function evaluateSafeArithmeticFormula(formula: string): string | null {
   const source = formula.trim().replace(/^=/, '');
-  if (!source || !/^[0-9+*/().\\s-]+$/.test(source)) return null;
+  if (!source || !/^[0-9+*/().\s-]+$/.test(source)) return null;
   let index = 0;
-  const skip = () => { while (/\\s/.test(source[index] ?? '')) index += 1; };
+  const skip = () => { while (/\s/.test(source[index] ?? '')) index += 1; };
   const number = (): number | null => {
     skip();
     const start = index;
     while (/[0-9.]/.test(source[index] ?? '')) index += 1;
     if (start === index) return null;
     const raw = source.slice(start, index);
-    if (!/^\\d+(?:\\.\\d+)?$/.test(raw)) return null;
+    if (!/^\d+(?:\.\d+)?$/.test(raw)) return null;
     const value = Number(raw);
     return Number.isFinite(value) ? value : null;
   };
