@@ -68,19 +68,26 @@ class ProductionController
         $flourIntegPct   = max(0, (float) ($b['flour_integral_pct'] ?? 0));
         $flourSemolaPct  = max(0, (float) ($b['flour_semola_pct'] ?? 0));
         $costPerKg       = max(0, (float) ($b['cost_per_kg'] ?? 932.30));
+        try {
+            $ingredientMap = $this->normalizeIngredientMap($pdo, $bid, $b['ingredient_map'] ?? null);
+        } catch (\\InvalidArgumentException $e) {
+            Response::error($e->getMessage(), 422);
+            return;
+        }
+        $ingredientMapJson = $ingredientMap !== null ? json_encode($ingredientMap, JSON_THROW_ON_ERROR) : null;
         $notes           = !empty($b['notes']) ? trim((string) $b['notes']) : null;
 
         $stmt = $pdo->prepare(
             'INSERT INTO dough_profiles 
              (business_id, name, unit_weight_grams, hydration_pct, biga_pct, biga_water_pct, biga_yeast_pct,
               poolish_pct, poolish_water_pct, poolish_yeast_pct, direct_yeast_pct, salt_pct, sugar_pct, oil_pct,
-              flour_white_pct, flour_integral_pct, flour_semola_pct, cost_per_kg, notes, is_active)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)'
+              flour_white_pct, flour_integral_pct, flour_semola_pct, cost_per_kg, ingredient_map, notes, is_active)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)'
         );
         $stmt->execute([
             $bid, $name, $unitWeightGrams, $hydrationPct, $bigaPct, $bigaWaterPct, $bigaYeastPct,
             $poolishPct, $poolishWaterPct, $poolishYeastPct, $directYeastPct, $saltPct, $sugarPct, $oilPct,
-            $flourWhitePct, $flourIntegPct, $flourSemolaPct, $costPerKg, $notes,
+            $flourWhitePct, $flourIntegPct, $flourSemolaPct, $costPerKg, $ingredientMapJson, $notes,
         ]);
 
         $newId = (int) $pdo->lastInsertId();
@@ -126,19 +133,26 @@ class ProductionController
         $flourIntegPct   = max(0, (float) ($b['flour_integral_pct'] ?? 0));
         $flourSemolaPct  = max(0, (float) ($b['flour_semola_pct'] ?? 0));
         $costPerKg       = max(0, (float) ($b['cost_per_kg'] ?? 932.30));
+        try {
+            $ingredientMap = $this->normalizeIngredientMap($pdo, $bid, $b['ingredient_map'] ?? null);
+        } catch (\\InvalidArgumentException $e) {
+            Response::error($e->getMessage(), 422);
+            return;
+        }
+        $ingredientMapJson = $ingredientMap !== null ? json_encode($ingredientMap, JSON_THROW_ON_ERROR) : null;
         $notes           = !empty($b['notes']) ? trim((string) $b['notes']) : null;
 
         $stmt = $pdo->prepare(
             'UPDATE dough_profiles 
              SET name = ?, unit_weight_grams = ?, hydration_pct = ?, biga_pct = ?, biga_water_pct = ?, biga_yeast_pct = ?,
                  poolish_pct = ?, poolish_water_pct = ?, poolish_yeast_pct = ?, direct_yeast_pct = ?, salt_pct = ?, sugar_pct = ?, oil_pct = ?,
-                 flour_white_pct = ?, flour_integral_pct = ?, flour_semola_pct = ?, cost_per_kg = ?, notes = ?
+                 flour_white_pct = ?, flour_integral_pct = ?, flour_semola_pct = ?, cost_per_kg = ?, ingredient_map = ?, notes = ?
              WHERE id = ? AND business_id = ?'
         );
         $stmt->execute([
             $name, $unitWeightGrams, $hydrationPct, $bigaPct, $bigaWaterPct, $bigaYeastPct,
             $poolishPct, $poolishWaterPct, $poolishYeastPct, $directYeastPct, $saltPct, $sugarPct, $oilPct,
-            $flourWhitePct, $flourIntegPct, $flourSemolaPct, $costPerKg, $notes,
+            $flourWhitePct, $flourIntegPct, $flourSemolaPct, $costPerKg, $ingredientMapJson, $notes,
             $id, $bid,
         ]);
 
@@ -169,57 +183,6 @@ class ProductionController
         Response::ok(['deleted' => true]);
     }
 
-    /**
-     * POST /production/dough-calculate
-     * Calcula la receta exacta de amasado según unidades y perfil de masa.
-     */
-    public function doughCalculate(Request $req): void
-    {
-        $bid = (int) $req->auth['business_id'];
-        $b = $req->body;
-
-        $profileId = !empty($b['profile_id']) ? (int) $b['profile_id'] : null;
-        $units     = max(1, (int) ($b['units'] ?? 100));
-        $batches   = max(1, (int) ($b['batches'] ?? 2));
-
-        $pdo = Database::pdo();
-        $this->ensureProfilesTable($pdo, $bid);
-
-        $profile = null;
-        if ($profileId) {
-            try {
-                $stmt = $pdo->prepare('SELECT * FROM dough_profiles WHERE id = ? AND business_id = ? AND is_active = 1');
-                $stmt->execute([$profileId, $bid]);
-                $r = $stmt->fetch();
-                if ($r) $profile = $this->formatProfile($r);
-            } catch (\Throwable $e) {}
-        }
-
-        if (!$profile) {
-            $stmt = $pdo->prepare('SELECT * FROM dough_profiles WHERE business_id = ? AND is_active = 1 ORDER BY id ASC LIMIT 1');
-            $stmt->execute([$bid]);
-            $r = $stmt->fetch();
-            if ($r) {
-                $profile = $this->formatProfile($r);
-            } else {
-                $defaults = $this->defaultProfiles($bid);
-                $profile = $defaults[0];
-            }
-        }
-
-        // Obtener costos actuales de insumos de masa
-        $costs = $this->getSupplyCosts($bid);
-
-        $calculation = $this->computeDough($profile, $units, $batches, $costs);
-
-        Response::ok([
-            'profile'     => $profile,
-            'units'       => $units,
-            'batches'     => $batches,
-            'calculation' => $calculation,
-        ]);
-    }
-
     private function ensureProfilesTable(\PDO $pdo, int $bid): void
     {
         $pdo->exec(
@@ -243,6 +206,7 @@ class ProductionController
                 flour_integral_pct   DECIMAL(5,2)    NOT NULL DEFAULT 12.17,
                 flour_semola_pct     DECIMAL(5,2)    NOT NULL DEFAULT 6.08,
                 cost_per_kg          DECIMAL(10,2)   NOT NULL DEFAULT 932.30,
+                ingredient_map       JSON            NULL,
                 notes                TEXT            NULL,
                 is_active            TINYINT(1)      NOT NULL DEFAULT 1,
                 created_at           TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -287,245 +251,6 @@ class ProductionController
                 ]);
             }
         }
-    }
-
-    private function computeDough(array $p, int $units, int $batches, array $costs): array
-    {
-        $isFaina = stripos($p['name'], 'fainá') !== false || stripos($p['name'], 'faina') !== false;
-
-        if ($isFaina) {
-            $chickpeaFlour = round($units * 0.185, 3);
-            $water         = round($chickpeaFlour * 2.25, 3);
-            $saltGrams     = round($chickpeaFlour * 50, 2);
-            $oilLiters     = round($units * 0.012, 3);
-            $totalWeightKg = round($chickpeaFlour + $water, 3);
-
-            $costFlour = $chickpeaFlour * ($costs['Harina de garbanzos'] ?? 3500.0);
-            $costSalt  = ($saltGrams / 1000) * ($costs['Sal'] ?? 650.0);
-            $costOil   = $oilLiters * ($costs['Aceite de oliva'] ?? 22500.0);
-            $totalCost = round($costFlour + $costSalt + $costOil, 2);
-
-            $whatsapp = "🥣 *RECETA FAINÁ - {$units} MOLDES*\n"
-                      . "──────────────────\n"
-                      . "• Harina de Garbanzo: {$chickpeaFlour} kg\n"
-                      . "• Agua: {$water} L\n"
-                      . "• Sal fina: {$saltGrams} g\n"
-                      . "• Aceite de oliva: " . ($oilLiters * 1000) . " cc\n"
-                      . "──────────────────\n"
-                      . "Batir enérgicamente sin grumos y reposar mínimo 4 horas.";
-
-            return [
-                'type'             => 'faina',
-                'total_weight_kg'  => $totalWeightKg,
-                'weight_per_unit_g'=> 185.0,
-                'units'            => $units,
-                'batches'          => $batches,
-                'total' => [
-                    'chickpea_flour_kg' => $chickpeaFlour,
-                    'water_liters'      => $water,
-                    'salt_grams'        => $saltGrams,
-                    'oil_liters'        => $oilLiters,
-                ],
-                'per_batch' => [
-                    'chickpea_flour_kg' => round($chickpeaFlour / $batches, 3),
-                    'water_liters'      => round($water / $batches, 3),
-                    'salt_grams'        => round($saltGrams / $batches, 2),
-                    'oil_liters'        => round($oilLiters / $batches, 3),
-                ],
-                'cost' => [
-                    'total'     => $totalCost,
-                    'per_unit'  => round($totalCost / $units, 2),
-                    'per_kg'    => $totalWeightKg > 0 ? round($totalCost / $totalWeightKg, 2) : 0,
-                ],
-                'whatsapp_text' => $whatsapp,
-            ];
-        }
-
-        // Fórmulas para masas con harina (Pizza, Molde, Focaccia, Detroit)
-        $unitGrams = (float) $p['unit_weight_grams'];
-        $hydrPct   = (float) $p['hydration_pct'];
-        $bigaPct   = (float) $p['biga_pct'];
-        $bigaWaterPct = (float) $p['biga_water_pct'];
-        $bigaYeastPct = (float) $p['biga_yeast_pct'];
-        $poolishPct   = (float) $p['poolish_pct'];
-        $poolishWaterPct = (float) $p['poolish_water_pct'];
-        $poolishYeastPct = (float) $p['poolish_yeast_pct'];
-        $directYeastPct  = (float) $p['direct_yeast_pct'];
-        $saltPct   = (float) $p['salt_pct'];
-        $sugarPct  = (float) $p['sugar_pct'];
-        $oilPct    = (float) $p['oil_pct'];
-
-        $flourWhitePct = (float) $p['flour_white_pct'];
-        $flourSemolaPct = (float) $p['flour_semola_pct'];
-        $flourIntegPct = (float) $p['flour_integral_pct'];
-
-        // Peso total de masa = unidades × peso unitario
-        $totalWeightKg = round(($units * $unitGrams) / 1000.0, 3);
-        $totalFlourKg  = round($totalWeightKg / (1.0 + ($hydrPct / 100.0)), 3);
-        $totalWaterKg  = round($totalFlourKg * ($hydrPct / 100.0), 3);
-
-        // Harinas segregadas
-        $flourWhiteKg  = round($totalFlourKg * ($flourWhitePct / 100.0), 3);
-        $flourSemolaKg = round($totalFlourKg * ($flourSemolaPct / 100.0), 3);
-        $flourIntegKg  = round($totalFlourKg * ($flourIntegPct / 100.0), 3);
-
-        // Biga
-        $bigaFlourKg = $bigaPct > 0 ? round($totalFlourKg * ($bigaPct / 100.0), 3) : 0.0;
-        $bigaWaterKg = $bigaFlourKg > 0 ? round($bigaFlourKg * ($bigaWaterPct / 100.0), 3) : 0.0;
-        $bigaYeastKg = $bigaFlourKg > 0 ? round($bigaFlourKg * ($bigaYeastPct / 100.0), 4) : 0.0;
-        $bigaTotalKg = round($bigaFlourKg + $bigaWaterKg + $bigaYeastKg, 3);
-
-        // Poolish
-        $poolishFlourKg = $poolishPct > 0 ? round($totalFlourKg * ($poolishPct / 100.0), 3) : 0.0;
-        $poolishWaterKg = $poolishFlourKg > 0 ? round($poolishFlourKg * ($poolishWaterPct / 100.0), 3) : 0.0;
-        $poolishYeastKg = $poolishFlourKg > 0 ? round($poolishFlourKg * ($poolishYeastPct / 100.0), 4) : 0.0;
-        $poolishTotalKg = round($poolishFlourKg + $poolishWaterKg + $poolishYeastKg, 3);
-
-        // Empaste / Masa Final
-        $finalFlourKg = round($totalFlourKg - $bigaFlourKg - $poolishFlourKg, 3);
-        $finalWaterKg = round($totalWaterKg - $bigaWaterKg - $poolishWaterKg, 3);
-        $directYeastKg= $directYeastPct > 0 ? round($totalFlourKg * ($directYeastPct / 100.0), 4) : 0.0;
-        $saltKg       = round($totalFlourKg * ($saltPct / 100.0), 3);
-        $sugarKg      = $sugarPct > 0 ? round($totalFlourKg * ($sugarPct / 100.0), 3) : 0.0;
-        $oilKg        = $oilPct > 0 ? round($totalFlourKg * ($oilPct / 100.0), 3) : 0.0;
-
-        // Costeo
-        $costFlourW = $flourWhiteKg * ($costs['Harina'] ?? 1500.0);
-        $costFlourS = $flourSemolaKg * ($costs['Sémola rimacinata'] ?? 1800.0);
-        $costFlourI = $flourIntegKg * ($costs['Harina integral'] ?? 1640.0);
-        $costYeast  = ($bigaYeastKg + $poolishYeastKg + $directYeastKg) * ($costs['Levadura'] ?? 10000.0);
-        $costSalt   = $saltKg * ($costs['Sal'] ?? 650.0);
-        $costSugar  = $sugarKg * ($costs['Azúcar'] ?? 1000.0);
-        $costOil    = $oilKg * ($costs['Aceite de oliva'] ?? 22500.0);
-
-        $totalCost = round($costFlourW + $costFlourS + $costFlourI + $costYeast + $costSalt + $costSugar + $costOil, 2);
-        $costPerKg = $totalWeightKg > 0 ? round($totalCost / $totalWeightKg, 2) : 0.0;
-        $costPerUnit = $units > 0 ? round($totalCost / $units, 2) : 0.0;
-
-        // Formato para WhatsApp
-        $waLines = [];
-        $waLines[] = "🍕 *AMASADO ARRABBIATA — {$units} BOLLOS ({$unitGrams}g)*";
-        $waLines[] = "Perfil: *{$p['name']}* (Hidr: {$hydrPct}%)";
-        $waLines[] = "──────────────────";
-
-        if ($bigaFlourKg > 0) {
-            $waLines[] = "🥣 *PASO 1: BIGA ({$bigaPct}%)*";
-            $waLines[] = "• Harina Biga: *{$bigaFlourKg} kg*";
-            $waLines[] = "• Agua Biga (50%): *{$bigaWaterKg} L*";
-            $waLines[] = "• Levadura Biga: *" . ($bigaYeastKg * 1000) . " g*";
-            $waLines[] = "• Peso total Biga: {$bigaTotalKg} kg";
-            $waLines[] = "──────────────────";
-        }
-
-        if ($poolishFlourKg > 0) {
-            $waLines[] = "🥣 *PASO 1: POOLISH ({$poolishPct}%)*";
-            $waLines[] = "• Harina Poolish: *{$poolishFlourKg} kg*";
-            $waLines[] = "• Agua Poolish: *{$poolishWaterKg} L*";
-            $waLines[] = "• Levadura: *" . ($poolishYeastKg * 1000) . " g*";
-            $waLines[] = "──────────────────";
-        }
-
-        if ($bigaFlourKg <= 0 && $poolishFlourKg <= 0) {
-            $waLines[] = "🥣 *AMASADO DIRECTO (SIN PREFERMENTO)*";
-            $waLines[] = "• Harina Total: *{$finalFlourKg} kg*";
-            if ($flourSemolaKg > 0) $waLines[] = "  ↳ Sémola: {$flourSemolaKg} kg";
-            if ($flourIntegKg > 0)  $waLines[] = "  ↳ Integral: {$flourIntegKg} kg";
-            $waLines[] = "• Agua Total ({$hydrPct}%): *{$finalWaterKg} L*";
-            $waLines[] = "• Levadura directa: *" . ($directYeastKg * 1000) . " g*";
-            $waLines[] = "• Sal fina ({$saltPct}%): *" . ($saltKg * 1000) . " g*";
-            if ($sugarKg > 0) $waLines[] = "• Azúcar: *" . ($sugarKg * 1000) . " g*";
-            if ($oilKg > 0)   $waLines[] = "• Aceite: *" . ($oilKg * 1000) . " cc*";
-        } else {
-            $waLines[] = "💧 *PASO 2: EMPASTE / MASA FINAL*";
-            $waLines[] = "• Harina restante: *{$finalFlourKg} kg*";
-            if ($flourSemolaKg > 0) $waLines[] = "  ↳ Sémola: {$flourSemolaKg} kg";
-            if ($flourIntegKg > 0)  $waLines[] = "  ↳ Integral: {$flourIntegKg} kg";
-            $waLines[] = "• Agua restante: *{$finalWaterKg} L*";
-            $waLines[] = "• Sal fina ({$saltPct}%): *" . ($saltKg * 1000) . " g*";
-            if ($directYeastKg > 0) $waLines[] = "• Levadura directa: *" . ($directYeastKg * 1000) . " g*";
-            if ($sugarKg > 0)       $waLines[] = "• Azúcar: *" . ($sugarKg * 1000) . " g*";
-            if ($oilKg > 0)         $waLines[] = "• Aceite: *" . ($oilKg * 1000) . " cc*";
-        }
-
-        if ($batches > 1) {
-            $waLines[] = "──────────────────";
-            $waLines[] = "⚖️ *DIVIDIDO EN {$batches} AMASADAS:*";
-            if ($bigaTotalKg > 0) {
-                $waLines[] = "• Biga p/ amasada: " . round($bigaTotalKg / $batches, 3) . " kg";
-            }
-            $waLines[] = "• Harina p/ amasada: " . round($finalFlourKg / $batches, 3) . " kg";
-            $waLines[] = "• Agua p/ amasada: " . round($finalWaterKg / $batches, 3) . " L";
-            $waLines[] = "• Sal p/ amasada: " . round(($saltKg * 1000) / $batches, 1) . " g";
-        }
-
-        $waLines[] = "──────────────────";
-        $waLines[] = "📦 Masa total: {$totalWeightKg} kg | Costo bollo: \${$costPerUnit}";
-
-        return [
-            'type'              => 'pizza',
-            'total_weight_kg'   => $totalWeightKg,
-            'total_flour_kg'    => $totalFlourKg,
-            'total_water_kg'    => $totalWaterKg,
-            'weight_per_unit_g' => $unitGrams,
-            'units'             => $units,
-            'batches'           => $batches,
-            'flour_blend' => [
-                'white_kg'    => $flourWhiteKg,
-                'semola_kg'   => $flourSemolaKg,
-                'integral_kg' => $flourIntegKg,
-            ],
-            'biga' => [
-                'active'     => $bigaFlourKg > 0,
-                'pct'        => $bigaPct,
-                'flour_kg'   => $bigaFlourKg,
-                'water_kg'   => $bigaWaterKg,
-                'yeast_g'    => round($bigaYeastKg * 1000, 1),
-                'total_kg'   => $bigaTotalKg,
-            ],
-            'poolish' => [
-                'active'     => $poolishFlourKg > 0,
-                'pct'        => $poolishPct,
-                'flour_kg'   => $poolishFlourKg,
-                'water_kg'   => $poolishWaterKg,
-                'yeast_g'    => round($poolishYeastKg * 1000, 1),
-                'total_kg'   => $poolishTotalKg,
-            ],
-            'empaste' => [
-                'flour_kg'   => $finalFlourKg,
-                'water_kg'   => $finalWaterKg,
-                'salt_g'     => round($saltKg * 1000, 1),
-                'direct_yeast_g' => round($directYeastKg * 1000, 1),
-                'sugar_g'    => round($sugarKg * 1000, 1),
-                'oil_cc'     => round($oilKg * 1000, 1),
-            ],
-            'per_batch' => [
-                'batches'    => $batches,
-                'flour_kg'   => round($finalFlourKg / $batches, 3),
-                'water_kg'   => round($finalWaterKg / $batches, 3),
-                'biga_kg'    => round($bigaTotalKg / $batches, 3),
-                'salt_g'     => round(($saltKg * 1000) / $batches, 1),
-            ],
-            'cost' => [
-                'total'     => $totalCost,
-                'per_kg'    => $costPerKg,
-                'per_unit'  => $costPerUnit,
-            ],
-            'whatsapp_text' => implode("\n", $waLines),
-        ];
-    }
-
-    private function getSupplyCosts(int $bid): array
-    {
-        $pdo = Database::pdo();
-        $costs = [];
-        try {
-            $stmt = $pdo->prepare('SELECT name, cost FROM supplies WHERE business_id = ?');
-            $stmt->execute([$bid]);
-            foreach ($stmt->fetchAll() as $r) {
-                $costs[$r['name']] = (float) $r['cost'];
-            }
-        } catch (\Throwable $e) {}
-        return $costs;
     }
 
     private function defaultProfiles(int $bid): array
@@ -710,6 +435,40 @@ class ProductionController
         ];
     }
 
+    private function normalizeIngredientMap(\\PDO $pdo, int $bid, mixed $raw): ?array
+    {
+        if ($raw === null) {
+            return null;
+        }
+        if (!is_array($raw)) {
+            throw new \\InvalidArgumentException('La asignación de insumos debe ser un objeto válido.');
+        }
+
+        $allowed = [
+            'flour_white_id', 'flour_integral_id', 'flour_semola_id',
+            'biga_yeast_id', 'poolish_yeast_id', 'direct_yeast_id',
+            'salt_id', 'sugar_id', 'oil_id', 'chickpea_flour_id', 'water_id',
+        ];
+        $check = $pdo->prepare('SELECT id FROM supplies WHERE id = ? AND business_id = ? AND is_active = 1');
+        $normalized = [];
+        foreach ($allowed as $key) {
+            $value = $raw[$key] ?? null;
+            if ($value === null || $value === '' || (int) $value === 0) {
+                $normalized[$key] = null;
+                continue;
+            }
+            if (!is_numeric($value) || (int) $value <= 0) {
+                throw new \\InvalidArgumentException('La asignación de insumos contiene un identificador inválido.');
+            }
+            $check->execute([(int) $value, $bid]);
+            if (!$check->fetchColumn()) {
+                throw new \\InvalidArgumentException('Uno de los insumos seleccionados no pertenece a este negocio o está inactivo.');
+            }
+            $normalized[$key] = (int) $value;
+        }
+        return $normalized;
+    }
+
     private function formatProfile(array $r): array
     {
         return [
@@ -732,6 +491,7 @@ class ProductionController
             'flour_integral_pct'=> (float) $r['flour_integral_pct'],
             'flour_semola_pct'  => (float) $r['flour_semola_pct'],
             'cost_per_kg'       => (float) $r['cost_per_kg'],
+            'ingredient_map'    => !empty($r['ingredient_map']) ? (json_decode((string) $r['ingredient_map'], true) ?: null) : null,
             'notes'             => $r['notes'],
         ];
     }
