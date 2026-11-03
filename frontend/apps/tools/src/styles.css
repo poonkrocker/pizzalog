@@ -445,3 +445,5 @@ table.kit-table select {
 }
 
 .notice-banner { border: 1px solid var(--line); background: var(--surface-alt); color: var(--text); border-radius: 8px; padding: 10px 12px; font-size: 12px; line-height: 1.5; }
+
+.tools-save-status { align-self: center; color: var(--muted); font-size: 11px; white-space: nowrap; }
