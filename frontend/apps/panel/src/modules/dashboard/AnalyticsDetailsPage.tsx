@@ -54,7 +54,7 @@ export function AnalyticsDetailsPage() {
   const summary = useQuery({ queryKey: ['analytics','details-summary',query], queryFn: () => api.analytics.summary(query).then(r => r.summary) });
   const previousSummary = useQuery({ queryKey: ['analytics','details-summary-previous',previous], queryFn: () => api.analytics.summary(previous).then(r => r.summary) });
   const categoryLeadersQ = useQuery({ queryKey: ['analytics','category-leaders',query], queryFn: () => api.analytics.categoryLeaders(query).then(r => r.leaders) });
-  const marginsQ = useQuery({ queryKey: ['analytics','details-margins',query], queryFn: () => api.analytics.productMargins(query).then(r => r.products as Array<{product_id:number;name:string;unit_cost:number;units:number;revenue:number;profit:number;margin_pct:number|null;has_cost:boolean}>) });
+  const marginsQ = useQuery({ queryKey: ['analytics','details-margins',query], queryFn: () => api.analytics.productMargins(query).then(r => r.products as Array<{product_id:number;name:string;unit_cost:number|null;units:number;revenue:number;profit:number|null;margin_pct:number|null;has_cost:boolean}>) });
   const combosQ = useQuery({ queryKey: ['analytics','details-combos',query], queryFn: () => api.analytics.winningCombinations(query) });
   const heatQ = useQuery({ queryKey: ['analytics','details-heatmap',query], queryFn: () => api.analytics.timeHeatmap(query).then(r => r.cells) });
   const weeklyPizzasQ = useQuery({ queryKey: ['analytics','weekly-pizzas',pizzaQuery], queryFn: () => api.analytics.weeklyPizzas(pizzaQuery) });
@@ -266,7 +266,7 @@ export function AnalyticsDetailsPage() {
       </div>
       <div style={card}>
         <h3 style={{marginTop:0}}>Rentabilidad por producto</h3><p style={muted}>Estimación con el costo actual del catálogo; no representa necesariamente el costo histórico de cada venta.</p>
-        {margins.slice(0,10).map(p=><div key={p.product_id} style={{display:'flex',justifyContent:'space-between',gap:'.75rem',padding:'.5rem 0',borderBottom:'1px solid #eee'}}><div><strong>{p.name}</strong><div style={muted}>{p.units} u. · Venta {formatARS(p.revenue)}</div></div><div style={{textAlign:'right'}}><strong>{p.has_cost ? formatARS(p.profit) : 'Costo faltante'}</strong><div style={muted}>{p.has_cost && p.margin_pct !== null ? `Margen ${p.margin_pct}%` : 'No comparable'}</div></div></div>)}
+        {margins.slice(0,10).map(p=><div key={p.product_id} style={{display:'flex',justifyContent:'space-between',gap:'.75rem',padding:'.5rem 0',borderBottom:'1px solid #eee'}}><div><strong>{p.name}</strong><div style={muted}>{p.units} u. · Venta {formatARS(p.revenue)}</div></div><div style={{textAlign:'right'}}><strong>{p.has_cost ? formatARS(p.profit) : 'Costo desactualizado o faltante'}</strong><div style={muted}>{p.has_cost && p.margin_pct !== null ? `Margen ${p.margin_pct}%` : 'No comparable'}</div></div></div>)}
       </div>
     </div>
     <div style={grid}>
