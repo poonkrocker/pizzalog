@@ -1012,9 +1012,12 @@ export function calculatePortfolioScenario(input: PortfolioScenarioInput): Portf
       ? item.selling_price
       : null;
     const simulatedCost = item.unit_cost * (1 + input.cost_delta_pct / 100);
-    const simulatedPrice = currentPrice === null
+    const proposedSimulatedPrice = currentPrice === null
       ? null
       : Math.round((currentPrice * (1 + input.price_delta_pct / 100)) / roundingIncrement) * roundingIncrement;
+    const simulatedPrice = proposedSimulatedPrice !== null && proposedSimulatedPrice > 0
+      ? proposedSimulatedPrice
+      : null;
 
     const currentScenario = calculatePricingScenario({
       unit_cost: item.unit_cost,
@@ -1044,9 +1047,9 @@ export function calculatePortfolioScenario(input: PortfolioScenarioInput): Portf
       current_price: currentPrice,
       simulated_price: simulatedPrice,
       current_food_cost_pct: currentScenario.food_cost_pct,
-      simulated_food_cost_pct: simulatedScenario.food_cost_pct,
-      current_margin: currentScenario.gross_profit === null ? null : Number(currentScenario.gross_profit),
-      simulated_margin: simulatedScenario.gross_profit === null ? null : Number(simulatedScenario.gross_profit),
+      simulated_food_cost_pct: simulatedPrice === null ? null : simulatedScenario.food_cost_pct,
+      current_margin: currentPrice === null || currentScenario.gross_profit === null ? null : Number(currentScenario.gross_profit),
+      simulated_margin: simulatedPrice === null || simulatedScenario.gross_profit === null ? null : Number(simulatedScenario.gross_profit),
     };
   });
 
