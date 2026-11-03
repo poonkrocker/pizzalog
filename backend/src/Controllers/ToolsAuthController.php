@@ -1,11 +1,11 @@
 <?php
-namespace Pizzalog\\Controllers;
+namespace Pizzalog\Controllers;
 
-use Pizzalog\\Core\\Config;
-use Pizzalog\\Core\\Database;
-use Pizzalog\\Core\\Jwt;
-use Pizzalog\\Core\\Request;
-use Pizzalog\\Core\\Response;
+use Pizzalog\Core\Config;
+use Pizzalog\Core\Database;
+use Pizzalog\Core\Jwt;
+use Pizzalog\Core\Request;
+use Pizzalog\Core\Response;
 
 class ToolsAuthController
 {
