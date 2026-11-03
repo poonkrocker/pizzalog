@@ -126,7 +126,12 @@ export function applyImportMappings(
   const pendingPrices: Array<{ name: string; price: PurchasePrice }> = [];
   const recipeRows = new Map<string, { name: string; type: Recipe['recipe_type']; yieldQuantity: number; yieldUnit: UnitCode; components: Recipe['components'] }>();
 
-  for (const mapping of mappings) {
+  const orderedMappings = [...mappings].sort((a, b) => {
+    const order = { ingredients: 0, purchase_prices: 1, recipes: 2, operating_expenses: 3, unknown: 4 };
+    return order[a.kind] - order[b.kind];
+  });
+
+  for (const mapping of orderedMappings) {
     const sheet = sheets[mapping.sheet_index];
     if (!sheet) continue;
     if (mapping.kind === 'unknown') {
@@ -173,7 +178,9 @@ export function applyImportMappings(
         const price = parseNumber(cell(row, mapping, 'purchase_price'));
         const packQuantity = parseNumber(cell(row, mapping, 'pack_quantity'));
         const packUnit = unitValue(cell(row, mapping, 'pack_unit'));
-        if (price !== null && price > 0 && packQuantity !== null && packQuantity > 0 && packUnit) {
+        const yieldPct = parseNumber(cell(row, mapping, 'yield_pct')) ?? 100;
+        if (price !== null && price > 0 && packQuantity !== null && packQuantity > 0 && packUnit &&
+            Number.isFinite(yieldPct) && yieldPct > 0 && yieldPct <= 100) {
           pendingPrices.push({
             name,
             price: {
@@ -182,7 +189,7 @@ export function applyImportMappings(
               currency: cell(row, mapping, 'currency') || current.currency,
               pack_quantity: packQuantity,
               pack_unit: packUnit,
-              yield_pct: parseNumber(cell(row, mapping, 'yield_pct')) ?? 100,
+              yield_pct: yieldPct,
               supplier: cell(row, mapping, 'supplier') || undefined,
             },
           });
@@ -202,6 +209,11 @@ export function applyImportMappings(
           warnings.push(`${mapping.name}, fila ${sourceRow}: no se pudo vincular el precio a un insumo con presentación válida.`);
           return;
         }
+        const yieldPct = parseNumber(cell(row, mapping, 'yield_pct')) ?? 100;
+        if (yieldPct <= 0 || yieldPct > 100) {
+          warnings.push(`${mapping.name}, fila ${sourceRow}: merma/rendimiento fuera de 0–100%; se omitió el precio.`);
+          return;
+        }
         pendingPrices.push({
           name,
           price: {
@@ -210,7 +222,7 @@ export function applyImportMappings(
             currency: cell(row, mapping, 'currency') || current.currency,
             pack_quantity: packQuantity,
             pack_unit: packUnit,
-            yield_pct: parseNumber(cell(row, mapping, 'yield_pct')) ?? 100,
+            yield_pct: yieldPct,
             supplier: cell(row, mapping, 'supplier') || undefined,
           },
         });
