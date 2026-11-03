@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
-import type { DoughProfile, DoughProfileInput } from '@pizzalog/shared';
+import { useQuery } from '@tanstack/react-query';
+import type { DoughIngredientMap, DoughProfile, DoughProfileInput } from '@pizzalog/shared';
 import { Button, Field, Input, Modal, Select, Textarea } from '@/ui';
 import { useCreateDoughProfile, useDeleteDoughProfile, useUpdateDoughProfile } from './hooks';
+import { useApi } from '@/lib/auth';
 
 export function DoughProfileModal({
   open,
@@ -15,6 +17,9 @@ export function DoughProfileModal({
   onSaved?: (saved: DoughProfile) => void;
 }) {
   const isEditing = Boolean(profile);
+  const api = useApi();
+  const suppliesQuery = useQuery({ queryKey: ['production', 'recipe-studio'], queryFn: () => api.production.recipeStudio() });
+  const supplies = suppliesQuery.data?.supplies ?? [];
   const createMutation = useCreateDoughProfile();
   const updateMutation = useUpdateDoughProfile();
   const deleteMutation = useDeleteDoughProfile();
@@ -44,6 +49,7 @@ export function DoughProfileModal({
   const [flourIntegralPct, setFlourIntegralPct] = useState<number>(12.17);
 
   const [costPerKg, setCostPerKg] = useState<number>(932.3);
+  const [ingredientMap, setIngredientMap] = useState<DoughIngredientMap>({});
   const [notes, setNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -79,6 +85,7 @@ export function DoughProfileModal({
       setFlourIntegralPct(profile.flour_integral_pct);
 
       setCostPerKg(profile.cost_per_kg);
+      setIngredientMap(profile.ingredient_map ?? {});
       setNotes(profile.notes ?? '');
     } else {
       // Defaults para nueva masa (directo por defecto o editable)
@@ -100,6 +107,7 @@ export function DoughProfileModal({
       setFlourSemolaPct(0);
       setFlourIntegralPct(0);
       setCostPerKg(920);
+      setIngredientMap({});
       setNotes('');
     }
     setError(null);
@@ -138,6 +146,7 @@ export function DoughProfileModal({
       flour_integral_pct: Number(flourIntegralPct),
       flour_semola_pct: Number(flourSemolaPct),
       cost_per_kg: Number(costPerKg) || 932.3,
+      ingredient_map: ingredientMap,
       notes: notes.trim() || null,
     };
 
@@ -428,6 +437,57 @@ export function DoughProfileModal({
               />
             </Field>
           </div>
+        </div>
+
+        <div style={{ background: '#f8fafc', padding: '0.85rem 1rem', borderRadius: 6, border: '1px solid #e2e8f0' }}>
+          <div style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: '.35rem', color: '#1e293b' }}>
+            Insumos vinculados al Cost Engine
+          </div>
+          <p style={{ margin: '0 0 .75rem', color: '#64748b', fontSize: '.8rem' }}>
+            Asigná los insumos reales del catálogo. Si falta una asignación o un precio válido, el cálculo de costo se mostrará incompleto; no se usarán precios estimados.
+          </p>
+          {suppliesQuery.isLoading ? <div style={{ color: '#64748b', fontSize: '.82rem' }}>Cargando insumos...</div> : null}
+          {(() => {
+            const isFaina = /fain[aá]/i.test(name);
+            const fields: Array<{ key: keyof DoughIngredientMap; label: string }> = isFaina
+              ? [
+                  { key: 'chickpea_flour_id', label: 'Harina de garbanzos' },
+                  { key: 'salt_id', label: 'Sal' },
+                  { key: 'oil_id', label: 'Aceite (precio por volumen)' },
+                  { key: 'water_id', label: 'Agua (opcional)' },
+                ]
+              : [
+                  { key: 'flour_white_id', label: 'Harina blanca / 0000' },
+                  { key: 'flour_semola_id', label: 'Sémola rimacinata' },
+                  { key: 'flour_integral_id', label: 'Harina integral' },
+                  ...(bigaPct > 0 ? [{ key: 'biga_yeast_id' as const, label: 'Levadura de biga' }] : []),
+                  ...(poolishPct > 0 ? [{ key: 'poolish_yeast_id' as const, label: 'Levadura de poolish' }] : []),
+                  ...(directYeastPct > 0 ? [{ key: 'direct_yeast_id' as const, label: 'Levadura directa' }] : []),
+                  ...(saltPct > 0 ? [{ key: 'salt_id' as const, label: 'Sal' }] : []),
+                  ...(sugarPct > 0 ? [{ key: 'sugar_id' as const, label: 'Azúcar' }] : []),
+                  ...(oilPct > 0 ? [{ key: 'oil_id' as const, label: 'Aceite (unidad de masa)' }] : []),
+                ];
+            return (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '.65rem' }}>
+                {fields.map((field) => (
+                  <Field key={field.key} label={field.label}>
+                    <Select
+                      value={ingredientMap[field.key] ?? ''}
+                      onChange={(event) => setIngredientMap((previous) => ({
+                        ...previous,
+                        [field.key]: event.target.value ? Number(event.target.value) : null,
+                      }))}
+                    >
+                      <option value="">Sin asignar</option>
+                      {supplies.map((supply) => (
+                        <option key={supply.id} value={supply.id}>{supply.name} · {supply.unit}</option>
+                      ))}
+                    </Select>
+                  </Field>
+                ))}
+              </div>
+            );
+          })()}
         </div>
 
         <Field label="Notas / Instrucciones de Amasado">
