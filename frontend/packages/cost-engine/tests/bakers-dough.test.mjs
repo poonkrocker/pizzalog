@@ -94,6 +94,19 @@ describe('Cost Engine — validación y expansión de masas', () => {
     );
   });
 
+  it('rechaza sal, azúcar o aceite porcentuales sin insumo asignado', () => {
+    for (const patch of [
+      { salt_pct: 2.5, salt_ingredient_id: undefined },
+      { sugar_pct: 1, sugar_ingredient_id: undefined },
+      { oil_pct: 2, oil_ingredient_id: undefined },
+    ]) {
+      assert.throws(
+        () => expandBakersDoughSpec({ ...baseSpec, ...patch }),
+        (error) => error instanceof CostEngineValidationError && error.code === 'INVALID_DOUGH_SPEC'
+      );
+    }
+  });
+
   it('rechaza porcentajes negativos o no finitos', () => {
     for (const invalid of [-1, Number.NaN, Number.POSITIVE_INFINITY]) {
       assert.throws(
