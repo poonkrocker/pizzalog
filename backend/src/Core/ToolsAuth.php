@@ -22,6 +22,7 @@ class ToolsAuth
                 || ($payload['iss'] ?? null) !== ($jwt['issuer'] ?? 'pizzalog')
                 || ($payload['aud'] ?? null) !== 'pizzalog-tools'
                 || empty($payload['sub'])
+                || !in_array(($payload['env'] ?? null), ['production', 'staging'], true)
             ) {
                 Response::error('Sesión de Tools inválida o vencida', 401);
             }
@@ -35,7 +36,7 @@ class ToolsAuth
                   WHERE ta.id = ?
                   LIMIT 1'
             );
-            $stmt->execute([(int) $payload['sub']]);
+            $stmt->execute([(int) $payload['sub'], (string)$payload['env']]);
             $account = $stmt->fetch();
 
             if (!$account || (int) $account['is_active'] !== 1) {
@@ -44,6 +45,18 @@ class ToolsAuth
             if ($account['expires_at'] !== null && strtotime($account['expires_at']) <= time()) {
                 Response::error('El acceso a Pizzalog Tools ha vencido', 403);
             }
+            if (
+                $account['app_user_id'] !== null
+                && (
+                    $account['app_user_active'] === null
+                    || (int)$account['app_user_active'] !== 1
+                    || $account['app_user_role'] !== 'admin'
+                    || strtolower((string)$account['app_user_email']) !== strtolower((string)$account['email'])
+                )
+            ) {
+                Response::error('El usuario vinculado de Pizzalog App ya no tiene permisos para acceder a Tools', 403);
+            }
+
             if (
                 $account['app_user_id'] !== null
                 && (
