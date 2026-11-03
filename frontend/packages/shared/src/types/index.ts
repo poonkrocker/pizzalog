@@ -701,10 +701,10 @@ export interface RecipeIngredient {
   category: string;
   quantity: number;
   unit: string;
-  unit_cost: number;
+  unit_cost: number | null;
   cost_unit?: string;
   unit_mismatch?: boolean;
-  total_cost: number;
+  total_cost: number | null;
 }
 
 export interface CostMarginProduct {
@@ -735,7 +735,7 @@ export interface SupplyItem {
   name: string;
   category: string;
   unit: string;
-  cost: number;
+  cost: number | null;
 }
 
 export interface DoughProfileInput {
@@ -833,12 +833,12 @@ export interface StudioRecipe {
   yield_unit: string;
   price: number;
   target_food_cost_pct: number;
-  batch_cost: number;
-  unit_cost: number;
+  batch_cost: number | null;
+  unit_cost: number | null;
   cost_unit?: string;
   unit_mismatch?: boolean;
-  suggested_price: number;
-  food_cost_pct: number;
+  suggested_price: number | null;
+  food_cost_pct: number | null;
   warnings?: string[];
   is_incomplete?: boolean;
   components: StudioRecipeComponent[];
