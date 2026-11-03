@@ -314,7 +314,7 @@ export function RecipeModal({
                     <datalist id={`supplies-list-${idx}`}>
                       {supplies.map((s) => (
                         <option key={s.id} value={s.name}>
-                          {s.category} ({formatARS(s.cost)}/{s.unit})
+                          {s.category} ({s.cost !== null ? formatARS(s.cost) : 'Sin costo'}/{s.unit})
                         </option>
                       ))}
                     </datalist>
