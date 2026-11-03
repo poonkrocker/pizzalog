@@ -51,3 +51,11 @@ Content-Type: application/json
 - `PUT /tools/workspace`
 - `POST /tools/import/preview`
 - `POST /tools/admin/accounts` (requiere administrador de App)
+
+## Cost Engine compartido
+
+- Restaurant Profit Kit y Recipe Studio construyen el mismo contrato `CostCatalog` y calculan lotes, costo unitario y precio sugerido con `@pizzalog/cost-engine`.
+- `RecipeCostingController` entrega recetas, componentes e insumos; ya no calcula costos ni precios en PHP.
+- Al guardar una receta, el panel envía snapshots calculados por Cost Engine. La API solo valida y persiste la proyección en `products.cost`; no vuelve a calcular.
+- Si una receta tiene costos faltantes o unidades no soportadas, se muestra como incompleta. No se convierte un costo ausente en cero ni se infieren equivalencias para unidades como `porción` o `bandeja`.
+- El backend conserva la expansión de ingredientes como proyección operativa para el catálogo legado; esa rutina no calcula costos ni precios.
