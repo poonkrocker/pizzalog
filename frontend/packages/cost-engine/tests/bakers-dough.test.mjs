@@ -64,9 +64,9 @@ describe('Cost Engine — validación y expansión de masas', () => {
     assert.equal(result.poolish.waterG, 200);
     assert.equal(result.poolish.yeastG, 4);
     assert.equal(result.direct.yeastG, 5);
-    assert.equal(result.direct.saltG, 27);
-    assert.equal(result.direct.sugarG, 10);
-    assert.equal(result.direct.oilG, 20);
+    assert.ok(Math.abs(result.direct.saltG - 27) < 1e-9);
+    assert.ok(Math.abs(result.direct.sugarG - 10) < 1e-9);
+    assert.ok(Math.abs(result.direct.oilG - 20) < 1e-9);
     assert.equal(result.final.flourG, 500);
     assert.equal(result.final.waterG, 300);
   });
