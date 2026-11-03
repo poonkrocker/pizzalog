@@ -133,6 +133,11 @@ Devolvé exclusivamente JSON válido, sin markdown, con esta estructura:
     }
   ]
 }
+Reglas de clasificación importantes:
+- Una tabla con nombre de ingrediente + unidad base + precio por unidad (sin cantidad de envase/presentación explícita) debe clasificarse como "ingredients", no como "purchase_prices". Mapear name (o ingredient_name), base_unit y purchase_price.
+- Usá "purchase_prices" solo cuando la hoja represente compras/precios históricos con datos explícitos de presentación/envase y esté destinada a vincularse con insumos ya existentes.
+- Una tabla normalizada de recetas con nombre de receta, tipo, rendimiento, unidad de rendimiento, ingrediente/componente, cantidad y unidad del componente debe clasificarse como "recipes" y mapear esos siete campos.
+- Los valores "product", "subrecipe", "producto" y "subreceta" representan tipos válidos de receta.
 En columns, cada valor debe ser el índice entero de la columna o null. Mapeá solo campos que estén claramente representados por un encabezado. No deduzcas la unidad base desde el nombre del ingrediente. Si una hoja mezcla varios tipos de datos, elegí unknown y explicalo en warnings.
 PROMPT;
 
