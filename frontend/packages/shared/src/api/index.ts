@@ -77,7 +77,6 @@ export type {
   ProductTrendsResponse,
   ProductListItem,
 } from './analytics';
-export type { DoughCalculateParams } from './production';
 export type { DoughProfileInput } from '../types';
 export type { MovementInput } from './supplies';
 export type { OptionInput, VariantUpdateInput } from './variants';
