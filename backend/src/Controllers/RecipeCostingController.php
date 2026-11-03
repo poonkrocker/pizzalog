@@ -295,8 +295,8 @@ class RecipeCostingController
                 }
                 $ins->execute([$bid,$rid,$ct,$sid,$child,$qty,$unit,(int)$i]);
             }
-            // Recalcular todos los productos vinculados; así un cambio en una subreceta
-            // también actualiza los productos finales que dependen de ella.
+            // Persistir únicamente los snapshots calculados por Cost Engine en el cliente.
+            // La API no vuelve a calcular costos; solo actualiza la proyección del producto.
             $linkedRecipes = $pdo->prepare('SELECT id, linked_product_id, name, price, yield_quantity
                 FROM recipe_studio_recipes WHERE business_id=? AND is_active=1 AND recipe_type=\'product\' AND linked_product_id IS NOT NULL');
             $linkedRecipes->execute([$bid]);
