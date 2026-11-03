@@ -62,9 +62,16 @@ class ToolsImportController
         }
 
         $deepseek = Config::get('deepseek', []);
-        $apiKey = (string) ($deepseek['api_key'] ?? '');
+        $apiKey = trim((string) ($deepseek['api_key'] ?? ''));
         if ($apiKey === '') {
-            Response::error('La importación inteligente no está configurada en el servidor', 503);
+            // El mapeo local permite importar formatos reconocibles sin depender de un proveedor de IA.
+            Response::ok([
+                'sheets' => $this->buildLocalMappings($sheets),
+                'ai_previews_remaining_today' => 0,
+                'note' => 'Mapeo automático local: no se envió información a ningún servicio externo.',
+                'mapping_mode' => 'local',
+            ]);
+            return;
         }
 
         $accountId = (int) $req->auth['tools_account_id'];
@@ -253,4 +260,111 @@ PROMPT;
             'note' => 'La IA solo propone un mapeo de columnas. No modifica datos ni calcula costos.',
         ]);
     }
+
+    /**
+     * Mapea encabezados habituales en español e inglés sin enviar datos fuera del servidor.
+     * Los casos ambiguos quedan como unknown para revisión manual.
+     */
+    private function buildLocalMappings(array $sheets): array
+    {
+        $aliases = [
+            'name' => ['nombre del insumo', 'nombre insumo', 'insumo', 'ingrediente', 'nombre', 'name', 'ingredient'],
+            'ingredient_name' => ['nombre del insumo', 'nombre insumo', 'insumo', 'ingrediente', 'ingredient name', 'name'],
+            'base_unit' => ['unidad base', 'unidad', 'unidad de medida', 'unidad medida', 'base unit', 'unit'],
+            'base_dimension' => ['dimension', 'dimensión', 'dimension base', 'base dimension'],
+            'purchase_price' => ['precio de compra', 'precio unitario', 'precio', 'costo de compra', 'purchase price', 'unit price'],
+            'currency' => ['moneda', 'currency'],
+            'pack_quantity' => ['cantidad por envase', 'contenido', 'cantidad envase', 'pack quantity', 'package quantity'],
+            'pack_unit' => ['unidad de envase', 'unidad presentación', 'presentacion', 'presentación', 'pack unit'],
+            'yield_pct' => ['rendimiento pct', 'rendimiento %', 'merma', 'yield pct'],
+            'purchase_date' => ['fecha de compra', 'fecha', 'purchase date'],
+            'density_g_per_ml' => ['densidad g ml', 'densidad', 'density g per ml'],
+            'unit_weight_g' => ['peso unitario g', 'peso por unidad', 'unit weight g'],
+            'supplier' => ['proveedor', 'supplier'],
+            'recipe_name' => ['nombre de receta', 'receta', 'producto', 'nombre del producto', 'recipe name'],
+            'recipe_type' => ['tipo de receta', 'tipo', 'recipe type'],
+            'yield_quantity' => ['rendimiento', 'cantidad de rendimiento', 'yield quantity'],
+            'yield_unit' => ['unidad de rendimiento', 'unidad rendimiento', 'yield unit'],
+            'component_name' => ['nombre del componente', 'componente', 'ingrediente', 'insumo', 'component name'],
+            'component_quantity' => ['cantidad del componente', 'cantidad', 'cantidad utilizada', 'quantity', 'component quantity'],
+            'component_unit' => ['unidad del componente', 'unidad componente', 'unidad', 'component unit'],
+            'expense_name' => ['nombre del gasto', 'gasto', 'concepto', 'expense name'],
+            'expense_category' => ['categoria', 'categoría', 'rubro', 'expense category'],
+            'expense_period' => ['periodo', 'período', 'frecuencia', 'expense period'],
+            'expense_amount' => ['importe', 'monto', 'importe del gasto', 'monto del gasto', 'amount', 'expense amount'],
+        ];
+
+        $normalize = static function ($value): string {
+            $value = strtolower(trim((string) $value));
+            $value = strtr($value, [
+                'á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u',
+                'ü' => 'u', 'ñ' => 'n',
+            ]);
+            return preg_replace('/[^a-z0-9%]+/', ' ', $value) ?? $value;
+        };
+
+        $result = [];
+        foreach ($sheets as $sheetIndex => $sheet) {
+            $rows = $sheet['rows'];
+            $bestIndex = 0;
+            $bestScore = -1;
+            $bestColumns = [];
+            $scanLimit = min(50, count($rows));
+            for ($rowIndex = 0; $rowIndex < $scanLimit; $rowIndex++) {
+                $headers = array_map($normalize, $rows[$rowIndex]);
+                $columns = [];
+                $score = 0;
+                foreach ($aliases as $field => $names) {
+                    foreach ($headers as $columnIndex => $header) {
+                        if ($header === '') continue;
+                        foreach ($names as $alias) {
+                            if ($header === $normalize($alias)) {
+                                $columns[$field] = $columnIndex;
+                                $score++;
+                                break 2;
+                            }
+                        }
+                    }
+                }
+                if ($score > $bestScore) {
+                    $bestScore = $score;
+                    $bestIndex = $rowIndex;
+                    $bestColumns = $columns;
+                }
+            }
+
+            $has = static fn(string $field): bool => array_key_exists($field, $bestColumns);
+            if ($has('recipe_name') && $has('component_name') && $has('component_quantity')) {
+                $kind = 'recipes';
+            } elseif ($has('expense_name') && $has('expense_amount')) {
+                $kind = 'operating_expenses';
+            } elseif ($has('ingredient_name') && $has('purchase_price') && $has('pack_quantity')) {
+                $kind = 'purchase_prices';
+            } elseif ($has('name') && $has('base_unit')) {
+                $kind = 'ingredients';
+            } else {
+                $kind = 'unknown';
+            }
+
+            $allFields = array_keys($aliases);
+            $columns = array_fill_keys($allFields, null);
+            foreach ($bestColumns as $field => $columnIndex) $columns[$field] = $columnIndex;
+            $result[] = [
+                'sheet_index' => $sheetIndex,
+                'name' => substr(is_string($sheet['name'] ?? null) ? $sheet['name'] : 'Hoja', 0, 80),
+                'kind' => $kind,
+                'header_row_index' => $bestIndex,
+                'headers' => array_slice($rows[$bestIndex], 0, self::MAX_COLUMNS),
+                'columns' => $columns,
+                'confidence' => $bestScore > 0 ? min(0.95, $bestScore / 6) : 0,
+                'warnings' => $kind === 'unknown'
+                    ? ['No se reconoció automáticamente la estructura. Podés asignar el tipo de hoja y las columnas manualmente.']
+                    : ['Mapeo automático local; revisá encabezados y unidades antes de confirmar.'],
+                'row_count' => max(0, count($rows) - $bestIndex - 1),
+            ];
+        }
+        return $result;
+    }
+
+
 }
