@@ -283,20 +283,12 @@ class RecipeCostingController
                     $supplyCheck->execute([$cid,$bid]);
                     $supRow=$supplyCheck->fetch(\PDO::FETCH_ASSOC);
                     if(!$supRow)throw new \RuntimeException('Uno de los insumos no existe o está inactivo.');
-                    $supUnit=trim((string)($supRow['unit']??$unit))?:$unit;
-                    if(!$this->areUnitsCompatible($unit,$supUnit)){
-                        throw new \RuntimeException("Unidad incompatible en '{$supRow['name']}': usaste '{$unit}' pero el insumo cotiza por '{$supUnit}'.");
-                    }
                     $sid=$cid;$child=null;
                 } else {
                     if($cid===$rid)throw new \RuntimeException('Una receta no puede incluirse a sí misma.');
                     $recipeCheck->execute([$cid,$bid]);
                     $recRow=$recipeCheck->fetch(\PDO::FETCH_ASSOC);
                     if(!$recRow)throw new \RuntimeException('Una subreceta seleccionada no existe.');
-                    $recUnit=trim((string)($recRow['yield_unit']??$unit))?:$unit;
-                    if(!$this->areUnitsCompatible($unit,$recUnit)){
-                        throw new \RuntimeException("Unidad incompatible en subreceta '{$recRow['name']}': usaste '{$unit}' pero rinde en '{$recUnit}'.");
-                    }
                     // Impedir ciclos: ¿la receta actual está dentro de las dependencias de la subreceta?
                     if($this->dependsOn($pdo,$bid,$cid,$rid,[]))throw new \RuntimeException('Esta combinación generaría un ciclo de subrecetas.');
                     $sid=null;$child=$cid;
@@ -413,21 +405,6 @@ class RecipeCostingController
             }
             $insertLink->execute([$productId, (int)$ingredientId, $line['quantity'], $line['unit']]);
         }
-    }
-
-    private function areUnitsCompatible(string $from, string $to): bool
-    {
-        $from = strtolower(trim($from)); $to = strtolower(trim($to));
-        if ($from === $to) return true;
-        $groups = [
-            ['kg'=>1.0,'kilo'=>1.0,'kilos'=>1.0,'g'=>0.001,'gr'=>0.001,'gramo'=>0.001,'gramos'=>0.001],
-            ['l'=>1.0,'lt'=>1.0,'litro'=>1.0,'litros'=>1.0,'cc'=>0.001,'ml'=>0.001],
-            ['u'=>1.0,'un'=>1.0,'unidad'=>1.0,'unidades'=>1.0],
-        ];
-        foreach ($groups as $group) {
-            if (isset($group[$from]) && isset($group[$to])) return true;
-        }
-        return false;
     }
 
     private function convertQuantity(float $quantity, string $from, string $to): float
