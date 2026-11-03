@@ -12,6 +12,7 @@ import {
 import {
   areUnitsCompatible,
   calculatePricingScenario,
+  calculatePortfolioScenario,
   CostEngine,
   type CostCatalog,
   type Dimension,
@@ -22,7 +23,7 @@ import {
 import { useApi } from '@/lib/auth';
 import { Field, Input, Loading, Modal } from '@/ui';
 
-type View = 'recipes' | 'costs';
+type View = 'recipes' | 'costs' | 'scenario';
 type ComponentRow = StudioRecipeComponentInput;
 type CostRow = BusinessCostInput;
 
@@ -97,6 +98,8 @@ export function RecipeStudioPage() {
   const api = useApi();
   const qc = useQueryClient();
   const [view, setView] = useState<View>('recipes');
+  const [scenarioCostDelta, setScenarioCostDelta] = useState(10);
+  const [scenarioPriceDelta, setScenarioPriceDelta] = useState(15);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [recipeModalOpen, setRecipeModalOpen] = useState(false);
   const [recipeName, setRecipeName] = useState('');
@@ -377,6 +380,22 @@ export function RecipeStudioPage() {
   const suggestedPrice = pricingScenario?.raw_suggested_price ?? null;
   const foodCost = pricingScenario?.food_cost_pct ?? null;
 
+  const portfolioScenario = useMemo(() => calculatePortfolioScenario({
+    items: recipes
+      .filter((recipe) => recipe.recipe_type === 'product')
+      .map((recipe) => ({
+        id: String(recipe.id),
+        name: recipe.name,
+        unit_cost: recipe.unit_cost,
+        status: recipe.is_incomplete ? 'incomplete' as const : 'complete' as const,
+        selling_price: recipe.price > 0 ? recipe.price : null,
+      })),
+    cost_delta_pct: scenarioCostDelta,
+    price_delta_pct: scenarioPriceDelta,
+    rounding_increment: 100,
+    target_food_cost_pct: 30,
+  }), [recipes, scenarioCostDelta, scenarioPriceDelta]);
+
   const monthlyTotal = costsQuery.data?.monthly_total ?? 0;
   const enteredMonthly = costItems.reduce((sum, item) => {
     const factor: Record<CostPeriod, number> = { monthly: 1, weekly: 52 / 12, daily: 365 / 12, yearly: 1 / 12 };
@@ -488,6 +507,7 @@ export function RecipeStudioPage() {
         <div style={{ display: 'flex', gap: '.4rem', flexWrap: 'wrap' }}>
           <button type="button" style={view === 'recipes' ? primaryButton : secondaryButton} onClick={() => setView('recipes')}>🍕 Recetas</button>
           <button type="button" style={view === 'costs' ? primaryButton : secondaryButton} onClick={() => setView('costs')}>🏠 Costeo del negocio</button>
+          <button type="button" style={view === 'scenario' ? primaryButton : secondaryButton} onClick={() => setView('scenario')}>📈 Simulador de escenarios</button>
         </div>
       </div>
 
@@ -629,6 +649,73 @@ export function RecipeStudioPage() {
             </div>
           </Modal>
         </>
+      )}
+
+      {view === 'scenario' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div style={panelStyle}>
+            <h3 style={{ marginTop: 0 }}>Simulador de costos y precios</h3>
+            <p style={{ color: '#64748b', fontSize: '.88rem' }}>
+              Simula variaciones sobre los costos unitarios calculados por Cost Engine. Las recetas incompletas quedan fuera de los totales hasta que tengan todos sus insumos y precios.
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '.75rem' }}>
+              <Field label="Variación de costos (%)">
+                <Input type="number" min="-99" step="1" value={scenarioCostDelta} onChange={(event) => setScenarioCostDelta(Math.max(-99, Number(event.target.value) || 0))} />
+              </Field>
+              <Field label="Variación de precios (%)">
+                <Input type="number" min="-99" step="1" value={scenarioPriceDelta} onChange={(event) => setScenarioPriceDelta(Math.max(-99, Number(event.target.value) || 0))} />
+              </Field>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '.75rem' }}>
+            <div style={panelStyle}>
+              <div style={{ color: '#64748b', fontSize: '.75rem', textTransform: 'uppercase' }}>Food cost actual</div>
+              <strong style={{ display: 'block', fontSize: '1.45rem' }}>{portfolioScenario.current_food_cost_pct !== null ? `${portfolioScenario.current_food_cost_pct.toFixed(1)}%` : '—'}</strong>
+              <div style={{ color: '#64748b', fontSize: '.78rem' }}>Recetas completas con precio</div>
+            </div>
+            <div style={panelStyle}>
+              <div style={{ color: '#64748b', fontSize: '.75rem', textTransform: 'uppercase' }}>Food cost simulado</div>
+              <strong style={{ display: 'block', fontSize: '1.45rem' }}>{portfolioScenario.simulated_food_cost_pct !== null ? `${portfolioScenario.simulated_food_cost_pct.toFixed(1)}%` : '—'}</strong>
+              <div style={{ color: '#64748b', fontSize: '.78rem' }}>Con las variaciones seleccionadas</div>
+            </div>
+            <div style={panelStyle}>
+              <div style={{ color: '#64748b', fontSize: '.75rem', textTransform: 'uppercase' }}>Facturación simulada</div>
+              <strong style={{ display: 'block', fontSize: '1.45rem' }}>{formatARS(portfolioScenario.simulated_revenue)}</strong>
+              <div style={{ color: '#64748b', fontSize: '.78rem' }}>Suma de precios por producto, sin volumen de ventas</div>
+            </div>
+            <div style={panelStyle}>
+              <div style={{ color: '#64748b', fontSize: '.75rem', textTransform: 'uppercase' }}>Margen bruto simulado</div>
+              <strong style={{ display: 'block', fontSize: '1.45rem' }}>{formatARS(portfolioScenario.simulated_gross_profit)}</strong>
+              <div style={{ color: '#64748b', fontSize: '.78rem' }}>{portfolioScenario.simulated_margin_pct !== null ? `${portfolioScenario.simulated_margin_pct.toFixed(1)}% sobre facturación` : 'Sin datos suficientes'}</div>
+            </div>
+          </div>
+          <div style={panelStyle}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '.5rem', marginBottom: '.75rem' }}>
+              <strong>Detalle por producto</strong>
+              <span style={{ color: '#64748b', fontSize: '.8rem' }}>{portfolioScenario.complete_items} completos · {portfolioScenario.incomplete_items} incompletos</span>
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '.86rem' }}>
+                <thead><tr style={{ textAlign: 'left', color: '#64748b', borderBottom: '1px solid var(--c-border, #ddd)' }}>
+                  <th style={{ padding: '.55rem' }}>Producto</th><th style={{ padding: '.55rem' }}>Costo actual</th><th style={{ padding: '.55rem' }}>Costo simulado</th><th style={{ padding: '.55rem' }}>Precio actual</th><th style={{ padding: '.55rem' }}>Precio simulado</th><th style={{ padding: '.55rem' }}>Food cost simulado</th>
+                </tr></thead>
+                <tbody>
+                  {portfolioScenario.rows.map((row) => <tr key={row.id} style={{ borderBottom: '1px solid var(--c-border, #eee)' }}>
+                    <td style={{ padding: '.6rem .55rem', fontWeight: 600 }}>{row.name}</td>
+                    <td style={{ padding: '.6rem .55rem' }}>{row.current_cost !== null ? formatARS(row.current_cost) : 'Incompleto'}</td>
+                    <td style={{ padding: '.6rem .55rem' }}>{row.simulated_cost !== null ? formatARS(row.simulated_cost) : '—'}</td>
+                    <td style={{ padding: '.6rem .55rem' }}>{row.current_price !== null ? formatARS(row.current_price) : 'Sin precio'}</td>
+                    <td style={{ padding: '.6rem .55rem' }}>{row.simulated_price !== null ? formatARS(row.simulated_price) : '—'}</td>
+                    <td style={{ padding: '.6rem .55rem' }}>{row.simulated_food_cost_pct !== null ? `${row.simulated_food_cost_pct.toFixed(1)}%` : '—'}</td>
+                  </tr>)}
+                </tbody>
+              </table>
+            </div>
+            <p style={{ marginBottom: 0, color: '#64748b', fontSize: '.78rem' }}>
+              El resumen es una comparación unitaria por producto, no una proyección de ventas ponderada por cantidades vendidas.
+            </p>
+          </div>
+        </div>
       )}
 
       {view === 'costs' && (
