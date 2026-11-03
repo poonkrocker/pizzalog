@@ -611,6 +611,20 @@ export interface AnalyticsWinningCombinations {
 
 // --- Producción / Calculadora de Masas & Costos ---------------------------
 
+export interface DoughIngredientMap {
+  flour_white_id?: number | null;
+  flour_integral_id?: number | null;
+  flour_semola_id?: number | null;
+  biga_yeast_id?: number | null;
+  poolish_yeast_id?: number | null;
+  direct_yeast_id?: number | null;
+  salt_id?: number | null;
+  sugar_id?: number | null;
+  oil_id?: number | null;
+  chickpea_flour_id?: number | null;
+  water_id?: number | null;
+}
+
 export interface DoughProfile {
   id: number;
   business_id: number;
@@ -631,6 +645,7 @@ export interface DoughProfile {
   flour_integral_pct: number;
   flour_semola_pct: number;
   cost_per_kg: number;
+  ingredient_map?: DoughIngredientMap | null;
   notes: string | null;
 }
 
@@ -669,7 +684,7 @@ export interface DoughCalculation {
     salt_g: number;
     direct_yeast_g: number;
     sugar_g: number;
-    oil_cc: number;
+    oil_g: number;
   };
   total?: {
     chickpea_flour_kg: number;
@@ -689,9 +704,10 @@ export interface DoughCalculation {
     oil_liters?: number;
   };
   cost: {
-    total: number;
-    per_kg: number;
-    per_unit: number;
+    total: number | null;
+    per_kg: number | null;
+    per_unit: number | null;
+    status: 'complete' | 'incomplete';
   };
   whatsapp_text: string;
 }
@@ -739,6 +755,7 @@ export interface SupplyItem {
 }
 
 export interface DoughProfileInput {
+  ingredient_map?: DoughIngredientMap | null;
   name: string;
   unit_weight_grams: number;
   hydration_pct: number;
