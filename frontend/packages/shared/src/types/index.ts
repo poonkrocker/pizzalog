@@ -812,6 +812,8 @@ export interface SaveStudioRecipeInput {
   price: number;
   target_food_cost_pct: number;
   components: StudioRecipeComponentInput[];
+  /** Cost Engine result; backend only persists this projection and never recalculates it. */
+  cost_snapshots?: Array<{ linked_product_id: number; unit_cost: number }>;
 }
 export interface StudioRecipeComponent {
   component_type: StudioComponentType;
