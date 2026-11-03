@@ -13,7 +13,7 @@ use Pizzalog\Repositories\VariantRepository;
 class ProductController
 {
     /** Columnas del producto para el panel (gestión interna: se ve todo siempre). */
-    private const FIELDS = 'id, category_id, sort_order, name, description, price, cost, image_url,
+    private const FIELDS = 'id, category_id, sort_order, name, description, price, cost, cost_is_current, cost_engine_version, cost_input_hash, cost_calculated_at, image_url,
                             track_stock, stock_quantity, stock_min, is_active, has_variants, is_combo,
                             is_open_price, is_combinable, show_online, show_in_salon, is_available, is_secret, is_vegan_opt, badge_text,
                             visible_days, visible_from, visible_until';
@@ -117,11 +117,11 @@ class ProductController
 
             $stmt = $pdo->prepare(
                 'INSERT INTO products
-                    (business_id, category_id, sort_order, name, description, price, cost,
+                    (business_id, category_id, sort_order, name, description, price, cost, cost_is_current,
                      track_stock, stock_quantity, stock_min, is_open_price, is_combinable, image_url,
                      show_online, show_in_salon, is_available, is_secret, is_vegan_opt, badge_text,
                      visible_days, visible_from, visible_until)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $stmt->execute([
                 $bid, $d['category_id'], $sortOrder, $d['name'], $d['description'], $d['price'],
@@ -157,7 +157,7 @@ class ProductController
         try {
             $stmt = $pdo->prepare(
                 'UPDATE products
-                    SET category_id = ?, name = ?, description = ?, price = ?, cost = ?,
+                    SET category_id = ?, name = ?, description = ?, price = ?, cost = ?, cost_is_current = 0,
                         track_stock = ?, stock_quantity = ?, stock_min = ?, is_open_price = ?, is_combinable = ?,
                         image_url = ?, show_online = ?, show_in_salon = ?, is_available = ?, is_secret = ?, is_vegan_opt = ?,
                         badge_text = ?, visible_days = ?, visible_from = ?, visible_until = ?
@@ -424,6 +424,7 @@ class ProductController
         $p['sort_order']     = (int) ($p['sort_order'] ?? 0);
         $p['price']          = (float) ($p['price'] ?? 0);
         $p['cost']           = (float) ($p['cost'] ?? 0);
+        $p['cost_is_current'] = (int) ($p['cost_is_current'] ?? 0);
         $p['stock_quantity'] = (int) ($p['stock_quantity'] ?? 0);
         $p['stock_min']      = (int) ($p['stock_min'] ?? 0);
 
