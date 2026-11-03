@@ -13,6 +13,10 @@ class ToolsAuthController
     {
         $email = strtolower(trim((string) $req->input('email', '')));
         $password = (string) $req->input('password', '');
+        $environment = (string) $req->input('environment', 'production');
+        if (!in_array($environment, ['production', 'staging'], true)) {
+            Response::error('Entorno de Tools inválido', 422);
+        }
 
         if ($email === '' || $password === '' || strlen($email) > 190 || strlen($password) > 1024) {
             Response::error('Ingresá un email válido y una contraseña de hasta 1024 caracteres', 422);
@@ -51,9 +55,9 @@ class ToolsAuthController
 
         $accountQuery = $pdo->prepare(
             'SELECT id, email, name, password_hash, app_user_id, is_active, expires_at
-               FROM tools_accounts WHERE email = ? LIMIT 1'
+               FROM tools_accounts WHERE email = ? AND environment = ? LIMIT 1'
         );
-        $accountQuery->execute([$email]);
+        $accountQuery->execute([$email, $environment]);
         $account = $accountQuery->fetch();
 
         // Las cuentas vinculadas validan siempre contra la contraseña vigente de App.
@@ -101,14 +105,14 @@ class ToolsAuthController
 
             // No se copia ni duplica el hash de App: Tools guarda únicamente la referencia al usuario.
             $pdo->prepare(
-                'INSERT INTO tools_accounts (email, name, password_hash, app_user_id, business_id, is_active)
-                 VALUES (?, ?, NULL, ?, ?, 1)
+                'INSERT INTO tools_accounts (email, environment, name, password_hash, app_user_id, business_id, is_active)
+                 VALUES (?, ?, ?, NULL, ?, ?, 1)
                  ON DUPLICATE KEY UPDATE
                     name = VALUES(name),
                     app_user_id = VALUES(app_user_id),
                     business_id = VALUES(business_id),
                     password_hash = NULL'
-            )->execute([$email, (string)$appUser['name'], (int)$appUser['id'], (int)$appUser['business_id']]);
+            )->execute([$email, $environment, (string)$appUser['name'], (int)$appUser['id'], (int)$appUser['business_id']]);
 
             $accountQuery->execute([$email]);
             $account = $accountQuery->fetch();
@@ -132,6 +136,7 @@ class ToolsAuthController
             [
                 'sub' => (int) $account['id'],
                 'aud' => 'pizzalog-tools',
+                'env' => $environment,
             ],
             $jwtSecret,
             max(300, min((int) ($jwtConfig['ttl'] ?? 28800), 43200)),
