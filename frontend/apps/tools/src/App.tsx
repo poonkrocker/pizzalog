@@ -25,25 +25,22 @@ import { downloadCustomProfitKitXlsx } from './xlsxExporter';
 const STORAGE_KEY = 'pizzalog_tools_workspace_v2';
 const ALL_UNITS: UnitCode[] = ['g', 'kg', 'mg', 'lb', 'oz', 'ml', 'cc', 'L', 'fl_oz_us', 'gal_us', 'unit', 'dozen'];
 
-export function App() {
-  const [state, setState] = useState<ToolsWorkspaceState>(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (parsed && parsed.catalog && Array.isArray(parsed.catalog.ingredients)) {
-          return {
-            ...createInitialDemoWorkspace(),
-            ...parsed,
-            productSalesMap: parsed.productSalesMap ?? createInitialDemoWorkspace().productSalesMap,
-          };
-        }
-      }
-    } catch {
-      // fallback to demo
-    }
-    return createInitialDemoWorkspace();
-  });
+type ToolsAccount = { id: number; email: string; name: string; expires_at?: string | null };
+
+const API_URL = ((import.meta.env.VITE_API_URL as string | undefined) ?? 'https://api.pizzalog.net').replace(/\\/+$/, '');
+
+export function App({
+  token,
+  account,
+  initialWorkspace,
+  onLogout,
+}: {
+  token: string;
+  account: ToolsAccount;
+  initialWorkspace: ToolsWorkspaceState;
+  onLogout: () => void;
+}) {
+  const [state, setState] = useState<ToolsWorkspaceState>(initialWorkspace);
 
   const [activeTab, setActiveTab] = useState<
     'ingredients' | 'subrecipes' | 'recipes' | 'expenses' | 'snapshots'
@@ -56,12 +53,26 @@ export function App() {
   const [builderError, setBuilderError] = useState<string | null>(null);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch {
-      // ignore storage quota errors
-    }
-  }, [state]);
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await fetch(`${API_URL}/tools/workspace`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ workspace: state }),
+        });
+        const payload = (await response.json()) as { ok?: boolean; error?: string };
+        if (!response.ok || !payload.ok) {
+          throw new Error(payload.error ?? 'No se pudo guardar el espacio de trabajo');
+        }
+      } catch (err) {
+        setImportError(err instanceof Error ? err.message : 'Error al guardar los cambios');
+      }
+    }, 650);
+    return () => window.clearTimeout(timer);
+  }, [state, token]);
 
   const t = I18N[state.locale] ?? I18N['es-AR'];
   const canChangeCurrency =
@@ -455,6 +466,8 @@ export function App() {
           <p className="tools-subtitle">{t.subtitle}</p>
         </div>
         <div className="tools-actions">
+          <span className="tools-account-label">{account.name}</span>
+          <button type="button" className="btn" onClick={onLogout}>Cerrar sesión</button>
           <button
             type="button"
             className="btn btn--ocre"
