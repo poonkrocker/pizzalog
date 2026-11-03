@@ -224,6 +224,32 @@ export function expandBakersDoughSpec(spec: BakersDoughSpec): {
     throw new CostEngineValidationError('INVALID_DOUGH_SPEC', 'El perfil de masa debe declarar al menos una harina.');
   }
 
+  const percentageInputs: Array<[string, number]> = [
+    ['biga.flour_pct', spec.biga?.flour_pct ?? 0],
+    ['biga.water_pct', spec.biga?.water_pct ?? 0],
+    ['biga.yeast_pct', spec.biga?.yeast_pct ?? 0],
+    ['poolish.flour_pct', spec.poolish?.flour_pct ?? 0],
+    ['poolish.water_pct', spec.poolish?.water_pct ?? 0],
+    ['poolish.yeast_pct', spec.poolish?.yeast_pct ?? 0],
+    ['direct_yeast_pct', spec.direct_yeast_pct ?? 0],
+    ['salt_pct', spec.salt_pct ?? 0],
+    ['sugar_pct', spec.sugar_pct ?? 0],
+    ['oil_pct', spec.oil_pct ?? 0],
+  ];
+  for (const [field, value] of percentageInputs) {
+    if (!Number.isFinite(value) || value < 0) {
+      throw new CostEngineValidationError(
+        'INVALID_DOUGH_SPEC',
+        `El porcentaje "${field}" debe ser un número finito no negativo.`,
+        { field, value }
+      );
+    }
+  }
+
+  if (spec.total_flour_g !== undefined && (!Number.isFinite(spec.total_flour_g) || spec.total_flour_g <= 0)) {
+    throw new CostEngineValidationError('INVALID_DOUGH_SPEC', 'total_flour_g debe ser un número finito mayor a cero.');
+  }
+
   const bigaFlourPct = spec.biga?.flour_pct ?? 0;
   const bigaWaterPct = spec.biga?.water_pct ?? 0;
   const bigaYeastPct = spec.biga?.yeast_pct ?? 0;
@@ -303,8 +329,46 @@ export function expandBakersDoughSpec(spec: BakersDoughSpec): {
   const waterTotalG = flourTotalG * (spec.hydration_pct / 100);
 
   // Resolver proporción de cada harina (por peso de referencia o por share_pct)
-  const usesWeights = spec.flours.every((f) => f.weight_kg !== undefined && f.weight_kg >= 0);
+  const hasAnyWeight = spec.flours.some((f) => f.weight_kg !== undefined);
+  const usesWeights = spec.flours.every(
+    (f) => f.weight_kg !== undefined && Number.isFinite(f.weight_kg) && f.weight_kg >= 0
+  );
+  if (hasAnyWeight && !usesWeights) {
+    throw new CostEngineValidationError(
+      'INVALID_DOUGH_SPEC',
+      'Si se usan pesos de harina, todos los componentes deben declarar un weight_kg válido.'
+    );
+  }
+
   const weightSum = usesWeights ? spec.flours.reduce((acc, f) => acc + (f.weight_kg ?? 0), 0) : 0;
+  if (usesWeights && (!Number.isFinite(weightSum) || weightSum <= 0)) {
+    throw new CostEngineValidationError(
+      'INVALID_DOUGH_SPEC',
+      'La suma de los pesos de harina debe ser mayor a cero.'
+    );
+  }
+
+  const shareValues = spec.flours.map((f) => f.share_pct);
+  if (!usesWeights) {
+    if (shareValues.some((value) => value === undefined || !Number.isFinite(value) || value < 0)) {
+      throw new CostEngineValidationError(
+        'INVALID_DOUGH_SPEC',
+        'Cada harina debe declarar un share_pct finito no negativo o todas deben declarar weight_kg.'
+      );
+    }
+    const shareSum = shareValues.reduce((sum, value) => sum + (value ?? 0), 0);
+    if (Math.abs(shareSum - 100) > 0.01) {
+      throw new CostEngineValidationError(
+        'INVALID_DOUGH_SPEC',
+        'La suma de share_pct de las harinas debe ser 100%.',
+        { share_sum: shareSum }
+      );
+    }
+  }
+
+  if (spec.flours.some((f) => !f.ingredient_id || !f.ingredient_id.trim())) {
+    throw new CostEngineValidationError('INVALID_DOUGH_SPEC', 'Cada harina debe tener un ingredient_id.');
+  }
 
   const components: RecipeComponent[] = [];
 
@@ -332,17 +396,39 @@ export function expandBakersDoughSpec(spec: BakersDoughSpec): {
     });
   }
 
-  // Levadura (biga + poolish + directa) contada una sola vez sobre la harina correspondiente
-  const yeastId =
-    spec.biga?.yeast_ingredient_id ??
-    spec.poolish?.yeast_ingredient_id ??
-    spec.yeast_ingredient_id;
-  const totalYeastG = flourTotalG * (totalYeastPctOnTotalFlour / 100);
-  if (totalYeastG > 0 && yeastId) {
+  // Cada prefermento conserva su propio insumo de levadura: no mezclar costos
+  // cuando biga, poolish y levadura directa usan productos diferentes.
+  const yeastComponents: Array<{ ingredientId: string | undefined; quantityG: number; source: string }> = [
+    {
+      ingredientId: spec.biga?.yeast_ingredient_id,
+      quantityG: flourTotalG * (bigaFlourPct / 100) * (bigaYeastPct / 100),
+      source: 'biga',
+    },
+    {
+      ingredientId: spec.poolish?.yeast_ingredient_id,
+      quantityG: flourTotalG * (poolishFlourPct / 100) * (poolishYeastPct / 100),
+      source: 'poolish',
+    },
+    {
+      ingredientId: spec.yeast_ingredient_id,
+      quantityG: flourTotalG * (directYeastPct / 100),
+      source: 'direct_yeast',
+    },
+  ];
+
+  for (const yeast of yeastComponents) {
+    if (yeast.quantityG <= 0) continue;
+    if (!yeast.ingredientId || !yeast.ingredientId.trim()) {
+      throw new CostEngineValidationError(
+        'INVALID_DOUGH_SPEC',
+        `Falta el ingrediente de levadura para "${yeast.source}" aunque su porcentaje es mayor a cero.`,
+        { source: yeast.source, quantity_g: yeast.quantityG }
+      );
+    }
     components.push({
       component_type: 'ingredient',
-      ingredient_id: yeastId,
-      quantity: totalYeastG,
+      ingredient_id: yeast.ingredientId,
+      quantity: yeast.quantityG,
       unit: 'g',
     });
   }
