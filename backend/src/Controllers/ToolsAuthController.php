@@ -114,7 +114,7 @@ class ToolsAuthController
                     password_hash = NULL'
             )->execute([$email, $environment, (string)$appUser['name'], (int)$appUser['id'], (int)$appUser['business_id']]);
 
-            $accountQuery->execute([$email]);
+            $accountQuery->execute([$email, $environment]);
             $account = $accountQuery->fetch();
         } elseif (!$account || empty($account['password_hash']) || !password_verify($password, (string)$account['password_hash'])) {
             Response::error('Email o contraseña incorrectos', 401);
