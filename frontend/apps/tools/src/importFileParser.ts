@@ -189,6 +189,48 @@ function elementText(element: Element, localName: string): string {
     .join('');
 }
 
+
+function normalizeRecipeMatrix(rows: string[][]): string[][] | null {
+  const norm = (value: string) => value.normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase().trim();
+  const productRowIndex = rows.findIndex((row) => norm(row[1] ?? row[0] ?? '') === 'producto');
+  const ingredientHeaderIndex = rows.findIndex((row) =>
+    norm(row[1] ?? row[0] ?? '') === 'ingrediente' &&
+    row.some((value) => norm(value) === 'unidad')
+  );
+  if (productRowIndex < 0 || ingredientHeaderIndex <= productRowIndex) return null;
+
+  const productRow = rows[productRowIndex];
+  const typeRow = rows[productRowIndex + 1] ?? [];
+  const ingredientHeader = rows[ingredientHeaderIndex];
+  const ingredientNameColumn = ingredientHeader.findIndex((value) => norm(value) === 'ingrediente');
+  const unitColumn = ingredientHeader.findIndex((value) => norm(value) === 'unidad');
+  if (ingredientNameColumn < 0 || unitColumn < 0) return null;
+
+  const output = [[
+    'Nombre de receta', 'Tipo de receta', 'Rendimiento', 'Unidad de rendimiento',
+    'Ingrediente', 'Cantidad', 'Unidad del componente',
+  ]];
+  for (let productColumn = Math.max(ingredientNameColumn, unitColumn) + 1;
+    productColumn < productRow.length; productColumn += 1) {
+    const recipeName = (productRow[productColumn] ?? '').trim();
+    if (!recipeName) continue;
+    const rawType = norm(typeRow[productColumn] ?? '');
+    const recipeType = /subreceta|sub.?recipe|preparacion/.test(rawType) ? 'subrecipe' : 'product';
+
+    for (let rowIndex = ingredientHeaderIndex + 1; rowIndex < rows.length; rowIndex += 1) {
+      const row = rows[rowIndex] ?? [];
+      const ingredient = (row[ingredientNameColumn] ?? '').trim();
+      const unit = (row[unitColumn] ?? '').trim();
+      const quantity = (row[productColumn] ?? '').trim();
+      if (!ingredient || !unit || !quantity) continue;
+      const numeric = Number(quantity.replace(',', '.'));
+      if (!Number.isFinite(numeric) || numeric <= 0) continue;
+      output.push([recipeName, recipeType, '1', 'unit', ingredient, quantity, unit]);
+    }
+  }
+  return output.length > 1 ? output : null;
+}
+
 async function parseXlsx(buffer: ArrayBuffer): Promise<ParsedImportSheet[]> {
   const files = await unzip(buffer);
   const fileNames = Array.from(files.keys()).map((name) => name.toLowerCase());
@@ -256,11 +298,15 @@ async function parseXlsx(buffer: ArrayBuffer): Promise<ParsedImportSheet[]> {
         totalRows += 1;
       }
     }
-    if (rows.length) sheets.push({
-      name,
-      rows,
-      ...(hasFormulaCells ? { warnings: ['La hoja contiene fórmulas. Se leyeron únicamente los valores guardados en el archivo; no se ejecutaron fórmulas.'] } : {}),
-    });
+    if (rows.length) {
+      const matrixRows = normalizeRecipeMatrix(rows);
+      sheets.push({
+        name: matrixRows ? `${name} — formato matriz convertido` : name,
+        rows: matrixRows ?? rows,
+        ...(hasFormulaCells ? { warnings: ['La hoja contiene fórmulas. Se leyeron únicamente los valores guardados en el archivo; no se ejecutaron fórmulas.'] } : {}),
+        ...(matrixRows ? { warnings: [...(hasFormulaCells ? ['La hoja contiene fórmulas. Se leyeron únicamente los valores guardados en el archivo; no se ejecutaron fórmulas.'] : []), 'Se detectó una matriz de recetas por producto y se normalizó a filas de ingredientes sin modificar cantidades.'] } : {}),
+      });
+    }
   }
   return sheets;
 }
