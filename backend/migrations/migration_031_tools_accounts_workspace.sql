@@ -36,3 +36,12 @@ CREATE TABLE IF NOT EXISTS tools_ai_usage (
     CONSTRAINT fk_tools_ai_usage_account FOREIGN KEY (account_id)
         REFERENCES tools_accounts (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS tools_login_attempts (
+    email_hash CHAR(64) NOT NULL,
+    ip_hash CHAR(64) NOT NULL,
+    attempts SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+    window_started_at DATETIME NOT NULL,
+    PRIMARY KEY (email_hash, ip_hash),
+    KEY idx_tools_login_attempts_window (window_started_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
