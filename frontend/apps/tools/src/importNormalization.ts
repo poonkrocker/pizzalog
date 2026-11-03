@@ -109,9 +109,9 @@ function unitValue(raw: string): UnitCode | null {
   return UNITS.includes(value as UnitCode) ? (value as UnitCode) : null;
 }
 
-function currencyValue(raw: string, fallback: string): string | null {
+function currencyValue(raw: string): string | null {
   const value = raw.trim().toUpperCase();
-  if (!value) return fallback;
+  if (!value) return null;
   return /^[A-Z]{3}$/.test(value) ? value : null;
 }
 
@@ -217,7 +217,7 @@ export function applyImportMappings(
         const price = parseNumber(cell(row, mapping, 'purchase_price'));
         const packQuantity = parseNumber(cell(row, mapping, 'pack_quantity'));
         const packUnit = unitValue(cell(row, mapping, 'pack_unit'));
-        const currency = currencyValue(cell(row, mapping, 'currency'), current.currency);
+        const currency = currencyValue(cell(row, mapping, 'currency'));
         const rawPurchaseDate = cell(row, mapping, 'purchase_date');
         const purchaseDate = purchaseDateValue(rawPurchaseDate);
         const yieldPct = parseNumber(cell(row, mapping, 'yield_pct')) ?? 100;
