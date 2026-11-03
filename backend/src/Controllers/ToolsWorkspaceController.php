@@ -18,8 +18,22 @@ class ToolsWorkspaceController
         $stmt->execute([(int) $req->auth['tools_account_id']]);
         $row = $stmt->fetch();
 
+        $workspace = null;
+        if ($row) {
+            $workspace = json_decode((string)$row['workspace_json'], true);
+            if (
+                !is_array($workspace)
+                || !is_array($workspace['catalog'] ?? null)
+                || !is_array($workspace['catalog']['ingredients'] ?? null)
+                || !is_array($workspace['catalog']['purchase_prices'] ?? null)
+                || !is_array($workspace['catalog']['recipes'] ?? null)
+            ) {
+                Response::error('El espacio de trabajo guardado está dañado o tiene una versión incompatible. No se sobrescribieron los datos.', 500);
+            }
+        }
+
         Response::ok([
-            'workspace' => $row ? json_decode((string) $row['workspace_json'], true) : null,
+            'workspace' => $workspace,
             'schema_version' => $row ? (int) $row['schema_version'] : 1,
         ]);
     }
@@ -27,8 +41,17 @@ class ToolsWorkspaceController
     public function save(Request $req): void
     {
         $workspace = $req->input('workspace');
-        if (!is_array($workspace) || !isset($workspace['catalog']) || !is_array($workspace['catalog'])) {
-            Response::error('El espacio de trabajo no tiene una estructura válida', 422);
+        if (
+            !is_array($workspace)
+            || !is_array($workspace['catalog'] ?? null)
+            || !is_array($workspace['catalog']['ingredients'] ?? null)
+            || !is_array($workspace['catalog']['purchase_prices'] ?? null)
+            || !is_array($workspace['catalog']['recipes'] ?? null)
+            || !is_array($workspace['operatingExpenses'] ?? null)
+            || !is_array($workspace['productSalesMap'] ?? null)
+            || !is_array($workspace['snapshots'] ?? null)
+        ) {
+            Response::error('El espacio de trabajo no tiene la estructura requerida por Tools v1', 422);
         }
 
         $json = json_encode($workspace, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
