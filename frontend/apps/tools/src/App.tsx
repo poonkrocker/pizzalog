@@ -47,6 +47,7 @@ export function App({
     'ingredients' | 'subrecipes' | 'recipes' | 'expenses' | 'snapshots'
   >('recipes');
   const [importError, setImportError] = useState<string | null>(null);
+  const [importNotice, setImportNotice] = useState<string | null>(null);
   const [isSmartImporting, setIsSmartImporting] = useState(false);
   const [smartImportPreview, setSmartImportPreview] = useState<{
     fileName: string;
@@ -340,6 +341,7 @@ export function App({
 
   async function handleSmartImport(file: File) {
     setImportError(null);
+    setImportNotice(null);
     setIsSmartImporting(true);
     try {
       const sheets = await parseImportFile(file);
@@ -374,6 +376,8 @@ export function App({
 
   function confirmSmartImport() {
     if (!smartImportPreview) return;
+    setImportError(null);
+    setImportNotice(null);
     const result = applyImportMappings(state, smartImportPreview.sheets, smartImportPreview.mappings);
     const total = Object.values(result.counts).reduce((sum, count) => sum + count, 0);
     if (total === 0) {
@@ -386,12 +390,13 @@ export function App({
       `Importados: ${result.counts.ingredients} insumos, ${result.counts.prices} precios, ${result.counts.recipes} recetas y ${result.counts.expenses} gastos.`,
       ...result.warnings,
     ];
-    setImportError(summary.join(' '));
+    setImportNotice(summary.join(' '));
     setSmartImportPreview(null);
   }
 
   function handleImportJson(file: File) {
     setImportError(null);
+    setImportNotice(null);
     const reader = new FileReader();
     reader.onload = () => {
       try {
@@ -590,6 +595,7 @@ export function App({
       </header>
 
       {importError && <div className="alert-banner">⚠️ Error de validación al importar: {importError}</div>}
+      {importNotice && <div className="notice-banner">{importNotice}</div>}
 
       <section className="tools-toolbar">
         <label className="field">
