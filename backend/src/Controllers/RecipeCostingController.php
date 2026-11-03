@@ -418,19 +418,37 @@ class RecipeCostingController
         }
     }
 
+    /**
+     * Convierte unidades únicamente para proyectar ingredientes al catálogo legado.
+     * El costeo y los precios se calculan en @pizzalog/cost-engine.
+     */
     private function convertQuantity(float $quantity, string $from, string $to): float
     {
-        $from = strtolower(trim($from)); $to = strtolower(trim($to));
+        $from = strtolower(trim($from));
+        $to = strtolower(trim($to));
         if ($from === $to) return $quantity;
+
         $groups = [
-            ['kg'=>1.0,'kilo'=>1.0,'kilos'=>1.0,'g'=>0.001,'gr'=>0.001,'gramo'=>0.001,'gramos'=>0.001],
-            ['l'=>1.0,'lt'=>1.0,'litro'=>1.0,'litros'=>1.0,'cc'=>0.001,'ml'=>0.001],
-            ['u'=>1.0,'un'=>1.0,'unidad'=>1.0,'unidades'=>1.0],
+            [
+                'mg' => 0.001, 'g' => 1.0, 'gr' => 1.0, 'gramo' => 1.0, 'gramos' => 1.0,
+                'kg' => 1000.0, 'kilo' => 1000.0, 'kilos' => 1000.0,
+                'oz' => 28.349523125, 'lb' => 453.59237,
+            ],
+            [
+                'ml' => 1.0, 'cc' => 1.0, 'l' => 1000.0, 'lt' => 1000.0,
+                'litro' => 1000.0, 'litros' => 1000.0,
+                'fl_oz_us' => 29.5735295625, 'gal_us' => 3785.411784,
+            ],
+            ['u' => 1.0, 'un' => 1.0, 'unit' => 1.0, 'unidad' => 1.0, 'unidades' => 1.0, 'dozen' => 12.0, 'docena' => 12.0],
         ];
+
         foreach ($groups as $group) {
-            if (isset($group[$from]) && isset($group[$to])) return $quantity * $group[$from] / $group[$to];
+            if (isset($group[$from], $group[$to])) {
+                return $quantity * $group[$from] / $group[$to];
+            }
         }
-        return 0.0;
+
+        throw new \\RuntimeException("No se puede proyectar una cantidad de '{$from}' a '{$to}': unidades incompatibles o sin equivalencia explícita.");
     }
 
     private function dependsOn(\PDO $pdo,int $bid,int $current,int $target,array $seen): bool
