@@ -8,20 +8,22 @@ use Pizzalog\Core\Response;
 
 class ToolsImportController
 {
-    private const MAX_SHEETS = 5;
-    private const MAX_ROWS = 500;
-    private const MAX_COLUMNS = 25;
+    private const MAX_SHEETS = 30;
+    private const MAX_ROWS = 10000;
+    private const MAX_COLUMNS = 200;
+    private const MAX_CELLS = 500000;
     private const DAILY_AI_LIMIT = 20;
 
     public function preview(Request $req): void
     {
         $sheets = $req->input('sheets');
         if (!is_array($sheets) || count($sheets) < 1 || count($sheets) > self::MAX_SHEETS) {
-            Response::error('El archivo debe contener entre 1 y 5 hojas con datos', 422);
+            Response::error('El archivo debe contener entre 1 y 30 hojas con datos', 422);
         }
         $sheets = array_values($sheets);
 
         $totalRows = 0;
+        $totalCells = 0;
         foreach ($sheets as $sheet) {
             if (!is_array($sheet) || !is_array($sheet['rows'] ?? null) || count($sheet['rows']) < 1) {
                 Response::error('Estructura de hoja inválida o vacía', 422);
@@ -32,11 +34,15 @@ class ToolsImportController
             }
             foreach ($sheet['rows'] as $row) {
                 if (!is_array($row) || count($row) > self::MAX_COLUMNS) {
-                    Response::error('Cada hoja admite hasta 25 columnas', 413);
+                    Response::error('Cada hoja admite hasta 200 columnas', 413);
+                }
+                $totalCells += count($row);
+                if ($totalCells > self::MAX_CELLS) {
+                    Response::error('La importación supera el límite seguro de 500.000 celdas', 413);
                 }
                 foreach ($row as $cell) {
-                    if (!is_scalar($cell) || strlen((string) $cell) > 250) {
-                        Response::error('Cada celda debe contener texto de hasta 250 caracteres', 422);
+                    if (!is_scalar($cell) || strlen((string) $cell) > 2000) {
+                        Response::error('Cada celda debe contener texto de hasta 2.000 caracteres', 422);
                     }
                 }
             }
