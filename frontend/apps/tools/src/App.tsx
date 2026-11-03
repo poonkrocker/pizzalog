@@ -434,8 +434,15 @@ export function App({
     const result = applyImportMappings(state, smartImportPreview.sheets, smartImportPreview.mappings);
     const total = Object.values(result.counts).reduce((sum, count) => sum + count, 0);
     if (total === 0) {
-      setImportError('No se importó ningún registro. Revisá las columnas detectadas y las unidades requeridas.');
-      setSmartImportPreview(null);
+      const detected = smartImportPreview.mappings
+        .map((mapping) => `${mapping.name}: ${mapping.kind} (encabezado fila ${mapping.header_row_index + 1})`)
+        .join('; ');
+      const details = result.warnings.slice(0, 8).join(' ');
+      setImportError([
+        'No se importó ningún registro. La previsualización sigue abierta para que puedas corregir el mapeo.',
+        detected ? `Hojas detectadas: ${detected}.` : '',
+        details ? `Motivos: ${details}` : '',
+      ].filter(Boolean).join(' '));
       return;
     }
     setState(result.workspace);
@@ -1597,6 +1604,7 @@ export function App({
               </div>
               <button type="button" className="btn" onClick={() => setSmartImportPreview(null)}>Cerrar</button>
             </div>
+            {importError && <p className="smart-import-note" role="alert">{importError}</p>}
             <p className="smart-import-note">
               {smartImportPreview.mappingMode === 'local'
                 ? (smartImportPreview.note || 'El mapeo se realizó localmente en el servidor. No se envió información a servicios externos. Revisá las columnas, unidades y advertencias; nada se guarda hasta tu confirmación.')
