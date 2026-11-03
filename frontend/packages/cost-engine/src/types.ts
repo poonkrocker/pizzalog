@@ -196,6 +196,50 @@ export interface PricingScenarioResult {
   warnings: string[];
 }
 
+export interface PortfolioScenarioItem {
+  id: string;
+  name: string;
+  unit_cost: number | null;
+  status: 'complete' | 'incomplete';
+  selling_price: number | null;
+}
+
+export interface PortfolioScenarioInput {
+  items: PortfolioScenarioItem[];
+  cost_delta_pct: number;
+  price_delta_pct: number;
+  rounding_increment?: number;
+  target_food_cost_pct?: number;
+}
+
+export interface PortfolioScenarioRow {
+  id: string;
+  name: string;
+  status: 'complete' | 'incomplete';
+  current_cost: number | null;
+  simulated_cost: number | null;
+  current_price: number | null;
+  simulated_price: number | null;
+  current_food_cost_pct: number | null;
+  simulated_food_cost_pct: number | null;
+  current_margin: number | null;
+  simulated_margin: number | null;
+}
+
+export interface PortfolioScenarioResult {
+  rows: PortfolioScenarioRow[];
+  complete_items: number;
+  incomplete_items: number;
+  current_revenue: number;
+  simulated_revenue: number;
+  current_cost: number;
+  simulated_cost: number;
+  current_food_cost_pct: number | null;
+  simulated_food_cost_pct: number | null;
+  current_margin: number | null;
+  simulated_margin: number | null;
+}
+
 export interface CostCatalog {
   ingredients: Ingredient[];
   purchase_prices: PurchasePrice[];
