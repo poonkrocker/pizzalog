@@ -48,7 +48,6 @@ export function DoughProfileModal({
   const [flourSemolaPct, setFlourSemolaPct] = useState<number>(6.08);
   const [flourIntegralPct, setFlourIntegralPct] = useState<number>(12.17);
 
-  const [costPerKg, setCostPerKg] = useState<number>(932.3);
   const [ingredientMap, setIngredientMap] = useState<DoughIngredientMap>({});
   const [notes, setNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -84,7 +83,6 @@ export function DoughProfileModal({
       setFlourSemolaPct(profile.flour_semola_pct);
       setFlourIntegralPct(profile.flour_integral_pct);
 
-      setCostPerKg(profile.cost_per_kg);
       setIngredientMap(profile.ingredient_map ?? {});
       setNotes(profile.notes ?? '');
     } else {
@@ -106,7 +104,6 @@ export function DoughProfileModal({
       setFlourWhitePct(100);
       setFlourSemolaPct(0);
       setFlourIntegralPct(0);
-      setCostPerKg(920);
       setIngredientMap({});
       setNotes('');
     }
@@ -145,7 +142,6 @@ export function DoughProfileModal({
       flour_white_pct: Number(flourWhitePct),
       flour_integral_pct: Number(flourIntegralPct),
       flour_semola_pct: Number(flourSemolaPct),
-      cost_per_kg: Number(costPerKg) || 932.3,
       ingredient_map: ingredientMap,
       notes: notes.trim() || null,
     };
