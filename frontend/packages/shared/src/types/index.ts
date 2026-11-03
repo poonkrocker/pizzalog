@@ -819,10 +819,10 @@ export interface StudioRecipeComponent {
   name: string;
   quantity: number;
   unit: string;
-  unit_cost: number;
+  unit_cost: number | null;
   cost_unit?: string;
   unit_mismatch?: boolean;
-  total_cost: number;
+  total_cost: number | null;
 }
 export interface StudioRecipe {
   id: number;
