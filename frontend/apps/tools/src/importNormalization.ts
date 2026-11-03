@@ -1,4 +1,4 @@
-import type { Ingredient, PurchasePrice, Recipe, UnitCode } from '@pizzalog/cost-engine';
+import { areUnitsCompatible, type Ingredient, type PurchasePrice, type Recipe, type UnitCode } from '@pizzalog/cost-engine';
 import type { ParsedImportSheet } from './importFileParser';
 import type { ToolsWorkspaceState, OperatingExpenseItem } from './demoData';
 
@@ -115,6 +115,17 @@ function currencyValue(raw: string, fallback: string): string | null {
   return /^[A-Z]{3}$/.test(value) ? value : null;
 }
 
+function purchaseDateValue(raw: string): string | null | undefined {
+  const value = raw.trim();
+  if (!value) return undefined;
+  let iso = value;
+  const local = value.match(/^(\\d{1,2})[\\/.\\-](\\d{1,2})[\\/.\\-](\\d{4})$/);
+  if (local) iso = `${local[3]}-${local[2].padStart(2, '0')}-${local[1].padStart(2, '0')}`;
+  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(iso)) return null;
+  const parsed = new Date(`${iso}T00:00:00Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === iso ? iso : null;
+}
+
 export function applyImportMappings(
   current: ToolsWorkspaceState,
   sheets: ParsedImportSheet[],
@@ -154,13 +165,16 @@ export function applyImportMappings(
         const name = cell(row, mapping, 'name', 'ingredient_name');
         if (!name) return;
         const baseUnit = unitValue(cell(row, mapping, 'base_unit'));
-        const dimension = dimensionValue(cell(row, mapping, 'base_dimension')) ?? (baseUnit ? dimensionForUnit(baseUnit) : null);
-        if (!baseUnit || !dimension) {
-          warnings.push(`${mapping.name}, fila ${sourceRow}: falta una unidad base explícita válida; se omitió el insumo.`);
+        const inferredDimension = baseUnit ? dimensionForUnit(baseUnit) : null;
+        const declaredDimension = dimensionValue(cell(row, mapping, 'base_dimension'));
+        if (!baseUnit || !inferredDimension || (declaredDimension && declaredDimension !== inferredDimension)) {
+          warnings.push(`${mapping.name}, fila ${sourceRow}: la unidad base falta o no coincide con la dimensión indicada; se omitió el insumo.`);
           return;
         }
+        const dimension = inferredDimension;
 
         let ingredient = knownIngredients.get(normalizedName(name));
+        let allowPriceForIngredient = true;
         if (!ingredient) {
           const next: Ingredient = {
             id: makeId('imp_ing', name, usedIngredientIds),
@@ -178,21 +192,27 @@ export function applyImportMappings(
           ingredient = next;
           counts.ingredients += 1;
         } else if (ingredient.base_unit !== baseUnit || ingredient.base_dimension !== dimension) {
-          warnings.push(`${mapping.name}, fila ${sourceRow}: ${name} ya existe con otra unidad base; no se modificó.`);
+          warnings.push(`${mapping.name}, fila ${sourceRow}: ${name} ya existe con otra unidad base; no se incorporó su precio.`);
+          allowPriceForIngredient = false;
         }
 
         const price = parseNumber(cell(row, mapping, 'purchase_price'));
         const packQuantity = parseNumber(cell(row, mapping, 'pack_quantity'));
         const packUnit = unitValue(cell(row, mapping, 'pack_unit'));
         const currency = currencyValue(cell(row, mapping, 'currency'), current.currency);
+        const rawPurchaseDate = cell(row, mapping, 'purchase_date');
+        const purchaseDate = purchaseDateValue(rawPurchaseDate);
         const yieldPct = parseNumber(cell(row, mapping, 'yield_pct')) ?? 100;
+        const compatiblePack = Boolean(packUnit && areUnitsCompatible(packUnit, ingredient.base_unit, ingredient));
         if (price !== null && price > 0 && packQuantity !== null && packQuantity > 0 && packUnit && currency &&
-            Number.isFinite(yieldPct) && yieldPct > 0 && yieldPct <= 100) {
+            purchaseDate !== null && Number.isFinite(yieldPct) && yieldPct > 0 && yieldPct <= 100 &&
+            compatiblePack && allowPriceForIngredient) {
           pendingPrices.push({
             name,
             price: {
               ingredient_id: ingredient.id,
               purchase_price: price,
+              ...(purchaseDate ? { purchase_date: purchaseDate } : {}),
               currency,
               pack_quantity: packQuantity,
               pack_unit: packUnit,
@@ -200,8 +220,15 @@ export function applyImportMappings(
               supplier: cell(row, mapping, 'supplier') || undefined,
             },
           });
-        } else if (price !== null || packQuantity !== null || packUnit) {
-          warnings.push(`${mapping.name}, fila ${sourceRow}: precio detectado sin presentación completa; se importó el insumo pero no su precio.`);
+        } else if (price !== null || packQuantity !== null || packUnit || rawPurchaseDate) {
+          const reason = rawPurchaseDate && purchaseDate === null
+            ? 'fecha de precio inválida'
+            : !compatiblePack
+              ? 'unidad de presentación incompatible o sin equivalencia explícita'
+              : !allowPriceForIngredient
+                ? 'unidad base distinta a la ya registrada'
+                : 'presentación, moneda, precio o rendimiento incompleto';
+          warnings.push(`${mapping.name}, fila ${sourceRow}: ${reason}; se importó el insumo si correspondía, pero no el precio.`);
         }
         return;
       }
@@ -213,13 +240,13 @@ export function applyImportMappings(
         const packUnit = unitValue(cell(row, mapping, 'pack_unit'));
         const ingredient = knownIngredients.get(normalizedName(name));
         const currency = currencyValue(cell(row, mapping, 'currency'), current.currency);
-        if (!name || !ingredient || price === null || price <= 0 || packQuantity === null || packQuantity <= 0 || !packUnit || !currency) {
-          warnings.push(`${mapping.name}, fila ${sourceRow}: no se pudo vincular el precio a un insumo con presentación o moneda válida.`);
-          return;
-        }
+        const rawPurchaseDate = cell(row, mapping, 'purchase_date');
+        const purchaseDate = purchaseDateValue(rawPurchaseDate);
         const yieldPct = parseNumber(cell(row, mapping, 'yield_pct')) ?? 100;
-        if (yieldPct <= 0 || yieldPct > 100) {
-          warnings.push(`${mapping.name}, fila ${sourceRow}: merma/rendimiento fuera de 0–100%; se omitió el precio.`);
+        const compatiblePack = Boolean(ingredient && packUnit && areUnitsCompatible(packUnit, ingredient.base_unit, ingredient));
+        if (!name || !ingredient || price === null || price <= 0 || packQuantity === null || packQuantity <= 0 ||
+            !packUnit || !currency || purchaseDate === null || yieldPct <= 0 || yieldPct > 100 || !compatiblePack) {
+          warnings.push(`${mapping.name}, fila ${sourceRow}: no se pudo vincular el precio a un insumo con presentación, moneda, fecha, rendimiento y equivalencia válidos.`);
           return;
         }
         pendingPrices.push({
@@ -227,6 +254,7 @@ export function applyImportMappings(
           price: {
             ingredient_id: ingredient.id,
             purchase_price: price,
+            ...(purchaseDate ? { purchase_date: purchaseDate } : {}),
             currency,
             pack_quantity: packQuantity,
             pack_unit: packUnit,
@@ -267,7 +295,8 @@ export function applyImportMappings(
         const componentUnit = unitValue(cell(row, mapping, 'component_unit'));
         const ingredient = knownIngredients.get(normalizedName(componentName));
         if (!name || !recipeType || yieldQuantity === null || yieldQuantity <= 0 || !yieldUnit ||
-            !componentName || componentQuantity === null || componentQuantity <= 0 || !componentUnit || !ingredient) {
+            !componentName || componentQuantity === null || componentQuantity <= 0 || !componentUnit || !ingredient ||
+            !areUnitsCompatible(componentUnit, ingredient.base_unit, ingredient)) {
           warnings.push(`${mapping.name}, fila ${sourceRow}: receta incompleta o componente sin insumo coincidente; se omitió la línea.`);
           return;
         }
@@ -290,9 +319,15 @@ export function applyImportMappings(
   }
 
   for (const item of pendingPrices) {
-    const existingIndex = purchasePrices.findIndex((price) => price.ingredient_id === item.price.ingredient_id);
-    if (existingIndex >= 0) purchasePrices[existingIndex] = item.price;
-    else purchasePrices.push(item.price);
+    const incoming = item.price;
+    const supplierKey = normalizedName(incoming.supplier ?? '');
+    const existingIndex = purchasePrices.findIndex((price) =>
+      price.ingredient_id === incoming.ingredient_id &&
+      (price.purchase_date ?? '') === (incoming.purchase_date ?? '') &&
+      normalizedName(price.supplier ?? '') === supplierKey
+    );
+    if (existingIndex >= 0) purchasePrices[existingIndex] = incoming;
+    else purchasePrices.push(incoming);
     counts.prices += 1;
   }
 
