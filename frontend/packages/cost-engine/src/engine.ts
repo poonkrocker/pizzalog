@@ -1066,7 +1066,9 @@ export function calculatePortfolioScenario(input: PortfolioScenarioInput): Portf
     simulated_cost: simulatedCost,
     current_food_cost_pct: currentRevenue > 0 ? (currentCost / currentRevenue) * 100 : null,
     simulated_food_cost_pct: simulatedRevenue > 0 ? (simulatedCost / simulatedRevenue) * 100 : null,
-    current_margin: currentRevenue > 0 ? ((currentRevenue - currentCost) / currentRevenue) * 100 : null,
-    simulated_margin: simulatedRevenue > 0 ? ((simulatedRevenue - simulatedCost) / simulatedRevenue) * 100 : null,
+    current_gross_profit: currentRevenue - currentCost,
+    simulated_gross_profit: simulatedRevenue - simulatedCost,
+    current_margin_pct: currentRevenue > 0 ? ((currentRevenue - currentCost) / currentRevenue) * 100 : null,
+    simulated_margin_pct: simulatedRevenue > 0 ? ((simulatedRevenue - simulatedCost) / simulatedRevenue) * 100 : null,
   };
 }
