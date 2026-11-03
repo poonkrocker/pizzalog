@@ -264,7 +264,7 @@ export function applyImportMappings(
         const packQuantity = parseNumber(cell(row, mapping, 'pack_quantity'));
         const packUnit = unitValue(cell(row, mapping, 'pack_unit'));
         const ingredient = knownIngredients.get(normalizedName(name));
-        const currency = currencyValue(cell(row, mapping, 'currency'), current.currency);
+        const currency = currencyValue(cell(row, mapping, 'currency'));
         const rawPurchaseDate = cell(row, mapping, 'purchase_date');
         const purchaseDate = purchaseDateValue(rawPurchaseDate);
         const yieldPct = parseNumber(cell(row, mapping, 'yield_pct')) ?? 100;
