@@ -234,6 +234,11 @@ export function expandBakersDoughSpec(spec: BakersDoughSpec): {
   yieldQuantityG: number;
   flourTotalG: number;
   waterTotalG: number;
+  flourBreakdown: Array<{ ingredient_id: string; quantityG: number }>;
+  biga: { flourG: number; waterG: number; yeastG: number; totalG: number };
+  poolish: { flourG: number; waterG: number; yeastG: number; totalG: number };
+  final: { flourG: number; waterG: number };
+  direct: { yeastG: number; saltG: number; sugarG: number; oilG: number };
 } {
   if (!Number.isFinite(spec.hydration_pct) || spec.hydration_pct < 0) {
     throw new CostEngineValidationError('INVALID_DOUGH_SPEC', 'La hidratación debe ser un porcentaje válido >= 0.');
@@ -389,6 +394,7 @@ export function expandBakersDoughSpec(spec: BakersDoughSpec): {
   }
 
   const components: RecipeComponent[] = [];
+  const flourBreakdown: Array<{ ingredient_id: string; quantityG: number }> = [];
 
   for (const f of spec.flours) {
     const fraction = usesWeights
@@ -396,6 +402,7 @@ export function expandBakersDoughSpec(spec: BakersDoughSpec): {
       : (f.share_pct ?? 0) / 100;
     const grams = flourTotalG * fraction;
     if (grams > 0) {
+      flourBreakdown.push({ ingredient_id: f.ingredient_id, quantityG: grams });
       components.push({
         component_type: 'ingredient',
         ingredient_id: f.ingredient_id,
@@ -404,6 +411,17 @@ export function expandBakersDoughSpec(spec: BakersDoughSpec): {
       });
     }
   }
+
+  const bigaFlourG = flourTotalG * (bigaFlourPct / 100);
+  const bigaWaterG = bigaFlourG * (bigaWaterPct / 100);
+  const bigaYeastG = bigaFlourG * (bigaYeastPct / 100);
+  const poolishFlourG = flourTotalG * (poolishFlourPct / 100);
+  const poolishWaterG = poolishFlourG * (poolishWaterPct / 100);
+  const poolishYeastG = poolishFlourG * (poolishYeastPct / 100);
+  const directYeastG = flourTotalG * (directYeastPct / 100);
+  const saltG = flourTotalG * (saltPct / 100);
+  const sugarG = flourTotalG * (sugarPct / 100);
+  const oilG = flourTotalG * (oilPct / 100);
 
   if (waterTotalG > 0 && spec.water_ingredient_id) {
     components.push({
@@ -419,17 +437,17 @@ export function expandBakersDoughSpec(spec: BakersDoughSpec): {
   const yeastComponents: Array<{ ingredientId: string | undefined; quantityG: number; source: string }> = [
     {
       ingredientId: spec.biga?.yeast_ingredient_id,
-      quantityG: flourTotalG * (bigaFlourPct / 100) * (bigaYeastPct / 100),
+      quantityG: bigaYeastG,
       source: 'biga',
     },
     {
       ingredientId: spec.poolish?.yeast_ingredient_id,
-      quantityG: flourTotalG * (poolishFlourPct / 100) * (poolishYeastPct / 100),
+      quantityG: poolishYeastG,
       source: 'poolish',
     },
     {
       ingredientId: spec.yeast_ingredient_id,
-      quantityG: flourTotalG * (directYeastPct / 100),
+      quantityG: directYeastG,
       source: 'direct_yeast',
     },
   ];
@@ -463,7 +481,6 @@ export function expandBakersDoughSpec(spec: BakersDoughSpec): {
   }
 
   // Sal
-  const saltG = flourTotalG * (saltPct / 100);
   if (saltG > 0 && spec.salt_ingredient_id) {
     components.push({
       component_type: 'ingredient',
@@ -474,7 +491,6 @@ export function expandBakersDoughSpec(spec: BakersDoughSpec): {
   }
 
   // Azúcar
-  const sugarG = flourTotalG * (sugarPct / 100);
   if (sugarG > 0 && spec.sugar_ingredient_id) {
     components.push({
       component_type: 'ingredient',
@@ -485,7 +501,6 @@ export function expandBakersDoughSpec(spec: BakersDoughSpec): {
   }
 
   // Aceite
-  const oilG = flourTotalG * (oilPct / 100);
   if (oilG > 0 && spec.oil_ingredient_id) {
     components.push({
       component_type: 'ingredient',
@@ -500,6 +515,24 @@ export function expandBakersDoughSpec(spec: BakersDoughSpec): {
     yieldQuantityG,
     flourTotalG,
     waterTotalG,
+    flourBreakdown,
+    biga: {
+      flourG: bigaFlourG,
+      waterG: bigaWaterG,
+      yeastG: bigaYeastG,
+      totalG: bigaFlourG + bigaWaterG + bigaYeastG,
+    },
+    poolish: {
+      flourG: poolishFlourG,
+      waterG: poolishWaterG,
+      yeastG: poolishYeastG,
+      totalG: poolishFlourG + poolishWaterG + poolishYeastG,
+    },
+    final: {
+      flourG: flourTotalG - bigaFlourG - poolishFlourG,
+      waterG: waterTotalG - bigaWaterG - poolishWaterG,
+    },
+    direct: { yeastG: directYeastG, saltG, sugarG, oilG },
   };
 }
 
