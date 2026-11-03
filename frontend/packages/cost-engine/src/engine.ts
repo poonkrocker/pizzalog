@@ -235,7 +235,7 @@ export function expandBakersDoughSpec(spec: BakersDoughSpec): {
   yieldQuantityG: number;
   flourTotalG: number;
   waterTotalG: number;
-  flourBreakdown: Array<{ ingredient_id: string; quantityG: number }>;
+  flourBreakdown: Array<{ ingredient_id: string; quantityG: number; index: number }>;
   biga: { flourG: number; waterG: number; yeastG: number; totalG: number };
   poolish: { flourG: number; waterG: number; yeastG: number; totalG: number };
   final: { flourG: number; waterG: number };
@@ -395,15 +395,15 @@ export function expandBakersDoughSpec(spec: BakersDoughSpec): {
   }
 
   const components: RecipeComponent[] = [];
-  const flourBreakdown: Array<{ ingredient_id: string; quantityG: number }> = [];
+  const flourBreakdown: Array<{ ingredient_id: string; quantityG: number; index: number }> = [];
 
-  for (const f of spec.flours) {
+  for (const [index, f] of spec.flours.entries()) {
     const fraction = usesWeights
       ? (f.weight_kg ?? 0) / weightSum
       : (f.share_pct ?? 0) / 100;
     const grams = flourTotalG * fraction;
+    flourBreakdown.push({ ingredient_id: f.ingredient_id, quantityG: grams, index });
     if (grams > 0) {
-      flourBreakdown.push({ ingredient_id: f.ingredient_id, quantityG: grams });
       components.push({
         component_type: 'ingredient',
         ingredient_id: f.ingredient_id,
