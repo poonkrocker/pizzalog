@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - feat/tools-cost-engine-importer-v1
     paths:
       - "frontend/apps/panel/**"
       - "frontend/packages/shared/**"
@@ -25,7 +26,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.ref_name }}
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -58,5 +59,5 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git commit -m "build(panel): publish compiled frontend"
-            git push origin HEAD:main
+            git push origin "HEAD:${GITHUB_REF_NAME}"
           fi
