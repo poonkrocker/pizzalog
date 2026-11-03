@@ -138,9 +138,6 @@ $router->post('/production/dough-profiles', [ProductionController::class, 'dough
 $router->put('/production/dough-profiles/{id}', [ProductionController::class, 'doughProfileUpdate'], [$auth, $manage]);
 $router->delete('/production/dough-profiles/{id}', [ProductionController::class, 'doughProfileDestroy'], [$auth, $manage]);
 $router->post('/production/dough-calculate', [ProductionController::class, 'doughCalculate'], [$auth]);
-$router->get('/production/cost-margins', [ProductionController::class, 'costMargins'], [$auth, $manage]);
-$router->post('/production/recipes', [ProductionController::class, 'saveRecipe'], [$auth, $manage]);
-$router->post('/production/simulate', [ProductionController::class, 'simulate'], [$auth, $manage]);
 $router->get('/production/recipe-studio', [RecipeCostingController::class, 'recipesIndex'], [$auth, $manage]);
 $router->post('/production/recipe-studio/recipes', [RecipeCostingController::class, 'recipesSave'], [$auth, $manage]);
 $router->post('/production/recipe-studio/import-legacy', [RecipeCostingController::class, 'importLegacyRecipes'], [$auth, $manage]);
