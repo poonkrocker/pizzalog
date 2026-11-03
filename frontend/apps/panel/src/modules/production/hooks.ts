@@ -1,6 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
-  DoughCalculateParams,
   DoughProfileInput,
 } from '@pizzalog/shared';
 import { useApi } from '@/lib/auth';
@@ -44,12 +43,5 @@ export function useDeleteDoughProfile() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['production', 'dough-profiles'] });
     },
-  });
-}
-
-export function useDoughCalculate() {
-  const api = useApi();
-  return useMutation({
-    mutationFn: (params: DoughCalculateParams) => api.production.doughCalculate(params),
   });
 }
