@@ -262,7 +262,7 @@ class RecipeCostingController
                 !is_finite((float)$unitCost) ||
                 (float)$unitCost < 0 ||
                 !preg_match('/^\d+\.\d+\.\d+$/', $engineVersion) ||
-                !preg_match('/^[a-f0-9]{64}$/', $inputHash)
+                !preg_match('/^[a-f0-9]{16}$/', $inputHash)
             ) {
                 throw new \InvalidArgumentException('El snapshot de costo de Cost Engine no tiene un resultado completo y una procedencia válida.');
             }
