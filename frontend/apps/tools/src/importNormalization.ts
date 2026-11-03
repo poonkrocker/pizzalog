@@ -248,8 +248,10 @@ export function applyImportMappings(
               ? 'unidad de presentación incompatible o sin equivalencia explícita'
               : !allowPriceForIngredient
                 ? 'unidad base distinta a la ya registrada'
-                : !compatibleCurrency
-                  ? 'falta un tipo de cambio explícito para la moneda importada'
+                : !currency
+                  ? 'falta declarar la moneda del precio'
+                  : !compatibleCurrency
+                    ? 'falta un tipo de cambio explícito para la moneda importada'
                   : 'presentación, moneda, precio o rendimiento incompleto';
           warnings.push(`${mapping.name}, fila ${sourceRow}: ${reason}; se importó el insumo si correspondía, pero no el precio.`);
         }
@@ -272,7 +274,7 @@ export function applyImportMappings(
         ));
         if (!name || !ingredient || price === null || price <= 0 || packQuantity === null || packQuantity <= 0 ||
             !packUnit || !currency || purchaseDate === null || yieldPct <= 0 || yieldPct > 100 || !compatiblePack || !compatibleCurrency) {
-          warnings.push(`${mapping.name}, fila ${sourceRow}: no se pudo vincular el precio a un insumo con presentación, fecha, rendimiento, moneda y tipo de cambio explícitos.`);
+          warnings.push(`${mapping.name}, fila ${sourceRow}: no se pudo vincular el precio a un insumo con presentación, fecha, rendimiento, moneda explícita y tipo de cambio válido.`);
           return;
         }
         pendingPrices.push({
