@@ -447,3 +447,11 @@ table.kit-table select {
 .notice-banner { border: 1px solid var(--line); background: var(--surface-alt); color: var(--text); border-radius: 8px; padding: 10px 12px; font-size: 12px; line-height: 1.5; }
 
 .tools-save-status { align-self: center; color: var(--muted); font-size: 11px; white-space: nowrap; }
+
+
+.smart-import-edit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin: 12px 0; }
+.smart-import-field-map { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 9px; margin: 12px 0 16px; }
+.smart-import-field-map .field, .smart-import-edit-grid .field { display: grid; gap: 5px; margin: 0; }
+.smart-import-field-map .field span, .smart-import-edit-grid .field span { font-size: 11px; color: var(--muted); font-weight: 700; }
+.smart-import-field-map select, .smart-import-edit-grid select { width: 100%; min-width: 0; }
+.smart-import-warning-note { margin: 8px 0; color: var(--warn); font-size: 12px; }
