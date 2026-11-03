@@ -43,6 +43,13 @@ $router = new Router();
 $auth   = Auth::authenticate();
 $manage = Auth::requireRole(['admin', 'manager']);  // crear/editar/borrar catálogo o empleado con permisos
 $admin  = Auth::requireRole(['admin']);             // gestión de usuarios
+$toolsAuth = ToolsAuth::authenticate();
+
+// --- Pizzalog Tools ---------------------------------------------------
+$router->post('/tools/auth/login', [ToolsAuthController::class, 'login']);
+$router->get('/tools/auth/me', [ToolsAuthController::class, 'me'], [$toolsAuth]);
+$router->get('/tools/workspace', [ToolsWorkspaceController::class, 'show'], [$toolsAuth]);
+$router->put('/tools/workspace', [ToolsWorkspaceController::class, 'save'], [$toolsAuth]);
 
 // --- Salud ------------------------------------------------------------
 $router->get('/', fn() => \Pizzalog\Core\Response::ok(['service' => 'pizzalog-api', 'status' => 'up']));
