@@ -271,10 +271,35 @@ export function applyImportMappings(
       if (mapping.kind === 'purchase_prices') {
         const name = cell(row, mapping, 'ingredient_name', 'name');
         const price = parseNumber(cell(row, mapping, 'purchase_price'));
-        const packQuantity = parseNumber(cell(row, mapping, 'pack_quantity'));
-        const packUnit = unitValue(cell(row, mapping, 'pack_unit'));
-        const ingredient = knownIngredients.get(normalizedName(name));
-        const currency = currencyValue(cell(row, mapping, 'currency'));
+        const rawBaseUnit = cell(row, mapping, 'base_unit');
+        const existingIngredient = knownIngredients.get(normalizedName(name));
+        const inferredBaseUnit = unitValue(rawBaseUnit);
+        let ingredient = existingIngredient;
+
+        // Una tabla de "precio por unidad" también puede ser la única fuente del catálogo.
+        // En ese caso creamos el insumo desde su unidad explícita, sin inferir equivalencias.
+        if (!ingredient && name && inferredBaseUnit) {
+          const dimension = dimensionForUnit(inferredBaseUnit);
+          if (dimension) {
+            ingredient = {
+              id: makeId('imp_ing', name, usedIngredientIds),
+              name,
+              base_dimension: dimension,
+              base_unit: inferredBaseUnit,
+              is_active: true,
+            };
+            ingredients.push(ingredient);
+            knownIngredients.set(normalizedName(name), ingredient);
+            counts.ingredients += 1;
+          }
+        }
+
+        const rawPackQuantity = cell(row, mapping, 'pack_quantity');
+        const rawPackUnit = cell(row, mapping, 'pack_unit');
+        const packQuantity = parseNumber(rawPackQuantity) ?? (price !== null && !rawPackQuantity ? 1 : null);
+        const packUnit = unitValue(rawPackUnit) ?? (price !== null && !rawPackUnit ? ingredient?.base_unit ?? null : null);
+        const rawCurrency = cell(row, mapping, 'currency');
+        const currency = currencyValue(rawCurrency) ?? (price !== null && !rawCurrency ? current.currency : null);
         const rawPurchaseDate = cell(row, mapping, 'purchase_date');
         const purchaseDate = purchaseDateValue(rawPurchaseDate);
         const yieldPct = parseNumber(cell(row, mapping, 'yield_pct')) ?? 100;
@@ -284,7 +309,7 @@ export function applyImportMappings(
         ));
         if (!name || !ingredient || price === null || price <= 0 || packQuantity === null || packQuantity <= 0 ||
             !packUnit || !currency || purchaseDate === null || yieldPct <= 0 || yieldPct > 100 || !compatiblePack || !compatibleCurrency) {
-          warnings.push(`${mapping.name}, fila ${sourceRow}: no se pudo vincular el precio a un insumo con presentación, fecha, rendimiento, moneda explícita y tipo de cambio válido.`);
+          warnings.push(`${mapping.name}, fila ${sourceRow}: no se pudo vincular el precio a un insumo con unidad/presentación compatible, moneda y precio válidos.`);
           return;
         }
         pendingPrices.push({
