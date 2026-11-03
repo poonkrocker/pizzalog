@@ -14,6 +14,7 @@ import {
   calculatePricingScenario,
   calculatePortfolioScenario,
   CostEngine,
+  ENGINE_VERSION,
   type CostCatalog,
   type Dimension,
   type Recipe as EngineRecipe,
@@ -455,7 +456,7 @@ export function RecipeStudioPage() {
         return;
       }
     }
-    const costByProduct = new Map<number, number>();
+    const costByProduct = new Map<number, { unit_cost: number; engine_version: string; input_snapshot_hash: string }>();
     if (draftEngineContext) {
       for (const savedRecipe of rawRecipes) {
         if (savedRecipe.recipe_type !== 'product') continue;
@@ -465,7 +466,7 @@ export function RecipeStudioPage() {
         try {
           const result = draftEngineContext.engine.calculateRecipeCost(String(savedRecipe.id));
           if (result.status === 'complete' && result.raw_unit_cost !== null) {
-            costByProduct.set(productId, result.raw_unit_cost);
+            costByProduct.set(productId, { unit_cost: result.raw_unit_cost, engine_version: result.engine_version || ENGINE_VERSION, input_snapshot_hash: result.input_snapshot_hash });
           }
         } catch {
           // Una receta incompleta no actualiza el costo almacenado del producto.
@@ -473,10 +474,10 @@ export function RecipeStudioPage() {
       }
       if (!editingId && recipeType === 'product' && linkedProductId > 0 &&
           draftEngineContext.result.status === 'complete' && draftEngineContext.result.raw_unit_cost !== null) {
-        costByProduct.set(linkedProductId, draftEngineContext.result.raw_unit_cost);
+        costByProduct.set(linkedProductId, { unit_cost: draftEngineContext.result.raw_unit_cost, engine_version: draftEngineContext.result.engine_version || ENGINE_VERSION, input_snapshot_hash: draftEngineContext.result.input_snapshot_hash });
       }
     }
-    const costSnapshots = Array.from(costByProduct, ([linked_product_id, unit_cost]) => ({ linked_product_id, unit_cost }));
+    const costSnapshots = Array.from(costByProduct, ([linked_product_id, snapshot]) => ({ linked_product_id, ...snapshot }));
 
     const body: SaveStudioRecipeInput = {
       ...(editingId ? { id: editingId } : {}),
