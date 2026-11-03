@@ -869,7 +869,7 @@ export function ProductionPage() {
                                         <div>
                                           <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>{ing.name}</div>
                                           <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
-                                            {ing.quantity} {ing.unit} @ {formatARS(ing.unit_cost)}/{ing.unit}
+                                            {ing.quantity} {ing.unit} @ {ing.unit_cost !== null ? formatARS(ing.unit_cost) : 'Sin costo cargado'}/{ing.unit}
                                           </div>
                                         </div>
                                         <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#1e293b' }}>
