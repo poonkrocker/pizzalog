@@ -448,7 +448,7 @@ class RecipeCostingController
             }
         }
 
-        throw new \\RuntimeException("No se puede proyectar una cantidad de '{$from}' a '{$to}': unidades incompatibles o sin equivalencia explícita.");
+        throw new \RuntimeException("No se puede proyectar una cantidad de '{$from}' a '{$to}': unidades incompatibles o sin equivalencia explícita.");
     }
 
     private function dependsOn(\PDO $pdo,int $bid,int $current,int $target,array $seen): bool
