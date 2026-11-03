@@ -70,7 +70,7 @@ class ProductionController
         $costPerKg       = max(0, (float) ($b['cost_per_kg'] ?? 932.30));
         try {
             $ingredientMap = $this->normalizeIngredientMap($pdo, $bid, $b['ingredient_map'] ?? null);
-        } catch (\\InvalidArgumentException $e) {
+        } catch (\InvalidArgumentException $e) {
             Response::error($e->getMessage(), 422);
             return;
         }
@@ -135,7 +135,7 @@ class ProductionController
         $costPerKg       = max(0, (float) ($b['cost_per_kg'] ?? 932.30));
         try {
             $ingredientMap = $this->normalizeIngredientMap($pdo, $bid, $b['ingredient_map'] ?? null);
-        } catch (\\InvalidArgumentException $e) {
+        } catch (\InvalidArgumentException $e) {
             Response::error($e->getMessage(), 422);
             return;
         }
@@ -435,13 +435,13 @@ class ProductionController
         ];
     }
 
-    private function normalizeIngredientMap(\\PDO $pdo, int $bid, mixed $raw): ?array
+    private function normalizeIngredientMap(\PDO $pdo, int $bid, mixed $raw): ?array
     {
         if ($raw === null) {
             return null;
         }
         if (!is_array($raw)) {
-            throw new \\InvalidArgumentException('La asignación de insumos debe ser un objeto válido.');
+            throw new \InvalidArgumentException('La asignación de insumos debe ser un objeto válido.');
         }
 
         $allowed = [
@@ -458,11 +458,11 @@ class ProductionController
                 continue;
             }
             if (!is_numeric($value) || (int) $value <= 0) {
-                throw new \\InvalidArgumentException('La asignación de insumos contiene un identificador inválido.');
+                throw new \InvalidArgumentException('La asignación de insumos contiene un identificador inválido.');
             }
             $check->execute([(int) $value, $bid]);
             if (!$check->fetchColumn()) {
-                throw new \\InvalidArgumentException('Uno de los insumos seleccionados no pertenece a este negocio o está inactivo.');
+                throw new \InvalidArgumentException('Uno de los insumos seleccionados no pertenece a este negocio o está inactivo.');
             }
             $normalized[$key] = (int) $value;
         }
