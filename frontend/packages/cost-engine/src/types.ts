@@ -102,6 +102,14 @@ export interface BakersDoughSpec {
   water_ingredient_id?: string;
 }
 
+export interface FainaSpec {
+  units_count: number;
+  chickpea_flour_ingredient_id: string;
+  salt_ingredient_id: string;
+  oil_ingredient_id: string;
+  water_ingredient_id?: string;
+}
+
 export interface Recipe {
   id: string;
   name: string;
