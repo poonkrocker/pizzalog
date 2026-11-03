@@ -40,7 +40,7 @@ Content-Type: application/json
 - El workspace queda aislado por `tools_account_id`; no se guarda en `localStorage`.
 - El parser del navegador solo lee valores; no ejecuta macros ni fórmulas.
 - Archivos: XLSX/CSV, hasta 8 MB, 5 hojas, 500 filas, 25 columnas y 250 caracteres por celda.
-- La previsualización IA requiere sesión y tiene un límite de 20 solicitudes diarias por cuenta.
+- La previsualización IA requiere sesión y tiene un límite de 20 solicitudes diarias por cuenta; DeepSeek recibe solo las primeras 20 filas de cada hoja para identificar encabezados, no la planilla completa.
 - DeepSeek propone exclusivamente el mapeo de columnas. La aplicación normaliza y valida los valores de forma determinística; la persona revisa la vista previa y confirma antes de incorporar datos.
 - La importación no inserta datos en la base operativa de App.
 
