@@ -97,6 +97,7 @@ async function unzip(buffer: ArrayBuffer): Promise<Map<string, Uint8Array>> {
   const decoder = new TextDecoder();
   const files = new Map<string, Uint8Array>();
   let offset = centralOffset;
+  let totalUncompressed = 0;
 
   for (let i = 0; i < entryCount; i += 1) {
     if (view.getUint32(offset, true) !== 0x02014b50) {
@@ -104,6 +105,11 @@ async function unzip(buffer: ArrayBuffer): Promise<Map<string, Uint8Array>> {
     }
     const method = view.getUint16(offset + 10, true);
     const compressedSize = view.getUint32(offset + 20, true);
+    const uncompressedSize = view.getUint32(offset + 24, true);
+    totalUncompressed += uncompressedSize;
+    if (uncompressedSize > 8 * 1024 * 1024 || totalUncompressed > 32 * 1024 * 1024) {
+      throw new Error('El XLSX supera el límite de contenido descomprimido');
+    }
     const nameLength = view.getUint16(offset + 28, true);
     const extraLength = view.getUint16(offset + 30, true);
     const commentLength = view.getUint16(offset + 32, true);
@@ -124,6 +130,7 @@ async function unzip(buffer: ArrayBuffer): Promise<Map<string, Uint8Array>> {
     if (method === 0) data = compressed;
     else if (method === 8) data = await inflateRaw(compressed);
     else throw new Error('El XLSX usa un método de compresión no compatible');
+    if (data.length !== uncompressedSize) throw new Error('El XLSX contiene una entrada ZIP truncada o inconsistente');
 
     files.set(name, data);
   }
