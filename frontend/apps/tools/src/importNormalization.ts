@@ -160,6 +160,7 @@ export function applyImportMappings(
   const counts = { ingredients: 0, prices: 0, recipes: 0, expenses: 0 };
   const pendingPrices: Array<{ name: string; price: PurchasePrice }> = [];
   const recipeRows = new Map<string, { name: string; type: Recipe['recipe_type']; yieldQuantity: number; yieldUnit: UnitCode; components: Recipe['components'] }>();
+  const invalidRecipeKeys = new Set<string>();
 
   const orderedMappings = [...mappings].sort((a, b) => {
     const order = { ingredients: 0, purchase_prices: 1, recipes: 2, operating_expenses: 3, unknown: 4 };
@@ -315,6 +316,7 @@ export function applyImportMappings(
 
       if (mapping.kind === 'recipes') {
         const name = cell(row, mapping, 'recipe_name');
+        const key = normalizedName(name);
         const recipeType = parseRecipeType(cell(row, mapping, 'recipe_type'));
         const yieldQuantity = parseNumber(cell(row, mapping, 'yield_quantity'));
         const yieldUnit = unitValue(cell(row, mapping, 'yield_unit'));
@@ -322,19 +324,31 @@ export function applyImportMappings(
         const componentQuantity = parseNumber(cell(row, mapping, 'component_quantity'));
         const componentUnit = unitValue(cell(row, mapping, 'component_unit'));
         const ingredient = knownIngredients.get(normalizedName(componentName));
-        if (!name || !recipeType || yieldQuantity === null || yieldQuantity <= 0 || !yieldUnit ||
-            !componentName || componentQuantity === null || componentQuantity <= 0 || !componentUnit || !ingredient ||
-            !areUnitsCompatible(componentUnit, ingredient.base_unit, ingredient)) {
-          warnings.push(`${mapping.name}, fila ${sourceRow}: receta incompleta o componente sin insumo coincidente; se omitió la línea.`);
+        const lineIsValid = Boolean(
+          name && recipeType && yieldQuantity !== null && yieldQuantity > 0 && yieldUnit &&
+          componentName && componentQuantity !== null && componentQuantity > 0 &&
+          componentUnit && ingredient &&
+          areUnitsCompatible(componentUnit, ingredient.base_unit, ingredient)
+        );
+        if (!lineIsValid) {
+          if (key) invalidRecipeKeys.add(key);
+          warnings.push(`${mapping.name}, fila ${sourceRow}: receta incompleta o componente sin insumo coincidente; se omitirá la receta completa para evitar un costo parcial.`);
           return;
         }
-        const key = normalizedName(name);
+
         const existing = recipeRows.get(key);
         if (existing && (existing.type !== recipeType || existing.yieldQuantity !== yieldQuantity || existing.yieldUnit !== yieldUnit)) {
-          warnings.push(`${mapping.name}, fila ${sourceRow}: datos de rendimiento inconsistentes para ${name}; se omitió la línea.`);
+          invalidRecipeKeys.add(key);
+          warnings.push(`${mapping.name}, fila ${sourceRow}: datos de rendimiento inconsistentes para ${name}; se omitirá la receta completa.`);
           return;
         }
-        const target = existing ?? { name, type: recipeType, yieldQuantity, yieldUnit, components: [] };
+        const target = existing ?? {
+          name,
+          type: recipeType,
+          yieldQuantity,
+          yieldUnit,
+          components: [],
+        };
         target.components = [...(target.components ?? []), {
           component_type: 'ingredient',
           ingredient_id: ingredient.id,
@@ -361,6 +375,10 @@ export function applyImportMappings(
 
   for (const [key, row] of recipeRows) {
     const name = row.name;
+    if (invalidRecipeKeys.has(key)) {
+      warnings.push(`La receta ${name} contiene una o más líneas sin validar y no se importó.`);
+      continue;
+    }
     if (recipes.some((recipe) => normalizedName(recipe.name) === key)) {
       warnings.push(`La receta ${name} ya existe; no se duplicó.`);
       continue;
