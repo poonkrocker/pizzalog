@@ -241,16 +241,36 @@ class RecipeCostingController
         $yield=max(0.0001,(float)($b['yield_quantity']??1)); $yieldUnit=trim((string)($b['yield_unit']??'u')) ?: 'u';
         $price=max(0,(float)($b['price']??0)); $target=max(1,min(100,(float)($b['target_food_cost_pct']??30)));
         $linked=!empty($b['linked_product_id'])?(int)$b['linked_product_id']:null;
+        $previousLinkedProductId = null;
+        if ($id) {
+            $previousStmt = $pdo->prepare('SELECT linked_product_id FROM recipe_studio_recipes WHERE id=? AND business_id=? AND is_active=1');
+            $previousStmt->execute([$id, $bid]);
+            $previousValue = $previousStmt->fetchColumn();
+            $previousLinkedProductId = $previousValue !== false && $previousValue !== null ? (int)$previousValue : null;
+        }
         $components=is_array($b['components']??null)?$b['components']:[];
         $costByProduct = [];
         foreach (is_array($b['cost_snapshots'] ?? null) ? $b['cost_snapshots'] : [] as $snapshot) {
             if (!is_array($snapshot)) continue;
             $productId = (int)($snapshot['linked_product_id'] ?? 0);
             $unitCost = $snapshot['unit_cost'] ?? null;
-            if ($productId <= 0 || !is_numeric($unitCost) || !is_finite((float)$unitCost) || (float)$unitCost < 0) {
-                Response::error('El snapshot de costo enviado por Cost Engine no es válido.', 422);
+            $engineVersion = trim((string)($snapshot['engine_version'] ?? ''));
+            $inputHash = strtolower(trim((string)($snapshot['input_snapshot_hash'] ?? '')));
+            if (
+                $productId <= 0 ||
+                !is_numeric($unitCost) ||
+                !is_finite((float)$unitCost) ||
+                (float)$unitCost < 0 ||
+                !preg_match('/^\d+\.\d+\.\d+$/', $engineVersion) ||
+                !preg_match('/^[a-f0-9]{64}$/', $inputHash)
+            ) {
+                throw new \InvalidArgumentException('El snapshot de costo de Cost Engine no tiene un resultado completo y una procedencia válida.');
             }
-            $costByProduct[$productId] = round((float)$unitCost, 2);
+            $costByProduct[$productId] = [
+                'unit_cost' => round((float)$unitCost, 2),
+                'engine_version' => $engineVersion,
+                'input_snapshot_hash' => $inputHash,
+            ];
         }
         if($name===''){Response::error('El nombre de la receta es obligatorio.',422);return;}
         if(!$components){Response::error('Agregá al menos un ingrediente o componente.',422);return;}
@@ -303,25 +323,38 @@ class RecipeCostingController
             $linkedRows = $linkedRecipes->fetchAll(\PDO::FETCH_ASSOC);
             $allowedProductIds = [];
             foreach ($linkedRows as $linkedRow) {
-                $allowedProductIds[(int)$linkedRow['linked_product_id']] = true;
+                $linkedProductId = (int)$linkedRow['linked_product_id'];
+                if (isset($allowedProductIds[$linkedProductId])) {
+                    throw new \RuntimeException('Un producto no puede tener más de una receta activa vinculada.');
+                }
+                $allowedProductIds[$linkedProductId] = true;
             }
-            foreach ($costByProduct as $productId => $_unitCost) {
+            foreach ($costByProduct as $productId => $_snapshot) {
                 if (!isset($allowedProductIds[(int)$productId])) {
                     throw new \RuntimeException('Cost Engine envió un costo para un producto que no está vinculado a una receta activa de este negocio.');
                 }
             }
 
-            $updateProduct = $pdo->prepare('UPDATE products SET name=?, price=? WHERE id=? AND business_id=?');
-            $updateProductWithCost = $pdo->prepare('UPDATE products SET name=?, price=?, cost=? WHERE id=? AND business_id=?');
+            if ($previousLinkedProductId !== null && !isset($allowedProductIds[$previousLinkedProductId])) {
+                $pdo->prepare('UPDATE products SET cost_is_current=0 WHERE id=? AND business_id=?')
+                    ->execute([$previousLinkedProductId, $bid]);
+            }
+
+            $updateProduct = $pdo->prepare('UPDATE products SET name=?, price=?, cost_is_current=0 WHERE id=? AND business_id=?');
+            $updateProductWithCost = $pdo->prepare('UPDATE products
+                SET name=?, price=?, cost=?, cost_is_current=1, cost_engine_version=?, cost_input_hash=?, cost_calculated_at=CURRENT_TIMESTAMP
+                WHERE id=? AND business_id=?');
             foreach ($linkedRows as $linkedRow) {
                 $linkedProduct = (int)$linkedRow['linked_product_id'];
                 $linkedYield = max(0.0001, (float)$linkedRow['yield_quantity']);
                 if (array_key_exists($linkedProduct, $costByProduct)) {
+                    $snapshot = $costByProduct[$linkedProduct];
                     $updateProductWithCost->execute([
-                        $linkedRow['name'], (float)$linkedRow['price'], $costByProduct[$linkedProduct], $linkedProduct, $bid,
+                        $linkedRow['name'], (float)$linkedRow['price'], $snapshot['unit_cost'],
+                        $snapshot['engine_version'], $snapshot['input_snapshot_hash'], $linkedProduct, $bid,
                     ]);
                 } else {
-                    // Sin resultado completo no se reemplaza el costo previo por cero ni por una estimación parcial.
+                    // Sin resultado completo se conserva el último valor, pero queda explícitamente desactualizado.
                     $updateProduct->execute([$linkedRow['name'], (float)$linkedRow['price'], $linkedProduct, $bid]);
                 }
                 // Proyección operativa de ingredientes; no realiza cálculos de costo.
