@@ -295,4 +295,14 @@ $router->get('/customers/{id}', [CustomerController::class, 'show'], [$auth]);
 $router->put('/customers/{id}', [CustomerController::class, 'update'], [$auth, $manage]);
 $router->delete('/customers/{id}', [CustomerController::class, 'destroy'], [$auth, $manage]);
 
+// Límite temprano de cuerpos JSON para endpoints de Tools antes de leer php://input.
+$toolsPath = parse_url((string)($_SERVER['REQUEST_URI'] ?? ''), PHP_URL_PATH);
+$contentLength = (int)($_SERVER['CONTENT_LENGTH'] ?? 0);
+if ($toolsPath === '/tools/import/preview' && $contentLength > 5 * 1024 * 1024) {
+    \\Pizzalog\\Core\\Response::error('La solicitud de importación supera el límite de 5 MB', 413);
+}
+if ($toolsPath === '/tools/workspace' && strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) === 'PUT' && $contentLength > 6 * 1024 * 1024) {
+    \\Pizzalog\\Core\\Response::error('El espacio de trabajo supera el límite de solicitud de 6 MB', 413);
+}
+
 $router->dispatch(Request::capture());
