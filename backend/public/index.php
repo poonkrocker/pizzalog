@@ -36,6 +36,11 @@ use Pizzalog\Controllers\TableController;
 use Pizzalog\Controllers\TableSessionController;
 use Pizzalog\Controllers\UserController;
 use Pizzalog\Controllers\StaffController;
+use Pizzalog\Controllers\ToolsAuthController;
+use Pizzalog\Controllers\ToolsWorkspaceController;
+use Pizzalog\Controllers\ToolsImportController;
+use Pizzalog\Controllers\ToolsAdminController;
+use Pizzalog\Core\ToolsAuth;
 
 require dirname(__DIR__) . '/bootstrap.php';
 
