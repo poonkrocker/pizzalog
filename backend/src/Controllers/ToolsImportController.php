@@ -258,6 +258,7 @@ PROMPT;
             'sheets' => $safeSheets,
             'ai_previews_remaining_today' => max(0, self::DAILY_AI_LIMIT - $used),
             'note' => 'La IA solo propone un mapeo de columnas. No modifica datos ni calcula costos.',
+            'mapping_mode' => 'ai',
         ]);
     }
 
