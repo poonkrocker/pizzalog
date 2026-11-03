@@ -139,6 +139,10 @@ function elementText(element: Element, localName: string): string {
 
 async function parseXlsx(buffer: ArrayBuffer): Promise<ParsedImportSheet[]> {
   const files = await unzip(buffer);
+  const fileNames = Array.from(files.keys()).map((name) => name.toLowerCase());
+  if (fileNames.some((name) => name.includes('vbaproject') || name.startsWith('xl/externallinks/'))) {
+    throw new Error('No se admiten archivos XLSX con macros o vínculos externos');
+  }
   const workbook = decodeXml(files, 'xl/workbook.xml');
   const rels = decodeXml(files, 'xl/_rels/workbook.xml.rels');
   const relationships = new Map<string, string>();
@@ -201,6 +205,8 @@ export async function parseImportFile(file: File): Promise<ParsedImportSheet[]> 
   const extension = file.name.toLowerCase().split('.').pop();
 
   if (extension === 'csv') {
+    const sample = new Uint8Array(await file.slice(0, 4096).arrayBuffer());
+    if (sample.some((byte) => byte === 0)) throw new Error('El archivo CSV parece contener datos binarios');
     const rows = parseCsv(await file.text());
     if (rows.length > MAX_ROWS) throw new Error('El CSV supera el límite de 500 filas');
     return [{ name: file.name, rows }];
