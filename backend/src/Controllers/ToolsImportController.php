@@ -30,7 +30,7 @@ class ToolsImportController
             }
             $totalRows += count($sheet['rows']);
             if ($totalRows > self::MAX_ROWS) {
-                Response::error('La importación admite hasta 500 filas por archivo', 413);
+                Response::error('La importación admite hasta 10.000 filas por archivo', 413);
             }
             foreach ($sheet['rows'] as $row) {
                 if (!is_array($row) || count($row) > self::MAX_COLUMNS) {
