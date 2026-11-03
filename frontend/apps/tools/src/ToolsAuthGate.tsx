@@ -5,6 +5,46 @@ import { App } from './App';
 const API_URL = ((import.meta.env.VITE_API_URL as string | undefined) ?? 'https://api.pizzalog.net').replace(/\/+$/, '');
 const TOKEN_KEY = 'pizzalog_tools_session';
 
+const LEGACY_WORKSPACE_KEY = 'pizzalog_tools_workspace_v2';
+
+function readLegacyWorkspace(): ToolsWorkspaceState | null {
+  try {
+    const raw = localStorage.getItem(LEGACY_WORKSPACE_KEY);
+    if (!raw) return null;
+    const value = JSON.parse(raw) as ToolsWorkspaceState;
+    if (
+      !value || typeof value !== 'object' ||
+      !value.catalog || !Array.isArray(value.catalog.ingredients) ||
+      !Array.isArray(value.catalog.purchase_prices) || !Array.isArray(value.catalog.recipes) ||
+      !Array.isArray(value.operatingExpenses) || !Array.isArray(value.snapshots) ||
+      !value.productSalesMap || typeof value.productSalesMap !== 'object'
+    ) return null;
+    return value;
+  } catch {
+    return null;
+  }
+}
+
+function removeLegacyWorkspace(): void {
+  try { localStorage.removeItem(LEGACY_WORKSPACE_KEY); } catch { /* Retain the local recovery copy if storage is unavailable. */ }
+}
+
+async function restoreOrMigrateWorkspace(token: string): Promise<ToolsWorkspaceState> {
+  const server = await api<{ workspace: ToolsWorkspaceState | null }>('/tools/workspace', token);
+  if (server.workspace) return server.workspace;
+
+  const legacy = readLegacyWorkspace();
+  if (!legacy) return createInitialDemoWorkspace();
+
+  await api<{ saved: boolean }>('/tools/workspace', token, {
+    method: 'PUT',
+    body: JSON.stringify({ workspace: legacy }),
+  });
+  // Delete the old browser copy only after the server confirms it was saved.
+  removeLegacyWorkspace();
+  return legacy;
+}
+
 function readSessionToken(): string | null {
   try { return sessionStorage.getItem(TOKEN_KEY); } catch { return null; }
 }
@@ -58,8 +98,6 @@ export function ToolsAuthGate() {
   const [workspaceError, setWorkspaceError] = useState('');
 
   useEffect(() => {
-    // Elimina el cache local de la versión previa, que ya no es una fuente de datos.
-    try { localStorage.removeItem('pizzalog_tools_workspace_v2'); } catch { /* storage may be disabled */ }
     const saved = readSessionToken();
     if (saved === null) {
       setLoading(false);
@@ -73,8 +111,8 @@ export function ToolsAuthGate() {
         setToken(savedToken);
         setAccount(me.account);
         try {
-          const data = await api<{ workspace: ToolsWorkspaceState | null }>('/tools/workspace', savedToken);
-          setWorkspace(data.workspace ?? createInitialDemoWorkspace());
+          const restoredWorkspace = await restoreOrMigrateWorkspace(savedToken);
+          setWorkspace(restoredWorkspace);
           setWorkspaceError('');
         } catch (err) {
           setWorkspaceError(err instanceof Error ? err.message : 'No se pudo recuperar el espacio de trabajo');
@@ -108,8 +146,8 @@ export function ToolsAuthGate() {
       setToken(result.token);
       setAccount(result.account);
       try {
-        const data = await api<{ workspace: ToolsWorkspaceState | null }>('/tools/workspace', result.token);
-        setWorkspace(data.workspace ?? createInitialDemoWorkspace());
+        const restoredWorkspace = await restoreOrMigrateWorkspace(result.token);
+        setWorkspace(restoredWorkspace);
       } catch (err) {
         setWorkspaceError(err instanceof Error ? err.message : 'No se pudo recuperar el espacio de trabajo');
       }
