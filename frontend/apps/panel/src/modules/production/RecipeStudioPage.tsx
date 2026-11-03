@@ -415,7 +415,13 @@ export function RecipeStudioPage() {
       const selectedRecipe = c.component_type === 'recipe' ? recipes.find((r) => r.id === c.component_id) : null;
       const costUnit = selectedSupply?.unit ?? selectedRecipe?.yield_unit ?? c.unit;
       const compName = selectedSupply?.name ?? selectedRecipe?.name ?? 'Componente';
-      if (!areUnitsCompatible(c.unit, costUnit)) {
+      const recipeUnitCode = toEngineUnit(c.unit);
+      const costUnitCode = toEngineUnit(costUnit);
+      if (!recipeUnitCode || !costUnitCode) {
+        setRecipeError(`La unidad de '${compName}' no está soportada por el Cost Engine: '${c.unit}' / '${costUnit}'. Usá una unidad estándar o definí una equivalencia explícita.`);
+        return;
+      }
+      if (!areUnitsCompatible(recipeUnitCode, costUnitCode)) {
         setRecipeError(`Unidad incompatible en '${compName}': usaste '${c.unit}' pero cotiza por '${costUnit}'.`);
         return;
       }
@@ -487,10 +493,10 @@ export function RecipeStudioPage() {
                   </div>
                 )}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '.5rem' }}>
-                  <div><div style={{ fontSize: '.75rem', color: '#64748b' }}>Costo total del lote</div><strong>{formatARS(recipe.batch_cost)}</strong></div>
-                  <div><div style={{ fontSize: '.75rem', color: '#64748b' }}>Costo por {recipe.yield_unit}</div><strong>{formatARS(recipe.unit_cost)}</strong></div>
-                  {recipe.recipe_type === 'product' && <div><div style={{ fontSize: '.75rem', color: '#64748b' }}>Precio sugerido</div><strong style={{ color: 'var(--c-accent, #c7101b)' }}>{formatARS(recipe.suggested_price)}</strong></div>}
-                  {recipe.recipe_type === 'product' && <div><div style={{ fontSize: '.75rem', color: '#64748b' }}>Food cost actual</div><strong>{recipe.price > 0 ? `${recipe.food_cost_pct}%` : 'Sin precio cargado'}</strong></div>}
+                  <div><div style={{ fontSize: '.75rem', color: '#64748b' }}>Costo total del lote</div><strong>{recipe.batch_cost !== null ? formatARS(recipe.batch_cost) : 'Incompleto'}</strong></div>
+                  <div><div style={{ fontSize: '.75rem', color: '#64748b' }}>Costo por {recipe.yield_unit}</div><strong>{recipe.unit_cost !== null ? formatARS(recipe.unit_cost) : '—'}</strong></div>
+                  {recipe.recipe_type === 'product' && <div><div style={{ fontSize: '.75rem', color: '#64748b' }}>Precio sugerido</div><strong style={{ color: 'var(--c-accent, #c7101b)' }}>{recipe.suggested_price !== null ? formatARS(recipe.suggested_price) : '—'}</strong></div>}
+                  {recipe.recipe_type === 'product' && <div><div style={{ fontSize: '.75rem', color: '#64748b' }}>Food cost actual</div><strong>{recipe.price > 0 ? (recipe.food_cost_pct !== null ? `${recipe.food_cost_pct}%` : 'Incompleto') : 'Sin precio cargado'}</strong></div>}
                 </div>
                 <button type="button" style={{ ...secondaryButton, alignSelf: 'start' }} onClick={() => editRecipe(recipe)}>Editar receta</button>
               </article>
@@ -555,22 +561,23 @@ export function RecipeStudioPage() {
                   const componentList = c.component_type === 'supply'
                     ? supplies.map((s) => ({ id: s.id, name: s.name, unit: s.unit, cost: s.cost }))
                     : recipes.filter((r) => r.recipe_type === 'subrecipe' && r.id !== editingId).map((r) => ({ id: r.id, name: r.name, unit: r.yield_unit, cost: r.unit_cost }));
-                  const unitCost = componentCostMap.get(`${c.component_type}:${c.component_id}`) ?? 0;
                   const costUnit = componentList.find((v) => v.id === c.component_id)?.unit ?? c.unit;
-                  const isCompatible = areUnitsCompatible(c.unit, costUnit);
-                  const displayedSubtotal = safeConvertQuantity(c.quantity, c.unit, costUnit) * unitCost;
+                  const fromUnit = toEngineUnit(c.unit);
+                  const toUnit = toEngineUnit(costUnit);
+                  const isCompatible = Boolean(fromUnit && toUnit && areUnitsCompatible(fromUnit, toUnit));
+                  const displayedSubtotal = draftCostResult?.components[index]?.raw_total_cost ?? null;
                   return <div key={index} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 145px), 1fr))', gap: '.5rem', alignItems: 'end', padding: '.65rem', border: `1px solid ${!isCompatible ? '#ef4444' : 'var(--c-border, #ddd)'}`, borderRadius: 7 }}>
                     <Field label="Tipo"><select value={c.component_type} onChange={(e) => changeComponent(index, { component_type: e.target.value as 'supply' | 'recipe' })} style={controlStyle}><option value="supply">Ingrediente / insumo</option><option value="recipe">Subreceta</option></select></Field>
                     <Field label={c.component_type === 'supply' ? 'Ingrediente' : 'Preparación'}>
                       <select value={c.component_id} onChange={(e) => { const id = Number(e.target.value); const found = componentList.find((v) => v.id === id); changeComponent(index, { component_id: id, unit: found?.unit || c.unit }); }} style={controlStyle}>
                         <option value={0}>Seleccionar...</option>
-                        {componentList.map((v) => <option key={v.id} value={v.id}>{v.name} · {formatARS(v.cost)}/{v.unit}</option>)}
+                        {componentList.map((v) => <option key={v.id} value={v.id}>{v.name} · {v.cost !== null ? formatARS(v.cost) : 'Sin costo'}/{v.unit}</option>)}
                       </select>
                     </Field>
                     <Field label="Cantidad"><Input type="number" min="0" step="0.001" value={c.quantity} onChange={(e) => changeComponent(index, { quantity: Math.max(0, Number(e.target.value) || 0) })} /></Field>
                     <Field label="Unidad"><select value={c.unit} onChange={(e) => changeComponent(index, { unit: e.target.value })} style={controlStyle}>{units.map((u) => <option key={u} value={u}>{u}</option>)}</select></Field>
                     <div style={{ padding: '.5rem 0', fontWeight: 700, color: !isCompatible ? '#dc2626' : 'inherit' }}>
-                      {!isCompatible ? `⚠️ Incompatible (${costUnit})` : `Subtotal: ${formatARS(displayedSubtotal)}`}
+                      {!isCompatible ? `⚠️ Incompatible (${costUnit})` : displayedSubtotal !== null ? `Subtotal: ${formatARS(displayedSubtotal)}` : 'Costo incompleto'}
                     </div>
                     <button type="button" aria-label="Quitar componente" style={{ ...secondaryButton, color: '#b91c1c' }} onClick={() => setComponents((prev) => prev.filter((_, i) => i !== index))}>Quitar</button>
                   </div>;
@@ -579,11 +586,11 @@ export function RecipeStudioPage() {
             </div>
 
             <div style={{ marginTop: '1rem', padding: '1rem', borderRadius: 8, background: 'var(--c-muted, #f8fafc)', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 155px), 1fr))', gap: '.75rem' }}>
-              <div><div style={{ color: '#64748b', fontSize: '.75rem' }}>Costo del lote</div><strong style={{ fontSize: '1.2rem' }}>{formatARS(computedBatchCost)}</strong></div>
-              <div><div style={{ color: '#64748b', fontSize: '.75rem' }}>Costo por rendimiento</div><strong style={{ fontSize: '1.2rem' }}>{formatARS(computedUnitCost)} / {yieldUnit}</strong></div>
+              <div><div style={{ color: '#64748b', fontSize: '.75rem' }}>Costo del lote</div><strong style={{ fontSize: '1.2rem' }}>{computedBatchCost !== null ? formatARS(computedBatchCost) : 'Incompleto'}</strong></div>
+              <div><div style={{ color: '#64748b', fontSize: '.75rem' }}>Costo por rendimiento</div><strong style={{ fontSize: '1.2rem' }}>{computedUnitCost !== null ? formatARS(computedUnitCost) : '—'} / {yieldUnit}</strong></div>
               {recipeType === 'product' && <>
-                <div><div style={{ color: '#64748b', fontSize: '.75rem' }}>Precio sugerido por food cost {targetPct}%</div><strong style={{ fontSize: '1.25rem', color: 'var(--c-accent, #c7101b)' }}>{formatARS(suggestedPrice)}</strong></div>
-                <div><div style={{ color: '#64748b', fontSize: '.75rem' }}>Food cost al precio cargado</div><strong style={{ fontSize: '1.2rem' }}>{foodCost.toFixed(1)}%</strong></div>
+                <div><div style={{ color: '#64748b', fontSize: '.75rem' }}>Precio sugerido por food cost {targetPct}%</div><strong style={{ fontSize: '1.25rem', color: 'var(--c-accent, #c7101b)' }}>{suggestedPrice !== null ? formatARS(suggestedPrice) : '—'}</strong></div>
+                <div><div style={{ color: '#64748b', fontSize: '.75rem' }}>Food cost al precio cargado</div><strong style={{ fontSize: '1.2rem' }}>{foodCost !== null ? `${foodCost.toFixed(1)}%` : '—'}</strong></div>
               </>}
             </div>
           </Modal>
