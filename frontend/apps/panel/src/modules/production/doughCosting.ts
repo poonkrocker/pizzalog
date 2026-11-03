@@ -111,8 +111,8 @@ export function calculateDoughWithCostEngine(
       chickpea_flour_ingredient_id: supplyRef(profile, 'chickpea_flour_id', supplies, 'mass'),
       salt_ingredient_id: supplyRef(profile, 'salt_id', supplies, 'mass'),
       oil_ingredient_id: supplyRef(profile, 'oil_id', supplies, 'volume'),
-      ...(waterUnit && dimensionForUnit(waterUnit) === 'mass' && typeof waterId === 'number'
-        ? { water_ingredient_id: `supply_${waterId}` }
+      ...(typeof waterId === 'number' && waterId > 0
+        ? { water_ingredient_id: waterUnit && dimensionForUnit(waterUnit) === 'mass' ? `supply_${waterId}` : 'missing_water_id' }
         : {}),
     };
     const expanded = expandFainaSpec(fainaSpec);
