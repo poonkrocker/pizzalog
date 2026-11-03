@@ -216,9 +216,16 @@ export function applyImportMappings(
         }
 
         const price = parseNumber(cell(row, mapping, 'purchase_price'));
-        const packQuantity = parseNumber(cell(row, mapping, 'pack_quantity'));
-        const packUnit = unitValue(cell(row, mapping, 'pack_unit'));
-        const currency = currencyValue(cell(row, mapping, 'currency'));
+        const rawPackQuantity = cell(row, mapping, 'pack_quantity');
+        const rawPackUnit = cell(row, mapping, 'pack_unit');
+        // A price explicitly labelled as a unit price can use one base unit as its package.
+        const packQuantity = parseNumber(rawPackQuantity) ?? (price !== null && !rawPackQuantity ? 1 : null);
+        const packUnit = unitValue(rawPackUnit) ?? (price !== null && !rawPackUnit ? baseUnit : null);
+        const rawCurrency = cell(row, mapping, 'currency');
+        const currency = currencyValue(rawCurrency) ?? (price !== null && !rawCurrency ? current.currency : null);
+        if (price !== null && !rawCurrency) {
+          warnings.push(`${mapping.name}, fila ${sourceRow}: la moneda no está declarada; se utilizó la moneda del proyecto (${current.currency}). Revisá este supuesto.`);
+        }
         const rawPurchaseDate = cell(row, mapping, 'purchase_date');
         const purchaseDate = purchaseDateValue(rawPurchaseDate);
         const yieldPct = parseNumber(cell(row, mapping, 'yield_pct')) ?? 100;
