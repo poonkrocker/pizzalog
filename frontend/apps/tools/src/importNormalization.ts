@@ -46,8 +46,8 @@ function parseNumber(raw: string): number | null {
     // XLSX numeric values use "." as the decimal separator, including es-AR files.
     // Preserve long decimals such as 932.298871562119; only repeated dot groups
     // are interpreted as thousands separators.
-    const dotCount = (value.match(/\\./g) ?? []).length;
-    if (dotCount > 1) value = value.replace(/\\./g, '');
+    const dotCount = (value.match(/\./g) ?? []).length;
+    if (dotCount > 1) value = value.replace(/\./g, '');
 
   }
   const number = Number(value);
