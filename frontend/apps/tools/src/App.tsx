@@ -22,12 +22,11 @@ import {
 } from './demoData';
 import { downloadCustomProfitKitXlsx } from './xlsxExporter';
 
-const STORAGE_KEY = 'pizzalog_tools_workspace_v2';
 const ALL_UNITS: UnitCode[] = ['g', 'kg', 'mg', 'lb', 'oz', 'ml', 'cc', 'L', 'fl_oz_us', 'gal_us', 'unit', 'dozen'];
 
 type ToolsAccount = { id: number; email: string; name: string; expires_at?: string | null };
 
-const API_URL = ((import.meta.env.VITE_API_URL as string | undefined) ?? 'https://api.pizzalog.net').replace(/\\/+$/, '');
+const API_URL = ((import.meta.env.VITE_API_URL as string | undefined) ?? 'https://api.pizzalog.net').replace(/\/+$/, '');
 
 export function App({
   token,
