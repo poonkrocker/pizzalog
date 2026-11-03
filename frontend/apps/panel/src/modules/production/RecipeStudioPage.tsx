@@ -11,8 +11,12 @@ import {
 } from '@pizzalog/shared';
 import {
   areUnitsCompatible,
-  convertQuantity,
   calculatePricingScenario,
+  CostEngine,
+  type CostCatalog,
+  type Dimension,
+  type Recipe as EngineRecipe,
+  type UnitCode,
 } from '@pizzalog/cost-engine';
 import { useApi } from '@/lib/auth';
 import { Field, Input, Loading, Modal } from '@/ui';
@@ -57,9 +61,28 @@ const secondaryButton: React.CSSProperties = {
   background: 'var(--c-surface, #fff)', color: 'var(--c-text, #222)', fontWeight: 600, cursor: 'pointer',
 };
 
-function safeConvertQuantity(quantity: number, from: string, to: string): number {
-  if (!areUnitsCompatible(from, to)) return 0;
-  return convertQuantity(quantity, from, to);
+const ENGINE_UNIT_ALIASES: Record<string, UnitCode> = {
+  kilo: 'kg', kilos: 'kg', gr: 'g', gramo: 'g', gramos: 'g',
+  lt: 'L', litro: 'L', litros: 'L', cc: 'cc', ml: 'ml',
+  u: 'unit', un: 'unit', unidad: 'unit', unidades: 'unit',
+  docena: 'dozen',
+};
+const ENGINE_UNITS = new Set<UnitCode>([
+  'kg', 'g', 'mg', 'lb', 'oz', 'L', 'l', 'ml', 'cc',
+  'fl_oz_us', 'gal_us', 'unit', 'u', 'dozen', 'docena',
+]);
+
+function toEngineUnit(value: string): UnitCode | null {
+  const normalized = value.trim().toLowerCase();
+  const aliased = ENGINE_UNIT_ALIASES[normalized];
+  if (aliased) return aliased;
+  return ENGINE_UNITS.has(value.trim() as UnitCode) ? value.trim() as UnitCode : null;
+}
+
+function dimensionForEngineUnit(unit: UnitCode): Dimension {
+  if (['kg', 'g', 'mg', 'lb', 'oz'].includes(unit)) return 'mass';
+  if (['L', 'l', 'ml', 'cc', 'fl_oz_us', 'gal_us'].includes(unit)) return 'volume';
+  return 'count';
 }
 
 function freshComponent(): ComponentRow {
