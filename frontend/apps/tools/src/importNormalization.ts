@@ -82,10 +82,10 @@ function parseCategory(raw: string): OperatingExpenseItem['category'] | null {
   const value = normalizedName(raw);
   if (/rent|alquiler|renta|locacion/.test(value)) return 'rent';
   if (/payroll|salary|sueld|nomina|personal/.test(value)) return 'payroll';
-  if (/utilit|service|servicio|luz|gas|agua/.test(value)) return 'utilities';
+  if (/electric|electricidad|luz|gas|agua|water|energy|energia|utility|utilities/.test(value)) return 'utilities';
   if (/software|subscription|suscripcion/.test(value)) return 'software';
   if (/tax|impuesto|tribut/.test(value)) return 'taxes';
-  if (/other|otro|vario/.test(value)) return 'other';
+  if (/other|otro|vario|maintenance|mantenimiento|service|servicio|professional|profesional/.test(value)) return 'other';
   return null;
 }
 
