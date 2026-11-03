@@ -303,8 +303,10 @@ async function parseXlsx(buffer: ArrayBuffer): Promise<ParsedImportSheet[]> {
       sheets.push({
         name: matrixRows ? `${name} — formato matriz convertido` : name,
         rows: matrixRows ?? rows,
-        ...(hasFormulaCells ? { warnings: ['La hoja contiene fórmulas. Se leyeron únicamente los valores guardados en el archivo; no se ejecutaron fórmulas.'] } : {}),
-        ...(matrixRows ? { warnings: [...(hasFormulaCells ? ['La hoja contiene fórmulas. Se leyeron únicamente los valores guardados en el archivo; no se ejecutaron fórmulas.'] : []), 'Se detectó una matriz de recetas por producto y se normalizó a filas de ingredientes sin modificar cantidades.'] } : {}),
+        ...((hasFormulaCells || matrixRows) ? { warnings: [
+          ...(hasFormulaCells ? ['La hoja contiene fórmulas. Se leyeron únicamente los valores guardados en el archivo; no se ejecutaron fórmulas.'] : []),
+          ...(matrixRows ? ['Se detectó una matriz de recetas por producto y se normalizó a filas de ingredientes sin modificar cantidades.'] : []),
+        ] } : {}),
       });
     }
   }
