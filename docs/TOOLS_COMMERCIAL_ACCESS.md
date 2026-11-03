@@ -36,6 +36,7 @@ Content-Type: application/json
 
 - Login de Tools usa una identidad separada de los usuarios operativos de App.
 - Todos los endpoints de workspace e importación requieren JWT con audiencia `pizzalog-tools` y validan la cuenta activa y su vencimiento.
+- El login limita a 10 intentos por combinación de email/IP cada 15 minutos; solo se almacenan hashes de email e IP.
 - El workspace queda aislado por `tools_account_id`; no se guarda en `localStorage`.
 - El parser del navegador solo lee valores; no ejecuta macros ni fórmulas.
 - Archivos: XLSX/CSV, hasta 8 MB, 5 hojas, 500 filas, 25 columnas y 250 caracteres por celda.
