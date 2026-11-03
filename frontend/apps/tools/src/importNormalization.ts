@@ -43,8 +43,12 @@ function parseNumber(raw: string): number | null {
     const decimals = value.length - comma - 1;
     value = decimals > 0 && decimals <= 2 ? value.replace(',', '.') : value.replace(/,/g, '');
   } else if (dot >= 0) {
-    const decimals = value.length - dot - 1;
-    if (decimals > 2) value = value.replace(/\./g, '');
+    // XLSX numeric values use "." as the decimal separator, including es-AR files.
+    // Preserve long decimals such as 932.298871562119; only repeated dot groups
+    // are interpreted as thousands separators.
+    const dotCount = (value.match(/\\./g) ?? []).length;
+    if (dotCount > 1) value = value.replace(/\\./g, '');
+
   }
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
