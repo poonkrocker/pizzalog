@@ -106,6 +106,8 @@ function parseRecipeType(raw: string): Recipe['recipe_type'] | null {
 
 function unitValue(raw: string): UnitCode | null {
   const value = raw.trim();
+  if (value.toLowerCase() === 'u') return 'unit';
+  if (value.toLowerCase() === 'docena') return 'dozen';
   return UNITS.includes(value as UnitCode) ? (value as UnitCode) : null;
 }
 
