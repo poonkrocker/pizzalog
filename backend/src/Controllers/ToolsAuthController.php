@@ -23,26 +23,27 @@ class ToolsAuthController
         $emailHash = hash_hmac('sha256', $email, (string)($jwtConfig['secret'] ?? ''));
         $clientIp = (string)($_SERVER['REMOTE_ADDR'] ?? 'unknown');
         $ipHash = hash_hmac('sha256', $clientIp, (string)($jwtConfig['secret'] ?? ''));
+        $pdo->prepare(
+            'DELETE FROM tools_login_attempts
+              WHERE window_started_at < NOW() - INTERVAL 1 DAY'
+        )->execute();
+
+        // Un solo UPSERT atómico evita que dos intentos concurrentes lean el mismo contador.
+        $pdo->prepare(
+            'INSERT INTO tools_login_attempts (email_hash, ip_hash, attempts, window_started_at)
+             VALUES (?, ?, 1, NOW())
+             ON DUPLICATE KEY UPDATE
+               attempts = IF(window_started_at < NOW() - INTERVAL 15 MINUTE, 1, attempts + 1),
+               window_started_at = IF(window_started_at < NOW() - INTERVAL 15 MINUTE, NOW(), window_started_at)'
+        )->execute([$emailHash, $ipHash]);
+
         $attemptQuery = $pdo->prepare(
-            'SELECT attempts, window_started_at FROM tools_login_attempts
+            'SELECT attempts FROM tools_login_attempts
               WHERE email_hash = ? AND ip_hash = ? LIMIT 1'
         );
         $attemptQuery->execute([$emailHash, $ipHash]);
-        $attemptRow = $attemptQuery->fetch();
-        if ($attemptRow && strtotime((string)$attemptRow['window_started_at']) > time() - 900) {
-            if ((int)$attemptRow['attempts'] >= 10) {
-                Response::error('Demasiados intentos. Esperá 15 minutos antes de volver a ingresar.', 429);
-            }
-            $pdo->prepare(
-                'UPDATE tools_login_attempts SET attempts = attempts + 1
-                  WHERE email_hash = ? AND ip_hash = ?'
-            )->execute([$emailHash, $ipHash]);
-        } else {
-            $pdo->prepare(
-                'INSERT INTO tools_login_attempts (email_hash, ip_hash, attempts, window_started_at)
-                 VALUES (?, ?, 1, NOW())
-                 ON DUPLICATE KEY UPDATE attempts = 1, window_started_at = NOW()'
-            )->execute([$emailHash, $ipHash]);
+        if ((int)$attemptQuery->fetchColumn() > 10) {
+            Response::error('Demasiados intentos. Esperá 15 minutos antes de volver a ingresar.', 429);
         }
 
         $stmt = $pdo->prepare(
