@@ -566,7 +566,7 @@ export function RecipeStudioPage() {
               </Field>
               <Field label="Unidad del rendimiento">
                 <select value={yieldUnit} onChange={(e) => setYieldUnit(e.target.value)} style={controlStyle}>
-                  {units.map((unit) => <option key={unit} value={unit}>{unit}</option>)}
+                  {units.map((unit) => <option key={unit} value={unit} disabled={!toEngineUnit(unit)}>{toEngineUnit(unit) ? unit : `${unit} (sin equivalencia)`}</option>)}
                 </select>
               </Field>
               {recipeType === 'product' && <>
@@ -609,7 +609,7 @@ export function RecipeStudioPage() {
                       </select>
                     </Field>
                     <Field label="Cantidad"><Input type="number" min="0" step="0.001" value={c.quantity} onChange={(e) => changeComponent(index, { quantity: Math.max(0, Number(e.target.value) || 0) })} /></Field>
-                    <Field label="Unidad"><select value={c.unit} onChange={(e) => changeComponent(index, { unit: e.target.value })} style={controlStyle}>{units.map((u) => <option key={u} value={u}>{u}</option>)}</select></Field>
+                    <Field label="Unidad"><select value={c.unit} onChange={(e) => changeComponent(index, { unit: e.target.value })} style={controlStyle}>{units.map((u) => <option key={u} value={u} disabled={!toEngineUnit(u)}>{toEngineUnit(u) ? u : `${u} (sin equivalencia)`}</option>)}</select></Field>
                     <div style={{ padding: '.5rem 0', fontWeight: 700, color: !isCompatible ? '#dc2626' : 'inherit' }}>
                       {!isCompatible ? `⚠️ Incompatible (${costUnit})` : displayedSubtotal !== null ? `Subtotal: ${formatARS(displayedSubtotal)}` : 'Costo incompleto'}
                     </div>
