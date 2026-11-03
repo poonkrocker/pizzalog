@@ -1,11 +1,8 @@
 import type { ApiClient } from './client';
 import type {
-  CostMarginsResponse,
   DoughCalculation,
   DoughProfile,
   DoughProfileInput,
-  SaveRecipeInput,
-  SimulationResponse,
   RecipeStudioResponse,
   SaveStudioRecipeInput,
   BusinessCostsResponse,
@@ -18,10 +15,6 @@ export interface DoughCalculateParams {
   batches?: number;
 }
 
-export interface SimulateParams {
-  cost_delta_pct?: number;
-  price_delta_pct?: number;
-}
 
 export function productionApi(client: ApiClient) {
   return {
@@ -37,12 +30,6 @@ export function productionApi(client: ApiClient) {
         '/production/dough-calculate',
         body,
       ),
-    costMargins: () => client.get<CostMarginsResponse>('/production/cost-margins'),
-    saveRecipe: (body: SaveRecipeInput) =>
-      client.post<{ success: boolean; product_id: number; name: string; price: number; cost: number }>(
-        '/production/recipes',
-        body,
-      ),
     recipeStudio: () => client.get<RecipeStudioResponse>('/production/recipe-studio'),
     importLegacyRecipes: () => client.post<{ success: boolean; imported_count: number }>('/production/recipe-studio/import-legacy', {}),
     saveStudioRecipe: (body: SaveStudioRecipeInput) =>
@@ -50,6 +37,5 @@ export function productionApi(client: ApiClient) {
     businessCosts: () => client.get<BusinessCostsResponse>('/production/business-costs'),
     saveBusinessCosts: (body: { items: BusinessCostInput[] }) =>
       client.put<{ success: boolean }>('/production/business-costs', body),
-    simulate: (body: SimulateParams) => client.post<SimulationResponse>('/production/simulate', body),
   };
 }
