@@ -300,9 +300,20 @@ class RecipeCostingController
             $linkedRecipes = $pdo->prepare('SELECT id, linked_product_id, name, price, yield_quantity
                 FROM recipe_studio_recipes WHERE business_id=? AND is_active=1 AND recipe_type=\'product\' AND linked_product_id IS NOT NULL');
             $linkedRecipes->execute([$bid]);
+            $linkedRows = $linkedRecipes->fetchAll(\PDO::FETCH_ASSOC);
+            $allowedProductIds = [];
+            foreach ($linkedRows as $linkedRow) {
+                $allowedProductIds[(int)$linkedRow['linked_product_id']] = true;
+            }
+            foreach ($costByProduct as $productId => $_unitCost) {
+                if (!isset($allowedProductIds[(int)$productId])) {
+                    throw new \RuntimeException('Cost Engine envió un costo para un producto que no está vinculado a una receta activa de este negocio.');
+                }
+            }
+
             $updateProduct = $pdo->prepare('UPDATE products SET name=?, price=? WHERE id=? AND business_id=?');
             $updateProductWithCost = $pdo->prepare('UPDATE products SET name=?, price=?, cost=? WHERE id=? AND business_id=?');
-            foreach ($linkedRecipes->fetchAll(\PDO::FETCH_ASSOC) as $linkedRow) {
+            foreach ($linkedRows as $linkedRow) {
                 $linkedProduct = (int)$linkedRow['linked_product_id'];
                 $linkedYield = max(0.0001, (float)$linkedRow['yield_quantity']);
                 if (array_key_exists($linkedProduct, $costByProduct)) {
