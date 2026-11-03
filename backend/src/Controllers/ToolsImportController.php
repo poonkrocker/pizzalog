@@ -181,16 +181,20 @@ PROMPT;
                 $kind = 'unknown';
             }
 
+            $rawColumns = is_array($mapping['columns'] ?? null) ? $mapping['columns'] : [];
             $columns = [];
             foreach ($allowedFields as $field) {
-                $index = filter_var($mapping['columns'][$field] ?? null, FILTER_VALIDATE_INT);
+                $index = filter_var($rawColumns[$field] ?? null, FILTER_VALIDATE_INT);
                 $columns[$field] = ($index !== false && $index >= 0 && $index < self::MAX_COLUMNS)
                     ? $index
                     : null;
             }
             $confidence = (float) ($mapping['confidence'] ?? 0);
             $warnings = is_array($mapping['warnings'] ?? null)
-                ? array_values(array_filter(array_map('strval', $mapping['warnings']), static fn($v) => $v !== ''))
+                ? array_values(array_filter(
+                    array_map(static fn($v) => is_string($v) ? trim($v) : '', $mapping['warnings']),
+                    static fn($v) => $v !== ''
+                ))
                 : [];
 
             $safeSheets[] = [
