@@ -185,7 +185,7 @@ PROMPT;
             $columns = [];
             foreach ($allowedFields as $field) {
                 $index = filter_var($rawColumns[$field] ?? null, FILTER_VALIDATE_INT);
-                $columns[$field] = ($index !== false && $index >= 0 && $index < self::MAX_COLUMNS)
+                $columns[$field] = ($index !== false && $index >= 0 && $index < count($source['rows'][$headerIndex]))
                     ? $index
                     : null;
             }
