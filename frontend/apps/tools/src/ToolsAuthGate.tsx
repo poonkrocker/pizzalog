@@ -4,6 +4,7 @@ import { App } from './App';
 
 const API_URL = ((import.meta.env.VITE_API_URL as string | undefined) ?? 'https://api.pizzalog.net').replace(/\/+$/, '');
 const TOKEN_KEY = 'pizzalog_tools_session';
+const TOOLS_ENVIRONMENT = ((import.meta.env.VITE_TOOLS_ENV as string | undefined) ?? 'production') === 'staging' ? 'staging' : 'production';
 
 const LEGACY_WORKSPACE_KEY = 'pizzalog_tools_workspace_v2';
 
@@ -140,7 +141,7 @@ export function ToolsAuthGate() {
     try {
       const result = await api<{ token: string; account: Account }>('/tools/auth/login', undefined, {
         method: 'POST',
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, environment: TOOLS_ENVIRONMENT }),
       });
       writeSessionToken(result.token);
       setToken(result.token);
