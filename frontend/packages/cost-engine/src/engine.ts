@@ -448,6 +448,17 @@ export function expandBakersDoughSpec(spec: BakersDoughSpec): {
     });
   }
 
+  // Los porcentajes positivos deben tener un insumo asignado; nunca omitir un costo silenciosamente.
+  if (saltPct > 0 && !spec.salt_ingredient_id?.trim()) {
+    throw new CostEngineValidationError('INVALID_DOUGH_SPEC', 'Falta asignar el insumo de sal.');
+  }
+  if (sugarPct > 0 && !spec.sugar_ingredient_id?.trim()) {
+    throw new CostEngineValidationError('INVALID_DOUGH_SPEC', 'Falta asignar el insumo de azúcar.');
+  }
+  if (oilPct > 0 && !spec.oil_ingredient_id?.trim()) {
+    throw new CostEngineValidationError('INVALID_DOUGH_SPEC', 'Falta asignar el insumo de aceite.');
+  }
+
   // Sal
   const saltG = flourTotalG * (saltPct / 100);
   if (saltG > 0 && spec.salt_ingredient_id) {
