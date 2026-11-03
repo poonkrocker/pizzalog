@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { formatARS, type DoughCalculation, type DoughProfile } from '@pizzalog/shared';
-import { Button, Field, Input, Loading, PageHeader, Select } from '@/ui';
-import { useDoughCalculate, useDoughProfiles } from './hooks';
+import { Button, Field, Input, PageHeader, Select } from '@/ui';
+import { useDoughProfiles } from './hooks';
+import { useApi } from '@/lib/auth';
+import { calculateDoughWithCostEngine } from './doughCosting';
 import { DoughProfileModal } from './DoughProfileModal';
 import { RecipeStudioPage } from './RecipeStudioPage';
 
@@ -9,6 +12,9 @@ type Tab = 'masas' | 'costeo';
 
 export function ProductionPage() {
   const [activeTab, setActiveTab] = useState<Tab>('masas');
+  const api = useApi();
+  const suppliesQuery = useQuery({ queryKey: ['production', 'recipe-studio'], queryFn: () => api.production.recipeStudio() });
+  const supplies = suppliesQuery.data?.supplies ?? [];
 
   // --- TAB 1: MASAS ---
   const profilesQuery = useDoughProfiles();
@@ -17,14 +23,12 @@ export function ProductionPage() {
   const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
   const [units, setUnits] = useState<number>(150);
   const [batches, setBatches] = useState<number>(1);
-  const [calculation, setCalculation] = useState<DoughCalculation | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
 
   // Modales de Masa y Receta
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [editingProfile, setEditingProfile] = useState<DoughProfile | null>(null);
 
-  const calcMutation = useDoughCalculate();
 
   // Seleccionar primer perfil cuando cargue
   useEffect(() => {
@@ -33,21 +37,26 @@ export function ProductionPage() {
     }
   }, [profiles, selectedProfileId]);
 
-  // Recalcular cuando cambien perfil, unidades o tandas
-  useEffect(() => {
-    if (selectedProfileId !== null) {
-      calcMutation.mutate(
-        { profile_id: selectedProfileId, units, batches },
-        {
-          onSuccess: (data) => setCalculation(data.calculation),
-        },
-      );
-    }
-  }, [selectedProfileId, units, batches]);
-
   const activeProfile = useMemo(() => {
     return profiles.find((p) => p.id === selectedProfileId) ?? profiles[0] ?? null;
   }, [profiles, selectedProfileId]);
+
+  const calculationState = useMemo(() => {
+    if (!activeProfile) return { calculation: null as DoughCalculation | null, error: null as string | null };
+    try {
+      return {
+        calculation: calculateDoughWithCostEngine(activeProfile, units, batches, supplies),
+        error: null,
+      };
+    } catch (error) {
+      return {
+        calculation: null,
+        error: error instanceof Error ? error.message : 'No se pudo calcular la masa.',
+      };
+    }
+  }, [activeProfile, units, batches, supplies]);
+  const calculation = calculationState.calculation;
+  const calculationError = calculationState.error;
 
   const handleCopyWhatsApp = () => {
     if (!calculation?.whatsapp_text) return;
@@ -230,6 +239,9 @@ export function ProductionPage() {
             </div>
           </div>
 
+          {calculationError && <div role="alert" style={{ padding: '.75rem 1rem', marginBottom: '1rem', background: '#fee2e2', color: '#991b1b', borderRadius: 7 }}>{calculationError}</div>}
+          {suppliesQuery.isLoading && <div style={{ color: '#64748b', marginBottom: '1rem' }}>Cargando catálogo de insumos...</div>}
+
           {/* Tarjetas KPI de Rendimiento y Costo */}
           {calculation && (
             <>
@@ -254,17 +266,17 @@ export function ProductionPage() {
                 <div style={{ background: '#fff', border: '1px solid #ddd', borderRadius: '8px', padding: '1rem' }}>
                   <div style={{ fontSize: '0.75rem', color: '#666', textTransform: 'uppercase' }}>Costo Total Tanda</div>
                   <div style={{ fontSize: '1.6rem', fontWeight: 800, color: 'var(--c-accent, #e63946)' }}>
-                    {formatARS(calculation.cost.total)}
+                    {calculation.cost.total !== null ? formatARS(calculation.cost.total) : 'Incompleto: revisar asignaciones y precios'}
                   </div>
                   <div style={{ fontSize: '0.8rem', color: '#888' }}>
-                    {formatARS(calculation.cost.per_kg)} / kg de masa
+                    {calculation.cost.per_kg !== null ? formatARS(calculation.cost.per_kg) : '—'} / kg de masa
                   </div>
                 </div>
 
                 <div style={{ background: '#fff', border: '1px solid #ddd', borderRadius: '8px', padding: '1rem' }}>
                   <div style={{ fontSize: '0.75rem', color: '#666', textTransform: 'uppercase' }}>Costo por Bollo</div>
                   <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#333' }}>
-                    {formatARS(calculation.cost.per_unit)}
+                    {calculation.cost.per_unit !== null ? formatARS(calculation.cost.per_unit) : '—'}
                   </div>
                   <div style={{ fontSize: '0.8rem', color: '#888' }}>
                     Impacto en costo de pizza
