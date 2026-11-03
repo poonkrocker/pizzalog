@@ -163,8 +163,8 @@ export function ToolsAuthGate() {
     setLoading(true);
     setWorkspaceError('');
     try {
-      const data = await api<{ workspace: ToolsWorkspaceState | null }>('/tools/workspace', token);
-      setWorkspace(data.workspace ?? createInitialDemoWorkspace());
+      const restoredWorkspace = await restoreOrMigrateWorkspace(token);
+      setWorkspace(restoredWorkspace);
     } catch (err) {
       setWorkspaceError(err instanceof Error ? err.message : 'No se pudo recuperar el espacio de trabajo');
     } finally {
