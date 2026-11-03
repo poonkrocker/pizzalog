@@ -19,11 +19,12 @@ class ToolsImportController
         if (!is_array($sheets) || count($sheets) < 1 || count($sheets) > self::MAX_SHEETS) {
             Response::error('El archivo debe contener entre 1 y 5 hojas con datos', 422);
         }
+        $sheets = array_values($sheets);
 
         $totalRows = 0;
         foreach ($sheets as $sheet) {
-            if (!is_array($sheet) || !is_array($sheet['rows'] ?? null)) {
-                Response::error('Estructura de hoja inválida', 422);
+            if (!is_array($sheet) || !is_array($sheet['rows'] ?? null) || count($sheet['rows']) < 1) {
+                Response::error('Estructura de hoja inválida o vacía', 422);
             }
             $totalRows += count($sheet['rows']);
             if ($totalRows > self::MAX_ROWS) {
