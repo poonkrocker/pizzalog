@@ -42,8 +42,8 @@ class ToolsImportController
         }
 
         $inputJson = json_encode($sheets, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
-        if ($inputJson === false || strlen($inputJson) > 1024 * 1024) {
-            Response::error('El contenido importado supera el límite de 1 MB', 413);
+        if ($inputJson === false || strlen($inputJson) > 4 * 1024 * 1024) {
+            Response::error('El contenido importado supera el límite de 4 MB', 413);
         }
 
         $accountId = (int) $req->auth['tools_account_id'];
