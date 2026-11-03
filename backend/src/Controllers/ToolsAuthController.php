@@ -20,7 +20,7 @@ class ToolsAuthController
 
         $pdo = Database::pdo();
         $jwtConfig = Config::get('jwt', []);
-        $emailHash = hash('sha256', $email);
+        $emailHash = hash_hmac('sha256', $email, (string)($jwtConfig['secret'] ?? ''));
         $clientIp = (string)($_SERVER['REMOTE_ADDR'] ?? 'unknown');
         $ipHash = hash_hmac('sha256', $clientIp, (string)($jwtConfig['secret'] ?? ''));
         $attemptQuery = $pdo->prepare(
