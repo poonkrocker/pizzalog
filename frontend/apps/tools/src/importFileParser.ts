@@ -254,6 +254,71 @@ function normalizeIngredientPriceRows(rows: string[][]): string[][] | null {
   return output.length > 1 ? output : null;
 }
 
+
+function evaluateSafeArithmeticFormula(formula: string): string | null {
+  const source = formula.trim().replace(/^=/, '');
+  if (!source || !/^[0-9+*/().\\s-]+$/.test(source)) return null;
+  let index = 0;
+  const skip = () => { while (/\\s/.test(source[index] ?? '')) index += 1; };
+  const number = (): number | null => {
+    skip();
+    const start = index;
+    while (/[0-9.]/.test(source[index] ?? '')) index += 1;
+    if (start === index) return null;
+    const raw = source.slice(start, index);
+    if (!/^\\d+(?:\\.\\d+)?$/.test(raw)) return null;
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : null;
+  };
+  const factor = (): number | null => {
+    skip();
+    if (source[index] === '+') { index += 1; return factor(); }
+    if (source[index] === '-') { index += 1; const value = factor(); return value === null ? null : -value; }
+    if (source[index] === '(') {
+      index += 1;
+      const value = expression();
+      skip();
+      if (source[index] !== ')') return null;
+      index += 1;
+      return value;
+    }
+    return number();
+  };
+  const term = (): number | null => {
+    let value = factor();
+    if (value === null) return null;
+    while (true) {
+      skip();
+      const op = source[index];
+      if (op !== '*' && op !== '/') break;
+      index += 1;
+      const rhs = factor();
+      if (rhs === null || (op === '/' && rhs === 0)) return null;
+      value = op === '*' ? value * rhs : value / rhs;
+      if (!Number.isFinite(value)) return null;
+    }
+    return value;
+  };
+  const expression = (): number | null => {
+    let value = term();
+    if (value === null) return null;
+    while (true) {
+      skip();
+      const op = source[index];
+      if (op !== '+' && op !== '-') break;
+      index += 1;
+      const rhs = term();
+      if (rhs === null) return null;
+      value = op === '+' ? value + rhs : value - rhs;
+      if (!Number.isFinite(value)) return null;
+    }
+    return value;
+  };
+  const result = expression();
+  skip();
+  return result !== null && index === source.length ? String(result) : null;
+}
+
 async function parseXlsx(buffer: ArrayBuffer): Promise<ParsedImportSheet[]> {
   const files = await unzip(buffer);
   const fileNames = Array.from(files.keys()).map((name) => name.toLowerCase());
@@ -296,6 +361,8 @@ async function parseXlsx(buffer: ArrayBuffer): Promise<ParsedImportSheet[]> {
     const document = decodeXml(files, path);
     const rows: string[][] = [];
     let hasFormulaCells = false;
+    let evaluatedArithmeticFormulas = 0;
+    let formulasWithoutCachedValues = 0;
 
     for (const rowNode of Array.from(document.getElementsByTagNameNS('*', 'row'))) {
       const values: string[] = [];
@@ -303,13 +370,19 @@ async function parseXlsx(buffer: ArrayBuffer): Promise<ParsedImportSheet[]> {
         const index = columnIndex(cell.getAttribute('r') ?? '');
         if (index < 0) continue;
         const type = cell.getAttribute('t');
-        const hasFormula = cell.getElementsByTagNameNS('*', 'f').length > 0;
+        const formulaNode = cell.getElementsByTagNameNS('*', 'f')[0];
+        const hasFormula = Boolean(formulaNode);
         const valueNode = cell.getElementsByTagNameNS('*', 'v')[0];
         const inlineText = type === 'inlineStr' ? elementText(cell, 't') : '';
         if (!hasFormula && !valueNode?.textContent && !inlineText) continue;
         if (index >= MAX_COLUMNS) throw new Error(`El XLSX supera el límite seguro de ${MAX_COLUMNS} columnas; no se recortaron datos.`);
         if (hasFormula) hasFormulaCells = true;
         let value = valueNode?.textContent ?? '';
+        if (hasFormula && !value) {
+          const evaluated = evaluateSafeArithmeticFormula(formulaNode?.textContent ?? '');
+          if (evaluated !== null) { value = evaluated; evaluatedArithmeticFormulas += 1; }
+          else formulasWithoutCachedValues += 1;
+        }
         if (type === 's' && value !== '') value = sharedStrings[Number(value)] ?? '';
         else if (type === 'inlineStr') value = inlineText;
         if (type === 'b') value = value === '1' ? 'TRUE' : 'FALSE';
@@ -331,7 +404,9 @@ async function parseXlsx(buffer: ArrayBuffer): Promise<ParsedImportSheet[]> {
           : ingredientPriceRows ? `${name} — insumos normalizados` : name,
         rows: normalizedRows,
         ...((hasFormulaCells || matrixRows || ingredientPriceRows) ? { warnings: [
-          ...(hasFormulaCells ? ['La hoja contiene fórmulas. Se leyeron únicamente los valores guardados en el archivo; no se ejecutaron fórmulas.'] : []),
+          ...(hasFormulaCells ? ['La hoja contiene fórmulas; se conservaron sus valores guardados y se evaluaron únicamente fórmulas aritméticas simples sin referencias externas.'] : []),
+          ...(evaluatedArithmeticFormulas ? [`Se calcularon ${evaluatedArithmeticFormulas} fórmulas aritméticas simples sin valor guardado.`] : []),
+          ...(formulasWithoutCachedValues ? [`Quedaron ${formulasWithoutCachedValues} fórmulas sin valor guardado que requieren revisar sus dependencias entre hojas.`] : []),
           ...(matrixRows ? ['Se detectó una matriz de recetas por producto y se normalizó a filas de ingredientes sin modificar cantidades.'] : []),
           ...(ingredientPriceRows ? ['Se detectó una tabla de precios por unidad y se normalizó para importar insumos y sus precios unitarios.'] : []),
         ] } : {}),
