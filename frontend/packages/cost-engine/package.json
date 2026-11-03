@@ -13,7 +13,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json",
-    "test": "tsc -p tsconfig.build.json && node --test tests/golden.test.mjs"
+    "test": "tsc -p tsconfig.build.json && node --test tests/*.test.mjs"
   },
   "dependencies": {
     "@pizzalog/cost-engine-fixtures": "workspace:*"
