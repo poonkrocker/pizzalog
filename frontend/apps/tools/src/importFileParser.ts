@@ -1,7 +1,25 @@
+export interface ParsedDoughProfile {
+  name: string;
+  unit_weight_g: number;
+  hydration_pct: number;
+  flours: Array<{ name: string; weight_kg: number }>;
+  biga?: { flour_pct: number; water_pct: number; yeast_pct: number; yeast_ingredient_name: string };
+  poolish?: { flour_pct: number; water_pct: number; yeast_pct: number; yeast_ingredient_name: string };
+  direct_yeast_pct?: number;
+  yeast_ingredient_name?: string;
+  salt_pct?: number;
+  salt_ingredient_name?: string;
+  sugar_pct?: number;
+  sugar_ingredient_name?: string;
+  oil_pct?: number;
+  oil_ingredient_name?: string;
+}
+
 export interface ParsedImportSheet {
   name: string;
   rows: string[][];
   warnings?: string[];
+  doughProfiles?: ParsedDoughProfile[];
 }
 
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
@@ -255,6 +273,76 @@ function normalizeIngredientPriceRows(rows: string[][]): string[][] | null {
 }
 
 
+
+function extractDoughProfiles(rows: string[][]): ParsedDoughProfile[] {
+  const norm = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const number = (value: string): number | null => {
+    const parsed = Number((value ?? '').trim().replace(',', '.'));
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+  const pct = (value: string): number | null => {
+    const parsed = number(value);
+    return parsed === null ? null : (Math.abs(parsed) <= 1 ? parsed * 100 : parsed);
+  };
+  const rowWithLabel = (label: string) => rows.find((row) => norm(row[1] ?? row[0] ?? '') === norm(label));
+  const parameter = (label: string) => {
+    const row = rowWithLabel(label);
+    return row ? number(row[3] ?? '') : null;
+  };
+  const parameterPct = (label: string) => {
+    const row = rowWithLabel(label);
+    return row ? pct(row[3] ?? '') : null;
+  };
+  const flourHeading = rows.findIndex((row) => norm(row[1] ?? '') === 'harinas de la masa de pizza');
+  const massesHeading = rows.findIndex((row) => norm(row[1] ?? '') === 'masas');
+  const parameterHeading = rows.findIndex((row) => norm(row[1] ?? '') === 'parametro');
+  if (flourHeading < 0 || massesHeading <= flourHeading || parameterHeading < 0) return [];
+
+  const flours: Array<{ name: string; weight_kg: number }> = [];
+  for (const row of rows.slice(flourHeading + 1, massesHeading)) {
+    const rawName = (row[1] ?? '').trim();
+    const weight = number(row[2] ?? '');
+    if (!rawName || weight === null || weight <= 0 || norm(rawName) === 'harina total de la tanda') continue;
+    const name = rawName.replace(/\s*\(resto\)\s*$/i, '').trim();
+    flours.push({ name, weight_kg: weight });
+  }
+  const unitWeight = parameter('Peso por unidad (harina + agua)');
+  const hydration = parameterPct('Hidratación total (agua ÷ harina)');
+  if (!flours.length || unitWeight === null || unitWeight <= 0 || hydration === null) return [];
+
+  const auxiliaryNames = rows.map((row) => (row[6] ?? '').trim()).filter(Boolean);
+  const findAuxiliary = (pattern: RegExp) => auxiliaryNames.find((name) => pattern.test(norm(name))) ?? '';
+  const yeastName = findAuxiliary(/levadura/);
+  const saltName = findAuxiliary(/sal/);
+  const sugarName = findAuxiliary(/azucar/);
+  const oilName = findAuxiliary(/aceite/);
+
+  const bigaFlour = parameterPct('Biga') ?? 0;
+  const bigaWater = parameterPct('Agua de la biga') ?? 0;
+  const bigaYeast = parameterPct('Levadura en la biga') ?? 0;
+  const poolishFlour = parameterPct('Poolish') ?? 0;
+  const poolishWater = parameterPct('Agua del poolish') ?? 0;
+  const poolishYeast = parameterPct('Levadura en el poolish') ?? 0;
+  const directYeast = parameterPct('Levadura directa') ?? 0;
+  const salt = parameterPct('Sal') ?? 0;
+  const sugar = parameterPct('Azúcar') ?? 0;
+  const oil = parameterPct('Aceite de oliva') ?? 0;
+
+  const profile: ParsedDoughProfile = {
+    name: 'Masa',
+    unit_weight_g: unitWeight,
+    hydration_pct: hydration,
+    flours,
+    ...(bigaFlour > 0 ? { biga: { flour_pct: bigaFlour, water_pct: bigaWater, yeast_pct: bigaYeast, yeast_ingredient_name: yeastName } } : {}),
+    ...(poolishFlour > 0 ? { poolish: { flour_pct: poolishFlour, water_pct: poolishWater, yeast_pct: poolishYeast, yeast_ingredient_name: yeastName } } : {}),
+    ...(directYeast > 0 ? { direct_yeast_pct: directYeast, yeast_ingredient_name: yeastName } : {}),
+    ...(salt > 0 ? { salt_pct: salt, salt_ingredient_name: saltName } : {}),
+    ...(sugar > 0 ? { sugar_pct: sugar, sugar_ingredient_name: sugarName } : {}),
+    ...(oil > 0 ? { oil_pct: oil, oil_ingredient_name: oilName } : {}),
+  };
+  return [profile];
+}
+
 function evaluateSafeArithmeticFormula(formula: string): string | null {
   const source = formula.trim().replace(/^=/, '');
   if (!source || !/^[0-9+*/().\s-]+$/.test(source)) return null;
@@ -398,17 +486,20 @@ async function parseXlsx(buffer: ArrayBuffer): Promise<ParsedImportSheet[]> {
       const matrixRows = normalizeRecipeMatrix(rows);
       const ingredientPriceRows = matrixRows ? null : normalizeIngredientPriceRows(rows);
       const normalizedRows = matrixRows ?? ingredientPriceRows ?? rows;
+      const doughProfiles = name.toLowerCase().includes('masa') ? extractDoughProfiles(rows) : [];
       sheets.push({
         name: matrixRows
           ? `${name} — recetas normalizadas`
           : ingredientPriceRows ? `${name} — insumos normalizados` : name,
         rows: normalizedRows,
-        ...((hasFormulaCells || matrixRows || ingredientPriceRows) ? { warnings: [
+        ...(doughProfiles.length ? { doughProfiles } : {}),
+        ...((hasFormulaCells || matrixRows || ingredientPriceRows || doughProfiles.length) ? { warnings: [
           ...(hasFormulaCells ? ['La hoja contiene fórmulas; se conservaron sus valores guardados y se evaluaron únicamente fórmulas aritméticas simples sin referencias externas.'] : []),
           ...(evaluatedArithmeticFormulas ? [`Se calcularon ${evaluatedArithmeticFormulas} fórmulas aritméticas simples sin valor guardado.`] : []),
           ...(formulasWithoutCachedValues ? [`Quedaron ${formulasWithoutCachedValues} fórmulas sin valor guardado que requieren revisar sus dependencias entre hojas.`] : []),
           ...(matrixRows ? ['Se detectó una matriz de recetas por producto y se normalizó a filas de ingredientes sin modificar cantidades.'] : []),
           ...(ingredientPriceRows ? ['Se detectó una tabla de precios por unidad y se normalizó para importar insumos y sus precios unitarios.'] : []),
+          ...(doughProfiles.length ? ['Se detectó un perfil de masa con fórmula de panadería; se conservarán sus parámetros como subreceta calculada.'] : []),
         ] } : {}),
       });
     }
