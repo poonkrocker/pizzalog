@@ -1524,6 +1524,67 @@ export function App({
       )}
 
       {/* Modal del Constructor Visual Interactivo de Recetas, Subrecetas y Masas */}
+      {smartImportPreview && (
+        <div className="modal-backdrop">
+          <div className="modal-panel smart-import-panel">
+            <div className="modal-header">
+              <div>
+                <h3>Revisar importación inteligente</h3>
+                <small>{smartImportPreview.fileName} · {smartImportPreview.remaining} previsualizaciones con IA restantes hoy</small>
+              </div>
+              <button type="button" className="btn" onClick={() => setSmartImportPreview(null)}>Cerrar</button>
+            </div>
+            <p className="smart-import-note">
+              DeepSeek propuso cómo interpretar las columnas. Los valores originales no fueron modificados y ningún dato se guardará hasta que confirmes.
+            </p>
+            {smartImportPreview.mappings.map((mapping) => {
+              const sheet = smartImportPreview.sheets[mapping.sheet_index];
+              if (!sheet) return null;
+              const mappedColumns = Object.entries(mapping.columns).filter(([, index]) => index !== null);
+              const previewRows = sheet.rows.slice(mapping.header_row_index + 1, mapping.header_row_index + 4);
+              return (
+                <section className="smart-import-sheet" key={mapping.sheet_index}>
+                  <div className="smart-import-sheet__heading">
+                    <strong>{mapping.name}</strong>
+                    <span>{mapping.kind} · {Math.round(mapping.confidence * 100)}% confianza · {mapping.row_count} filas</span>
+                  </div>
+                  {mapping.warnings.length > 0 && (
+                    <ul className="smart-import-warnings">
+                      {mapping.warnings.map((warning, index) => <li key={index}>{warning}</li>)}
+                    </ul>
+                  )}
+                  <div className="smart-import-mappings">
+                    {mappedColumns.length === 0 ? (
+                      <span>No se detectaron columnas confiables.</span>
+                    ) : mappedColumns.map(([field, index]) => (
+                      <span key={field}><b>{field}</b>: {mapping.headers[index as number] ?? `Columna ${Number(index) + 1}`}</span>
+                    ))}
+                  </div>
+                  <div className="table-wrap">
+                    <table className="data-table">
+                      <thead>
+                        <tr>{mapping.headers.slice(0, 8).map((header, index) => <th key={index}>{header || `Col. ${index + 1}`}</th>)}</tr>
+                      </thead>
+                      <tbody>
+                        {previewRows.map((row, rowIndex) => (
+                          <tr key={rowIndex}>
+                            {mapping.headers.slice(0, 8).map((_, columnIndex) => <td key={columnIndex}>{row[columnIndex] ?? ''}</td>)}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              );
+            })}
+            <div className="smart-import-footer">
+              <button type="button" className="btn" onClick={() => setSmartImportPreview(null)}>Cancelar</button>
+              <button type="button" className="btn btn--primary" onClick={confirmSmartImport}>Confirmar e incorporar datos</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {editingRecipe && (
         <div className="modal-backdrop" onClick={() => setEditingRecipe(null)}>
           <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
