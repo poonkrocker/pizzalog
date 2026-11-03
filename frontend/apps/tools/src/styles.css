@@ -426,3 +426,20 @@ table.kit-table select {
 .tools-auth-submit { width: 100%; min-height: 46px; justify-content: center; }
 .tools-auth-card small { color: #b9a99a; font-size: 11px; line-height: 1.5; text-align: center; }
 .tools-account-label { align-self: center; color: var(--muted); font-size: 12px; font-weight: 700; }
+
+
+.smart-import-panel { max-width: 1040px; }
+.smart-import-note { color: var(--muted); font-size: 13px; line-height: 1.5; }
+.smart-import-sheet { border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin: 14px 0; }
+.smart-import-sheet__heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; }
+.smart-import-sheet__heading span { color: var(--muted); font-size: 11px; }
+.smart-import-mappings { display: flex; flex-wrap: wrap; gap: 7px; margin: 10px 0; }
+.smart-import-mappings span { border: 1px solid var(--line); background: var(--surface-alt); border-radius: 6px; padding: 5px 8px; font-size: 11px; }
+.smart-import-warnings { color: var(--warn); font-size: 12px; margin: 8px 0; padding-left: 20px; }
+.smart-import-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.tools-account-label { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 680px) {
+  .smart-import-sheet__heading { align-items: flex-start; flex-direction: column; }
+  .smart-import-footer { flex-direction: column-reverse; }
+  .smart-import-footer .btn { width: 100%; }
+}
