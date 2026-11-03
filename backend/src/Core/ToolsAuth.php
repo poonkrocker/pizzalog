@@ -1,5 +1,5 @@
 <?php
-namespace Pizzalog\\Core;
+namespace Pizzalog\Core;
 
 class ToolsAuth
 {
