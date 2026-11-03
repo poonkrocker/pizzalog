@@ -177,10 +177,12 @@ PROMPT;
             'expense_name', 'expense_category', 'expense_period', 'expense_amount',
         ];
         $safeSheets = [];
+        $seenSheetIndexes = [];
         foreach ($mapped['sheets'] as $mapping) {
             if (!is_array($mapping)) continue;
             $sheetIndex = filter_var($mapping['sheet_index'] ?? null, FILTER_VALIDATE_INT);
-            if ($sheetIndex === false || $sheetIndex < 0 || $sheetIndex >= count($sheets)) continue;
+            if ($sheetIndex === false || $sheetIndex < 0 || $sheetIndex >= count($sheets) || isset($seenSheetIndexes[$sheetIndex])) continue;
+            $seenSheetIndexes[$sheetIndex] = true;
             $source = $sheets[$sheetIndex];
             $headerIndex = filter_var($mapping['header_row_index'] ?? null, FILTER_VALIDATE_INT);
             if ($headerIndex === false || $headerIndex < 0 || $headerIndex >= count($source['rows'])) $headerIndex = 0;
@@ -208,7 +210,7 @@ PROMPT;
 
             $safeSheets[] = [
                 'sheet_index' => $sheetIndex,
-                'name' => substr((string) ($source['name'] ?? 'Hoja'), 0, 80),
+                'name' => substr(is_string($source['name'] ?? null) ? $source['name'] : 'Hoja', 0, 80),
                 'kind' => $kind,
                 'header_row_index' => $headerIndex,
                 'headers' => array_slice($source['rows'][$headerIndex], 0, self::MAX_COLUMNS),
@@ -218,6 +220,25 @@ PROMPT;
                 'row_count' => max(0, count($source['rows']) - $headerIndex - 1),
             ];
         }
+
+        // No ocultar hojas que el modelo no haya clasificado o haya omitido.
+        foreach ($sheets as $sheetIndex => $source) {
+            if (isset($seenSheetIndexes[$sheetIndex])) continue;
+            $headerIndex = 0;
+            $emptyColumns = array_fill_keys($allowedFields, null);
+            $safeSheets[] = [
+                'sheet_index' => $sheetIndex,
+                'name' => substr(is_string($source['name'] ?? null) ? $source['name'] : 'Hoja', 0, 80),
+                'kind' => 'unknown',
+                'header_row_index' => $headerIndex,
+                'headers' => array_slice($source['rows'][$headerIndex], 0, self::MAX_COLUMNS),
+                'columns' => $emptyColumns,
+                'confidence' => 0,
+                'warnings' => ['La IA no devolvió un mapeo para esta hoja. Revisala manualmente antes de importar.'],
+                'row_count' => max(0, count($source['rows']) - 1),
+            ];
+        }
+        usort($safeSheets, static fn(array $a, array $b): int => $a['sheet_index'] <=> $b['sheet_index']);
 
         Response::ok([
             'sheets' => $safeSheets,
