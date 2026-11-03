@@ -450,7 +450,7 @@ export function DoughProfileModal({
                   { key: 'chickpea_flour_id', label: 'Harina de garbanzos' },
                   { key: 'salt_id', label: 'Sal' },
                   { key: 'oil_id', label: 'Aceite (precio por volumen)' },
-                  { key: 'water_id', label: 'Agua (opcional)' },
+                  { key: 'water_id', label: 'Agua (opcional; unidad de masa)' },
                 ]
               : [
                   { key: 'flour_white_id', label: 'Harina blanca / 0000' },
