@@ -61,18 +61,19 @@ export function ToolsAuthGate() {
     // Elimina el cache local de la versión previa, que ya no es una fuente de datos.
     try { localStorage.removeItem('pizzalog_tools_workspace_v2'); } catch { /* storage may be disabled */ }
     const saved = readSessionToken();
-    if (!saved) {
+    if (saved === null) {
       setLoading(false);
       return;
     }
+    const savedToken: string = saved;
 
     async function restore() {
       try {
-        const me = await api<{ account: Account }>('/tools/auth/me', saved);
-        setToken(saved);
+        const me = await api<{ account: Account }>('/tools/auth/me', savedToken);
+        setToken(savedToken);
         setAccount(me.account);
         try {
-          const data = await api<{ workspace: ToolsWorkspaceState | null }>('/tools/workspace', saved);
+          const data = await api<{ workspace: ToolsWorkspaceState | null }>('/tools/workspace', savedToken);
           setWorkspace(data.workspace ?? createInitialDemoWorkspace());
           setWorkspaceError('');
         } catch (err) {
