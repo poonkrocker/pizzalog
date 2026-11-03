@@ -106,6 +106,7 @@ Devolvé exclusivamente JSON válido, sin markdown, con esta estructura:
         "pack_quantity": null,
         "pack_unit": null,
         "yield_pct": null,
+        "purchase_date": null,
         "density_g_per_ml": null,
         "unit_weight_g": null,
         "supplier": null,
@@ -171,7 +172,7 @@ PROMPT;
 
         $allowedFields = [
             'name', 'ingredient_name', 'base_dimension', 'base_unit', 'purchase_price',
-            'currency', 'pack_quantity', 'pack_unit', 'yield_pct', 'density_g_per_ml',
+            'currency', 'pack_quantity', 'pack_unit', 'yield_pct', 'purchase_date', 'density_g_per_ml',
             'unit_weight_g', 'supplier', 'recipe_name', 'recipe_type', 'yield_quantity',
             'yield_unit', 'component_name', 'component_quantity', 'component_unit',
             'expense_name', 'expense_category', 'expense_period', 'expense_amount',
