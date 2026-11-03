@@ -27,3 +27,12 @@ CREATE TABLE IF NOT EXISTS tools_workspaces (
     CONSTRAINT fk_tools_workspace_account FOREIGN KEY (account_id)
         REFERENCES tools_accounts (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS tools_ai_usage (
+    account_id BIGINT UNSIGNED NOT NULL,
+    usage_date DATE NOT NULL,
+    request_count SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+    PRIMARY KEY (account_id, usage_date),
+    CONSTRAINT fk_tools_ai_usage_account FOREIGN KEY (account_id)
+        REFERENCES tools_accounts (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
