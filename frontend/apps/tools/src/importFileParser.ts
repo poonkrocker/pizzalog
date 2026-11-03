@@ -42,8 +42,12 @@ function parseCsv(text: string): string[][] {
       if (quoted && text[i + 1] === '"') {
         cell += '"';
         i += 1;
+      } else if (quoted) {
+        quoted = false;
+      } else if (cell.length === 0) {
+        quoted = true;
       } else {
-        quoted = !quoted;
+        throw new Error('El CSV contiene comillas fuera de lugar; corregí el formato antes de importar.');
       }
     } else if (char === delimiter && !quoted) {
       row.push(cell);
@@ -58,6 +62,7 @@ function parseCsv(text: string): string[][] {
       cell += char;
     }
   }
+  if (quoted) throw new Error('El CSV contiene comillas sin cerrar; corregí el formato antes de importar.');
   row.push(cell);
   if (row.some((value) => value.trim() !== '')) rows.push(row);
 
@@ -264,7 +269,8 @@ export async function parseImportFile(file: File): Promise<ParsedImportSheet[]> 
   if (extension === 'csv') {
     const sample = new Uint8Array(await file.slice(0, 4096).arrayBuffer());
     if (sample.some((byte) => byte === 0)) throw new Error('El archivo CSV parece contener datos binarios');
-    const rows = parseCsv(await file.text());
+    const csvText = (await file.text()).replace(/^\\uFEFF/, '');
+    const rows = parseCsv(csvText);
     if (rows.length > MAX_ROWS) throw new Error('El CSV supera el límite de 500 filas');
     return [{ name: file.name, rows }];
   }
