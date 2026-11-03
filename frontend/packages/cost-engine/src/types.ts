@@ -236,8 +236,10 @@ export interface PortfolioScenarioResult {
   simulated_cost: number;
   current_food_cost_pct: number | null;
   simulated_food_cost_pct: number | null;
-  current_margin: number | null;
-  simulated_margin: number | null;
+  current_gross_profit: number;
+  simulated_gross_profit: number;
+  current_margin_pct: number | null;
+  simulated_margin_pct: number | null;
 }
 
 export interface CostCatalog {
