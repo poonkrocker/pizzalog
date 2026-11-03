@@ -124,7 +124,7 @@ export function applyImportMappings(
   const warnings: string[] = [];
   const counts = { ingredients: 0, prices: 0, recipes: 0, expenses: 0 };
   const pendingPrices: Array<{ name: string; price: PurchasePrice }> = [];
-  const recipeRows = new Map<string, { type: Recipe['recipe_type']; yieldQuantity: number; yieldUnit: UnitCode; components: Recipe['components'] }>();
+  const recipeRows = new Map<string, { name: string; type: Recipe['recipe_type']; yieldQuantity: number; yieldUnit: UnitCode; components: Recipe['components'] }>();
 
   for (const mapping of mappings) {
     const sheet = sheets[mapping.sheet_index];
@@ -257,7 +257,7 @@ export function applyImportMappings(
           warnings.push(`${mapping.name}, fila ${sourceRow}: datos de rendimiento inconsistentes para ${name}; se omitió la línea.`);
           return;
         }
-        const target = existing ?? { type: recipeType, yieldQuantity, yieldUnit, components: [] };
+        const target = existing ?? { name, type: recipeType, yieldQuantity, yieldUnit, components: [] };
         target.components = [...(target.components ?? []), {
           component_type: 'ingredient',
           ingredient_id: ingredient.id,
@@ -277,7 +277,7 @@ export function applyImportMappings(
   }
 
   for (const [key, row] of recipeRows) {
-    const name = sheets.flatMap((sheet) => sheet.rows).find((line) => normalizedName(line[0] ?? '') === key)?.[0] ?? key;
+    const name = row.name;
     if (recipes.some((recipe) => normalizedName(recipe.name) === key)) {
       warnings.push(`La receta ${name} ya existe; no se duplicó.`);
       continue;
