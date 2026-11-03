@@ -17,6 +17,7 @@ import {
   type Dimension,
   type Recipe as EngineRecipe,
   type UnitCode,
+  type CostResult,
 } from '@pizzalog/cost-engine';
 import { useApi } from '@/lib/auth';
 import { Field, Input, Loading, Modal } from '@/ui';
@@ -119,10 +120,140 @@ export function RecipeStudioPage() {
     queryKey: ['production', 'business-costs'],
     queryFn: () => api.production.businessCosts(),
   });
-  const recipes = recipesQuery.data?.recipes ?? [];
+  const rawRecipes = recipesQuery.data?.recipes ?? [];
   const supplies = recipesQuery.data?.supplies ?? [];
   const products = recipesQuery.data?.products ?? [];
   const legacyUnimportedCount = recipesQuery.data?.legacy_unimported_count ?? 0;
+
+  const costEngineModel = useMemo(() => {
+    const ingredients = supplies.flatMap((supply) => {
+      const unit = toEngineUnit(supply.unit);
+      if (!unit) return [];
+      return [{
+        id: `supply_${supply.id}`,
+        name: supply.name,
+        base_dimension: dimensionForEngineUnit(unit),
+        base_unit: unit,
+        is_active: true,
+      }];
+    });
+    const purchase_prices = supplies.flatMap((supply) => {
+      const unit = toEngineUnit(supply.unit);
+      if (!unit || supply.cost === null || !Number.isFinite(supply.cost) || supply.cost <= 0) return [];
+      return [{
+        ingredient_id: `supply_${supply.id}`,
+        purchase_price: supply.cost,
+        currency: 'ARS',
+        pack_quantity: 1,
+        pack_unit: unit,
+        yield_pct: 100,
+      }];
+    });
+    const invalidRecipeIds = new Set<number>();
+    const engineRecipes: EngineRecipe[] = [];
+
+    for (const recipe of rawRecipes) {
+      const yieldUnit = toEngineUnit(recipe.yield_unit);
+      if (!yieldUnit) {
+        invalidRecipeIds.add(recipe.id);
+        continue;
+      }
+      const mappedComponents = [];
+      let invalid = false;
+      for (const component of recipe.components) {
+        const unit = toEngineUnit(component.unit);
+        if (!unit || !Number.isFinite(component.quantity) || component.quantity <= 0) {
+          invalid = true;
+          break;
+        }
+        if (component.component_type === 'supply') {
+          const supply = supplies.find((item) => item.id === component.component_id);
+          if (!supply || !toEngineUnit(supply.unit)) {
+            invalid = true;
+            break;
+          }
+          mappedComponents.push({
+            component_type: 'ingredient' as const,
+            ingredient_id: `supply_${component.component_id}`,
+            quantity: component.quantity,
+            unit,
+          });
+        } else {
+          mappedComponents.push({
+            component_type: 'subrecipe' as const,
+            recipe_id: String(component.component_id),
+            quantity: component.quantity,
+            unit,
+          });
+        }
+      }
+      if (invalid) {
+        invalidRecipeIds.add(recipe.id);
+        continue;
+      }
+      engineRecipes.push({
+        id: String(recipe.id),
+        name: recipe.name,
+        recipe_type: recipe.recipe_type,
+        yield_quantity: recipe.yield_quantity,
+        yield_unit: yieldUnit,
+        currency: 'ARS',
+        components: mappedComponents,
+      });
+    }
+
+    const catalog: CostCatalog = { ingredients, purchase_prices, recipes: engineRecipes };
+    return { catalog, engine: new CostEngine(catalog), invalidRecipeIds };
+  }, [rawRecipes, supplies]);
+
+  const recipes = useMemo(() => rawRecipes.map((recipe) => {
+    if (costEngineModel.invalidRecipeIds.has(recipe.id)) {
+      return {
+        ...recipe,
+        batch_cost: null,
+        unit_cost: null,
+        suggested_price: null,
+        food_cost_pct: null,
+        warnings: ['La receta contiene unidades no compatibles con el Cost Engine o componentes sin referencia válida.'],
+        is_incomplete: true,
+      };
+    }
+    try {
+      const result = costEngineModel.engine.calculateRecipeCost(String(recipe.id));
+      const pricing = result.status === 'complete' && result.raw_unit_cost !== null && recipe.recipe_type === 'product'
+        ? calculatePricingScenario({
+            unit_cost: result.raw_unit_cost,
+            status: result.status,
+            currency: 'ARS',
+            target_food_cost_pct: Math.max(1, Math.min(99, recipe.target_food_cost_pct)),
+            rounding_increment: 100,
+            rounding_mode: 'ceil',
+            ...(recipe.price > 0 ? { selling_price: recipe.price } : {}),
+          })
+        : null;
+      return {
+        ...recipe,
+        batch_cost: result.status === 'complete' ? result.raw_batch_cost : null,
+        unit_cost: result.status === 'complete' ? result.raw_unit_cost : null,
+        suggested_price: pricing?.raw_suggested_price ?? null,
+        food_cost_pct: pricing?.food_cost_pct ?? null,
+        warnings: result.warnings,
+        is_incomplete: result.status !== 'complete',
+      };
+    } catch (error) {
+      return {
+        ...recipe,
+        batch_cost: null,
+        unit_cost: null,
+        suggested_price: null,
+        food_cost_pct: null,
+        warnings: [error instanceof Error ? error.message : 'No se pudo calcular esta receta.'],
+        is_incomplete: true,
+      };
+    }
+  }), [rawRecipes, costEngineModel]);
+
+
 
   const importLegacyMutation = useMutation({
     mutationFn: () => api.production.importLegacyRecipes(),
@@ -177,22 +308,56 @@ export function RecipeStudioPage() {
     setRecipeModalOpen(true);
   }
 
-  const componentCostMap = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const s of supplies) map.set(`supply:${s.id}`, s.cost);
-    for (const r of recipes) map.set(`recipe:${r.id}`, r.unit_cost);
-    return map;
-  }, [supplies, recipes]);
+  const draftCostResult = useMemo<CostResult | null>(() => {
+    const yieldUnitCode = toEngineUnit(yieldUnit);
+    if (!yieldUnitCode) return null;
+    const draftRecipeId = editingId ? String(editingId) : '__draft_recipe__';
+    const mappedComponents = [];
+    for (const component of components) {
+      const unit = toEngineUnit(component.unit);
+      if (!unit || component.quantity <= 0) return null;
+      if (component.component_type === 'supply') {
+        const supply = supplies.find((item) => item.id === component.component_id);
+        if (!supply || !toEngineUnit(supply.unit)) return null;
+        mappedComponents.push({
+          component_type: 'ingredient' as const,
+          ingredient_id: `supply_${component.component_id}`,
+          quantity: component.quantity,
+          unit,
+        });
+      } else {
+        mappedComponents.push({
+          component_type: 'subrecipe' as const,
+          recipe_id: String(component.component_id),
+          quantity: component.quantity,
+          unit,
+        });
+      }
+    }
+    const draft: EngineRecipe = {
+      id: draftRecipeId,
+      name: recipeName || 'Receta en edición',
+      recipe_type: recipeType,
+      yield_quantity: Math.max(0.0001, yieldQuantity),
+      yield_unit: yieldUnitCode,
+      currency: 'ARS',
+      components: mappedComponents,
+    };
+    const recipesWithoutDraft = costEngineModel.catalog.recipes.filter((recipe) => recipe.id !== draftRecipeId);
+    try {
+      const engine = new CostEngine({
+        ...costEngineModel.catalog,
+        recipes: [...recipesWithoutDraft, draft],
+      });
+      return engine.calculateRecipeCost(draftRecipeId);
+    } catch {
+      return null;
+    }
+  }, [costEngineModel, components, editingId, recipeName, recipeType, yieldQuantity, yieldUnit, supplies]);
 
-  const computedBatchCost = components.reduce((sum, c) => {
-    const selectedSupply = c.component_type === 'supply' ? supplies.find((s) => s.id === c.component_id) : null;
-    const selectedRecipe = c.component_type === 'recipe' ? recipes.find((r) => r.id === c.component_id) : null;
-    const costUnit = selectedSupply?.unit ?? selectedRecipe?.yield_unit ?? c.unit;
-    const quantity = safeConvertQuantity(Math.max(0, c.quantity || 0), c.unit, costUnit);
-    return sum + quantity * (componentCostMap.get(`${c.component_type}:${c.component_id}`) ?? 0);
-  }, 0);
-  const computedUnitCost = computedBatchCost / Math.max(0.0001, yieldQuantity);
-  const pricingScenario = recipeType === 'product' && computedUnitCost > 0
+  const computedBatchCost = draftCostResult?.status === 'complete' ? draftCostResult.raw_batch_cost : null;
+  const computedUnitCost = draftCostResult?.status === 'complete' ? draftCostResult.raw_unit_cost : null;
+  const pricingScenario = recipeType === 'product' && computedUnitCost !== null
     ? calculatePricingScenario({
         unit_cost: computedUnitCost,
         status: 'complete',
@@ -203,8 +368,8 @@ export function RecipeStudioPage() {
         ...(price > 0 ? { selling_price: price } : {}),
       })
     : null;
-  const suggestedPrice = pricingScenario?.raw_suggested_price ?? 0;
-  const foodCost = pricingScenario?.food_cost_pct ?? 0;
+  const suggestedPrice = pricingScenario?.raw_suggested_price ?? null;
+  const foodCost = pricingScenario?.food_cost_pct ?? null;
 
   const monthlyTotal = costsQuery.data?.monthly_total ?? 0;
   const enteredMonthly = costItems.reduce((sum, item) => {
