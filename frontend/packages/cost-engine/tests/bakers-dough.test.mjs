@@ -45,6 +45,32 @@ describe('Cost Engine — validación y expansión de masas', () => {
     );
   });
 
+  it('returns the detailed preferment and final dough breakdown from the engine', () => {
+    const result = expandBakersDoughSpec({
+      ...baseSpec,
+      salt_pct: 2.7,
+      salt_ingredient_id: 'salt',
+      sugar_pct: 1,
+      sugar_ingredient_id: 'sugar',
+      oil_pct: 2,
+      oil_ingredient_id: 'oil',
+    });
+    assert.equal(result.flourBreakdown.length, 1);
+    assert.equal(result.flourBreakdown[0].quantityG, 1000);
+    assert.equal(result.biga.flourG, 300);
+    assert.equal(result.biga.waterG, 150);
+    assert.equal(result.biga.yeastG, 3);
+    assert.equal(result.poolish.flourG, 200);
+    assert.equal(result.poolish.waterG, 200);
+    assert.equal(result.poolish.yeastG, 4);
+    assert.equal(result.direct.yeastG, 5);
+    assert.equal(result.direct.saltG, 27);
+    assert.equal(result.direct.sugarG, 10);
+    assert.equal(result.direct.oilG, 20);
+    assert.equal(result.final.flourG, 500);
+    assert.equal(result.final.waterG, 300);
+  });
+
   it('rechaza mezclas con pesos de harina cuya suma sea cero', () => {
     assert.throws(
       () => expandBakersDoughSpec({
