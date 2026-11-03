@@ -39,7 +39,7 @@ export interface Product {
   description: string | null;
   price: number;
   cost: number | null;
-  cost_is_current: number;
+  cost_is_current?: number;
   cost_engine_version?: string | null;
   cost_input_hash?: string | null;
   cost_calculated_at?: string | null;
