@@ -55,6 +55,12 @@ class ToolsImportController
             Response::error('La muestra de encabezados supera el límite de 512 KB', 413);
         }
 
+        $deepseek = Config::get('deepseek', []);
+        $apiKey = (string) ($deepseek['api_key'] ?? '');
+        if ($apiKey === '') {
+            Response::error('La importación inteligente no está configurada en el servidor', 503);
+        }
+
         $accountId = (int) $req->auth['tools_account_id'];
         $pdo = Database::pdo();
         $pdo->prepare(
@@ -75,12 +81,6 @@ class ToolsImportController
         );
         $quota->execute([$accountId]);
         $used = (int) $quota->fetchColumn();
-
-        $deepseek = Config::get('deepseek', []);
-        $apiKey = (string) ($deepseek['api_key'] ?? '');
-        if ($apiKey === '') {
-            Response::error('La importación inteligente no está configurada en el servidor', 503);
-        }
 
         $systemPrompt = <<<'PROMPT'
 Sos un asistente de mapeo de planillas para un software de costos gastronómicos.
