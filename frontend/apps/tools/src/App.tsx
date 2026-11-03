@@ -562,6 +562,20 @@ export function App({
               }}
             />
           </label>
+          <label className="btn btn--ocre" style={{ margin: 0, opacity: isSmartImporting ? 0.65 : 1 }}>
+            {isSmartImporting ? 'Analizando planilla…' : 'Importar XLSX / CSV'}
+            <input
+              type="file"
+              accept=".xlsx,.csv"
+              disabled={isSmartImporting}
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void handleSmartImport(file);
+                e.target.value = '';
+              }}
+            />
+          </label>
           <button
             type="button"
             className="btn"
