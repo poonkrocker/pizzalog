@@ -49,7 +49,7 @@ export function RecipeModal({
           category: ing.category,
           quantity: ing.quantity,
           unit: ing.unit,
-          unit_cost: ing.unit_cost,
+          unit_cost: ing.unit_cost ?? undefined,
         })),
       );
     } else {
