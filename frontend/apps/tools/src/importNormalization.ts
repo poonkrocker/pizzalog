@@ -126,6 +126,24 @@ function purchaseDateValue(raw: string): string | null | undefined {
   return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === iso ? iso : null;
 }
 
+function hasCurrencyRate(
+  source: string,
+  target: string,
+  rates: ToolsWorkspaceState['catalog']['exchange_rates'],
+  asOfDate?: string
+): boolean {
+  const from = source.toUpperCase();
+  const to = target.toUpperCase();
+  if (from === to) return true;
+  return (rates ?? []).some((rate) =>
+    rate.from_currency.toUpperCase() === from &&
+    rate.to_currency.toUpperCase() === to &&
+    (!asOfDate || rate.effective_date <= asOfDate) &&
+    Number.isFinite(rate.rate) &&
+    rate.rate > 0
+  );
+}
+
 export function applyImportMappings(
   current: ToolsWorkspaceState,
   sheets: ParsedImportSheet[],
@@ -204,9 +222,12 @@ export function applyImportMappings(
         const purchaseDate = purchaseDateValue(rawPurchaseDate);
         const yieldPct = parseNumber(cell(row, mapping, 'yield_pct')) ?? 100;
         const compatiblePack = Boolean(packUnit && areUnitsCompatible(packUnit, ingredient.base_unit, ingredient));
+        const compatibleCurrency = Boolean(currency && hasCurrencyRate(
+          currency, current.currency, current.catalog.exchange_rates, purchaseDate
+        ));
         if (price !== null && price > 0 && packQuantity !== null && packQuantity > 0 && packUnit && currency &&
             purchaseDate !== null && Number.isFinite(yieldPct) && yieldPct > 0 && yieldPct <= 100 &&
-            compatiblePack && allowPriceForIngredient) {
+            compatiblePack && compatibleCurrency && allowPriceForIngredient) {
           pendingPrices.push({
             name,
             price: {
@@ -227,7 +248,9 @@ export function applyImportMappings(
               ? 'unidad de presentación incompatible o sin equivalencia explícita'
               : !allowPriceForIngredient
                 ? 'unidad base distinta a la ya registrada'
-                : 'presentación, moneda, precio o rendimiento incompleto';
+                : !compatibleCurrency
+                  ? 'falta un tipo de cambio explícito para la moneda importada'
+                  : 'presentación, moneda, precio o rendimiento incompleto';
           warnings.push(`${mapping.name}, fila ${sourceRow}: ${reason}; se importó el insumo si correspondía, pero no el precio.`);
         }
         return;
@@ -244,9 +267,12 @@ export function applyImportMappings(
         const purchaseDate = purchaseDateValue(rawPurchaseDate);
         const yieldPct = parseNumber(cell(row, mapping, 'yield_pct')) ?? 100;
         const compatiblePack = Boolean(ingredient && packUnit && areUnitsCompatible(packUnit, ingredient.base_unit, ingredient));
+        const compatibleCurrency = Boolean(currency && hasCurrencyRate(
+          currency, current.currency, current.catalog.exchange_rates, purchaseDate
+        ));
         if (!name || !ingredient || price === null || price <= 0 || packQuantity === null || packQuantity <= 0 ||
-            !packUnit || !currency || purchaseDate === null || yieldPct <= 0 || yieldPct > 100 || !compatiblePack) {
-          warnings.push(`${mapping.name}, fila ${sourceRow}: no se pudo vincular el precio a un insumo con presentación, moneda, fecha, rendimiento y equivalencia válidos.`);
+            !packUnit || !currency || purchaseDate === null || yieldPct <= 0 || yieldPct > 100 || !compatiblePack || !compatibleCurrency) {
+          warnings.push(`${mapping.name}, fila ${sourceRow}: no se pudo vincular el precio a un insumo con presentación, fecha, rendimiento, moneda y tipo de cambio explícitos.`);
           return;
         }
         pendingPrices.push({
