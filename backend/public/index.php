@@ -39,6 +39,7 @@ use Pizzalog\Controllers\StaffController;
 use Pizzalog\Controllers\ToolsAuthController;
 use Pizzalog\Controllers\ToolsWorkspaceController;
 use Pizzalog\Controllers\ToolsAdminController;
+use Pizzalog\Controllers\ToolsImportController;
 use Pizzalog\Core\ToolsAuth;
 
 require dirname(__DIR__) . '/bootstrap.php';
@@ -62,6 +63,7 @@ $router->post('/tools/auth/login', [ToolsAuthController::class, 'login']);
 $router->get('/tools/auth/me', [ToolsAuthController::class, 'me'], [$toolsAuth]);
 $router->get('/tools/workspace', [ToolsWorkspaceController::class, 'show'], [$toolsAuth]);
 $router->put('/tools/workspace', [ToolsWorkspaceController::class, 'save'], [$toolsAuth]);
+$router->post('/tools/import/preview', [ToolsImportController::class, 'preview'], [$toolsAuth]);
 $router->post('/tools/admin/accounts', [ToolsAdminController::class, 'createAccount'], [$auth, $admin]);
 
 // --- Categorías -------------------------------------------------------
