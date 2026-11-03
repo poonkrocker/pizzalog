@@ -88,12 +88,27 @@ export function selectEffectivePurchasePrice(
   purchasePrices: PurchasePrice[],
   asOfDate?: string
 ): PurchasePrice | undefined {
-  const matches = purchasePrices.filter(
-    (p) => p.ingredient_id === ingredientId && (!asOfDate || !p.purchase_date || p.purchase_date <= asOfDate)
-  );
-  if (matches.length === 0) return undefined;
-  matches.sort((a, b) => (b.purchase_date ?? '').localeCompare(a.purchase_date ?? ''));
-  return matches[0];
+  let selected: PurchasePrice | undefined;
+  let selectedDate = '';
+  let selectedIndex = -1;
+
+  purchasePrices.forEach((price, index) => {
+    if (
+      price.ingredient_id !== ingredientId ||
+      (asOfDate && price.purchase_date && price.purchase_date > asOfDate)
+    ) {
+      return;
+    }
+
+    const date = price.purchase_date ?? '';
+    if (date > selectedDate || (date === selectedDate && index > selectedIndex)) {
+      selected = price;
+      selectedDate = date;
+      selectedIndex = index;
+    }
+  });
+
+  return selected;
 }
 
 export interface UsableUnitCostResult {
