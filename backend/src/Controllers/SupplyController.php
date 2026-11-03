@@ -63,12 +63,21 @@ class SupplyController
     {
         $bid = (int) $req->auth['business_id'];
         $id  = (int) $req->param('id');
-        if (!$this->repo->get($bid, $id)) {
+        $current = $this->repo->get($bid, $id);
+        if (!$current) {
             Response::error('Insumo no encontrado', 404);
         }
         $d = $this->validate($req);
         $d['is_active'] = (int) (bool) $req->input('is_active', true);
+        $costChanged = (string)($current['cost'] ?? '') !== (string)($d['cost'] ?? '')
+            || (string)($current['unit'] ?? '') !== (string)($d['unit'] ?? '')
+            || (int)($current['is_active'] ?? 1) !== $d['is_active'];
         $this->repo->update($bid, $id, $d);
+        if ($costChanged) {
+            // Un cambio de costo, unidad o disponibilidad de un insumo invalida
+            // conservadoramente los costos de producto calculados con el catálogo anterior.
+            Database::pdo()->prepare('UPDATE products SET cost_is_current=0 WHERE business_id=?')->execute([$bid]);
+        }
         Response::ok(['supply' => $this->repo->get($bid, $id)]);
     }
 
@@ -81,6 +90,7 @@ class SupplyController
             Response::error('Insumo no encontrado', 404);
         }
         $this->repo->deactivate($bid, $id);
+        Database::pdo()->prepare('UPDATE products SET cost_is_current=0 WHERE business_id=?')->execute([$bid]);
         Response::ok(['deleted' => true]);
     }
 
