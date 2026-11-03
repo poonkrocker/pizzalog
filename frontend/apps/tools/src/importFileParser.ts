@@ -93,6 +93,7 @@ async function unzip(buffer: ArrayBuffer): Promise<Map<string, Uint8Array>> {
   if (eocd < 0) throw new Error('El archivo no parece ser un XLSX válido');
 
   const entryCount = view.getUint16(eocd + 10, true);
+  if (entryCount > 2000) throw new Error('El XLSX contiene demasiadas entradas internas');
   const centralOffset = view.getUint32(eocd + 16, true);
   const decoder = new TextDecoder();
   const files = new Map<string, Uint8Array>();
