@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CostEngine,
   CostEngineValidationError,
@@ -49,6 +49,9 @@ export function App({
   const [importError, setImportError] = useState<string | null>(null);
   const [importNotice, setImportNotice] = useState<string | null>(null);
   const [isSmartImporting, setIsSmartImporting] = useState(false);
+  const [workspaceSaveError, setWorkspaceSaveError] = useState<string | null>(null);
+  const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [smartImportPreview, setSmartImportPreview] = useState<{
     fileName: string;
     sheets: ParsedImportSheet[];
@@ -62,23 +65,32 @@ export function App({
   const [builderError, setBuilderError] = useState<string | null>(null);
 
   useEffect(() => {
-    const timer = window.setTimeout(async () => {
-      try {
-        const response = await fetch(`${API_URL}/tools/workspace`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ workspace: state }),
+    const workspaceSnapshot = state;
+    const timer = window.setTimeout(() => {
+      saveQueueRef.current = saveQueueRef.current
+        .catch(() => undefined)
+        .then(async () => {
+          setIsSavingWorkspace(true);
+          try {
+            const response = await fetch(`${API_URL}/tools/workspace`, {
+              method: 'PUT',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({ workspace: workspaceSnapshot }),
+            });
+            const payload = (await response.json()) as { ok?: boolean; error?: string };
+            if (!response.ok || !payload.ok) {
+              throw new Error(payload.error ?? 'No se pudo guardar el espacio de trabajo');
+            }
+            setWorkspaceSaveError(null);
+          } catch (err) {
+            setWorkspaceSaveError(err instanceof Error ? err.message : 'Error al guardar los cambios');
+          } finally {
+            setIsSavingWorkspace(false);
+          }
         });
-        const payload = (await response.json()) as { ok?: boolean; error?: string };
-        if (!response.ok || !payload.ok) {
-          throw new Error(payload.error ?? 'No se pudo guardar el espacio de trabajo');
-        }
-      } catch (err) {
-        setImportError(err instanceof Error ? err.message : 'Error al guardar los cambios');
-      }
     }, 650);
     return () => window.clearTimeout(timer);
   }, [state, token]);
@@ -532,6 +544,9 @@ export function App({
         </div>
         <div className="tools-actions">
           <span className="tools-account-label">{account.name}</span>
+          <span className="tools-save-status" role="status">
+            {workspaceSaveError ? 'Error de guardado' : isSavingWorkspace ? 'Guardando…' : 'Guardado automático'}
+          </span>
           <button type="button" className="btn" onClick={onLogout}>Cerrar sesión</button>
           <button
             type="button"
@@ -595,6 +610,7 @@ export function App({
       </header>
 
       {importError && <div className="alert-banner">⚠️ Error de validación al importar: {importError}</div>}
+      {workspaceSaveError && <div className="alert-banner">⚠️ No se pudieron guardar tus cambios: {workspaceSaveError}</div>}
       {importNotice && <div className="notice-banner">{importNotice}</div>}
 
       <section className="tools-toolbar">
