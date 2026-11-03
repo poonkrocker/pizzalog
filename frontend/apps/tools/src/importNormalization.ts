@@ -1,5 +1,5 @@
-import { areUnitsCompatible, type Ingredient, type PurchasePrice, type Recipe, type UnitCode } from '@pizzalog/cost-engine';
-import type { ParsedImportSheet } from './importFileParser';
+import { areUnitsCompatible, type BakersDoughSpec, type Ingredient, type PurchasePrice, type Recipe, type UnitCode } from '@pizzalog/cost-engine';
+import type { ParsedDoughProfile, ParsedImportSheet } from './importFileParser';
 import type { ToolsWorkspaceState, OperatingExpenseItem } from './demoData';
 
 export interface ImportSheetMapping {
@@ -162,11 +162,105 @@ export function applyImportMappings(
   const usedIngredientIds = new Set(ingredients.map((item) => item.id));
   const usedRecipeIds = new Set(recipes.map((item) => item.id));
   const knownIngredients = new Map(ingredients.map((item) => [normalizedName(item.name), item]));
+  const doughProfiles = sheets.flatMap((sheet) => sheet.doughProfiles ?? []);
+  const doughRecipesByName = new Map<string, Recipe>();
+  let doughProfilesAdded = false;
   const warnings: string[] = [];
   const counts = { ingredients: 0, prices: 0, recipes: 0, expenses: 0 };
   const pendingPrices: Array<{ name: string; price: PurchasePrice }> = [];
   const recipeRows = new Map<string, { name: string; type: Recipe['recipe_type']; yieldQuantity: number; yieldUnit: UnitCode; components: NonNullable<Recipe['components']> }>();
   const invalidRecipeKeys = new Set<string>();
+
+  const addDoughProfiles = () => {
+    if (doughProfilesAdded) return;
+    doughProfilesAdded = true;
+    for (const profile of doughProfiles) {
+      const flourInputs = profile.flours.map((flour) => ({
+        ingredient: knownIngredients.get(normalizedName(flour.name)),
+        weight_kg: flour.weight_kg,
+        name: flour.name,
+      }));
+      const missingFlours = flourInputs.filter((item) => !item.ingredient);
+      if (missingFlours.length) {
+        warnings.push(`No se pudo convertir la masa "${profile.name}" en subreceta: faltan precios/insumos para las harinas ${missingFlours.map((item) => item.name).join(', ')}.`);
+        continue;
+      }
+      const findIngredientId = (name?: string) => name ? knownIngredients.get(normalizedName(name))?.id : undefined;
+      const yeastId = findIngredientId(profile.yeast_ingredient_name ?? profile.biga?.yeast_ingredient_name ?? profile.poolish?.yeast_ingredient_name);
+      const saltId = findIngredientId(profile.salt_ingredient_name);
+      const sugarId = findIngredientId(profile.sugar_ingredient_name);
+      const oilId = findIngredientId(profile.oil_ingredient_name);
+      if ((profile.biga?.yeast_pct ?? 0) > 0 && !findIngredientId(profile.biga?.yeast_ingredient_name)) {
+        warnings.push(`La masa "${profile.name}" requiere un insumo de levadura para la biga que no se encontró.`);
+        continue;
+      }
+      if ((profile.poolish?.yeast_pct ?? 0) > 0 && !findIngredientId(profile.poolish?.yeast_ingredient_name)) {
+        warnings.push(`La masa "${profile.name}" requiere un insumo de levadura para el poolish que no se encontró.`);
+        continue;
+      }
+      if ((profile.direct_yeast_pct ?? 0) > 0 && !yeastId) {
+        warnings.push(`La masa "${profile.name}" requiere levadura directa, pero no se encontró ese insumo.`);
+        continue;
+      }
+      if ((profile.salt_pct ?? 0) > 0 && !saltId) {
+        warnings.push(`La masa "${profile.name}" requiere sal, pero no se encontró ese insumo.`);
+        continue;
+      }
+      if ((profile.sugar_pct ?? 0) > 0 && !sugarId) {
+        warnings.push(`La masa "${profile.name}" requiere azúcar, pero no se encontró ese insumo.`);
+        continue;
+      }
+      if ((profile.oil_pct ?? 0) > 0 && !oilId) {
+        warnings.push(`La masa "${profile.name}" requiere aceite, pero no se encontró ese insumo.`);
+        continue;
+      }
+      const spec: BakersDoughSpec = {
+        unit_weight_g: profile.unit_weight_g,
+        units_count: 1,
+        hydration_pct: profile.hydration_pct,
+        yield_basis: 'flour_plus_water',
+        flours: flourInputs.map((item) => ({
+          ingredient_id: item.ingredient!.id,
+          weight_kg: item.weight_kg,
+        })),
+        ...(profile.biga ? { biga: {
+          flour_pct: profile.biga.flour_pct,
+          water_pct: profile.biga.water_pct,
+          yeast_pct: profile.biga.yeast_pct,
+          yeast_ingredient_id: findIngredientId(profile.biga.yeast_ingredient_name)!,
+        } } : {}),
+        ...(profile.poolish ? { poolish: {
+          flour_pct: profile.poolish.flour_pct,
+          water_pct: profile.poolish.water_pct,
+          yeast_pct: profile.poolish.yeast_pct,
+          yeast_ingredient_id: findIngredientId(profile.poolish.yeast_ingredient_name)!,
+        } } : {}),
+        ...(profile.direct_yeast_pct ? { direct_yeast_pct: profile.direct_yeast_pct, yeast_ingredient_id: yeastId } : {}),
+        ...(profile.salt_pct ? { salt_pct: profile.salt_pct, salt_ingredient_id: saltId } : {}),
+        ...(profile.sugar_pct ? { sugar_pct: profile.sugar_pct, sugar_ingredient_id: sugarId } : {}),
+        ...(profile.oil_pct ? { oil_pct: profile.oil_pct, oil_ingredient_id: oilId } : {}),
+      };
+      const existing = recipes.find((recipe) => normalizedName(recipe.name) === normalizedName(profile.name));
+      if (existing) {
+        warnings.push(`La subreceta calculada "${profile.name}" ya existe; no se reemplazó.`);
+        doughRecipesByName.set(normalizedName(profile.name), existing);
+        continue;
+      }
+      const recipe: Recipe = {
+        id: makeId('imp_dough', profile.name, usedRecipeIds),
+        name: profile.name,
+        recipe_type: 'subrecipe',
+        yield_quantity: profile.unit_weight_g,
+        yield_unit: 'g',
+        currency: current.currency,
+        bakers_dough: spec,
+      };
+      recipes.push(recipe);
+      doughRecipesByName.set(normalizedName(profile.name), recipe);
+      counts.recipes += 1;
+      warnings.push(`"${profile.name}" se importó como subreceta de masa calculada: ${profile.unit_weight_g} g por bollo, hidratación ${profile.hydration_pct}%.`);
+    }
+  };
 
   const orderedMappings = [...mappings].sort((a, b) => {
     const order = { ingredients: 0, purchase_prices: 1, recipes: 2, operating_expenses: 3, unknown: 4 };
@@ -176,6 +270,7 @@ export function applyImportMappings(
   for (const mapping of orderedMappings) {
     const sheet = sheets[mapping.sheet_index];
     if (!sheet) continue;
+    if (mapping.kind === 'recipes') addDoughProfiles();
     if (mapping.kind === 'unknown') {
       warnings.push(`${mapping.name}: tipo de hoja no reconocido; no se importó.`);
       continue;
@@ -189,6 +284,7 @@ export function applyImportMappings(
       if (mapping.kind === 'ingredients') {
         const name = cell(row, mapping, 'name', 'ingredient_name');
         if (!name) return;
+        if (doughProfiles.some((profile) => normalizedName(profile.name) === normalizedName(name))) return;
         const baseUnit = unitValue(cell(row, mapping, 'base_unit'));
         const inferredDimension = baseUnit ? dimensionForUnit(baseUnit) : null;
         const declaredDimension = dimensionValue(cell(row, mapping, 'base_dimension'));
@@ -274,6 +370,7 @@ export function applyImportMappings(
 
       if (mapping.kind === 'purchase_prices') {
         const name = cell(row, mapping, 'ingredient_name', 'name');
+        if (doughProfiles.some((profile) => normalizedName(profile.name) === normalizedName(name))) return;
         const price = parseNumber(cell(row, mapping, 'purchase_price'));
         const rawBaseUnit = cell(row, mapping, 'base_unit');
         const existingIngredient = knownIngredients.get(normalizedName(name));
@@ -362,11 +459,13 @@ export function applyImportMappings(
         const componentQuantity = parseNumber(cell(row, mapping, 'component_quantity'));
         const componentUnit = unitValue(cell(row, mapping, 'component_unit'));
         const ingredient = knownIngredients.get(normalizedName(componentName));
+        const doughRecipe = doughRecipesByName.get(normalizedName(componentName));
+        const validIngredientComponent = Boolean(ingredient && componentUnit && areUnitsCompatible(componentUnit, ingredient.base_unit, ingredient));
+        const validDoughComponent = Boolean(doughRecipe && componentUnit && areUnitsCompatible(componentUnit, doughRecipe.yield_unit));
         if (
           !name || !recipeType || yieldQuantity === null || yieldQuantity <= 0 || !yieldUnit ||
           !componentName || componentQuantity === null || componentQuantity <= 0 ||
-          !componentUnit || !ingredient ||
-          !areUnitsCompatible(componentUnit, ingredient.base_unit, ingredient)
+          !componentUnit || (!validIngredientComponent && !validDoughComponent)
         ) {
           if (key) invalidRecipeKeys.add(key);
           warnings.push(`${mapping.name}, fila ${sourceRow}: receta incompleta o componente sin insumo coincidente; se omitirá la receta completa para evitar un costo parcial.`);
@@ -392,12 +491,19 @@ export function applyImportMappings(
           yieldUnit,
           components: [],
         };
-        target.components.push({
-          component_type: 'ingredient',
-          ingredient_id: ingredient.id,
-          quantity: componentQuantity,
-          unit: componentUnit,
-        });
+        target.components.push(doughRecipe
+          ? {
+              component_type: 'subrecipe',
+              recipe_id: doughRecipe.id,
+              quantity: componentQuantity,
+              unit: componentUnit,
+            }
+          : {
+              component_type: 'ingredient',
+              ingredient_id: ingredient!.id,
+              quantity: componentQuantity,
+              unit: componentUnit,
+            });
         recipeRows.set(key, target);
       }
     });
