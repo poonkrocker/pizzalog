@@ -31,7 +31,7 @@ export function ToolsAuthGate() {
 
   useEffect(() => {
     // Elimina el cache local de la versión previa, que ya no es una fuente de datos.
-    localStorage.removeItem('pizzalog_tools_workspace_v2');
+    try { localStorage.removeItem('pizzalog_tools_workspace_v2'); } catch { /* storage may be disabled */ }
     const saved = sessionStorage.getItem(TOKEN_KEY);
     if (!saved) {
       setLoading(false);
