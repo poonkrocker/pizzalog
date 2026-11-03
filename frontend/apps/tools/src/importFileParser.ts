@@ -231,6 +231,29 @@ function normalizeRecipeMatrix(rows: string[][]): string[][] | null {
   return output.length > 1 ? output : null;
 }
 
+
+function normalizeIngredientPriceRows(rows: string[][]): string[][] | null {
+  const norm = (value: string) => value.normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase().trim();
+  const headerIndex = rows.findIndex((row) =>
+    row.some((value) => norm(value) === 'ingrediente') &&
+    row.some((value) => norm(value) === 'unidad') &&
+    row.some((value) => norm(value).includes('precio'))
+  );
+  if (headerIndex < 0) return null;
+  const header = rows[headerIndex];
+  const nameColumn = header.findIndex((value) => norm(value) === 'ingrediente');
+  const unitColumn = header.findIndex((value) => norm(value) === 'unidad');
+  const priceColumn = header.findIndex((value) => norm(value).includes('precio'));
+  const output = [['Nombre del insumo', 'Unidad base', 'Precio de compra']];
+  for (const row of rows.slice(headerIndex + 1)) {
+    const name = (row[nameColumn] ?? '').trim();
+    const unit = (row[unitColumn] ?? '').trim();
+    const price = (row[priceColumn] ?? '').trim();
+    if (name && unit) output.push([name, unit, price]);
+  }
+  return output.length > 1 ? output : null;
+}
+
 async function parseXlsx(buffer: ArrayBuffer): Promise<ParsedImportSheet[]> {
   const files = await unzip(buffer);
   const fileNames = Array.from(files.keys()).map((name) => name.toLowerCase());
@@ -300,12 +323,17 @@ async function parseXlsx(buffer: ArrayBuffer): Promise<ParsedImportSheet[]> {
     }
     if (rows.length) {
       const matrixRows = normalizeRecipeMatrix(rows);
+      const ingredientPriceRows = matrixRows ? null : normalizeIngredientPriceRows(rows);
+      const normalizedRows = matrixRows ?? ingredientPriceRows ?? rows;
       sheets.push({
-        name: matrixRows ? `${name} — formato matriz convertido` : name,
-        rows: matrixRows ?? rows,
-        ...((hasFormulaCells || matrixRows) ? { warnings: [
+        name: matrixRows
+          ? `${name} — recetas normalizadas`
+          : ingredientPriceRows ? `${name} — insumos normalizados` : name,
+        rows: normalizedRows,
+        ...((hasFormulaCells || matrixRows || ingredientPriceRows) ? { warnings: [
           ...(hasFormulaCells ? ['La hoja contiene fórmulas. Se leyeron únicamente los valores guardados en el archivo; no se ejecutaron fórmulas.'] : []),
           ...(matrixRows ? ['Se detectó una matriz de recetas por producto y se normalizó a filas de ingredientes sin modificar cantidades.'] : []),
+          ...(ingredientPriceRows ? ['Se detectó una tabla de precios por unidad y se normalizó para importar insumos y sus precios unitarios.'] : []),
         ] } : {}),
       });
     }
@@ -315,7 +343,7 @@ async function parseXlsx(buffer: ArrayBuffer): Promise<ParsedImportSheet[]> {
 
 export async function parseImportFile(file: File): Promise<ParsedImportSheet[]> {
   if (file.size === 0) throw new Error('El archivo está vacío');
-  if (file.size > MAX_FILE_BYTES) throw new Error('El archivo supera el límite de 8 MB');
+  if (file.size > MAX_FILE_BYTES) throw new Error('El archivo supera el límite seguro de 20 MB');
   const extension = file.name.toLowerCase().split('.').pop();
 
   if (extension === 'csv') {
