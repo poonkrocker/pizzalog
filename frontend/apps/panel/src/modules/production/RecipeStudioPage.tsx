@@ -412,6 +412,10 @@ export function RecipeStudioPage() {
   function submitRecipe() {
     setRecipeError('');
     if (!recipeName.trim()) { setRecipeError('Ingresá un nombre para la receta.'); return; }
+    if (!toEngineUnit(yieldUnit)) {
+      setRecipeError(`La unidad de rendimiento '${yieldUnit}' no está soportada por el Cost Engine. Usá una unidad estándar.`);
+      return;
+    }
     const validComponents = components.filter((c) => c.component_id > 0 && c.quantity > 0);
     if (!validComponents.length) {
       setRecipeError('Agregá al menos un ingrediente o una subreceta con cantidad mayor que cero.'); return;
