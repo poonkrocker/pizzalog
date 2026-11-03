@@ -10,6 +10,9 @@ import {
   type MissingInput,
   type PricingScenarioInput,
   type PricingScenarioResult,
+  type PortfolioScenarioInput,
+  type PortfolioScenarioResult,
+  type PortfolioScenarioRow,
   type PurchasePrice,
   type Recipe,
   type RecipeComponent,
@@ -965,4 +968,105 @@ export function createCostSnapshot(
   );
 
   return Object.freeze(snapshot);
+}
+
+/**
+ * Simula cambios porcentuales de costos y precios sobre un conjunto de recetas.
+ * Los productos incompletos permanecen incompletos: nunca se sustituyen costos faltantes por cero.
+ */
+export function calculatePortfolioScenario(input: PortfolioScenarioInput): PortfolioScenarioResult {
+  const roundingIncrement = input.rounding_increment ?? 100;
+  const targetFoodCostPct = input.target_food_cost_pct ?? 30;
+  if (
+    !Number.isFinite(input.cost_delta_pct) ||
+    !Number.isFinite(input.price_delta_pct) ||
+    input.cost_delta_pct <= -100 ||
+    input.price_delta_pct <= -100 ||
+    !Number.isFinite(roundingIncrement) ||
+    roundingIncrement <= 0
+  ) {
+    throw new CostEngineValidationError(
+      'INVALID_PRICING_PARAMETERS',
+      'Las variaciones deben ser finitas y mayores a -100%; el redondeo debe ser positivo.'
+    );
+  }
+
+  const rows: PortfolioScenarioRow[] = input.items.map((item) => {
+    if (item.status !== 'complete' || item.unit_cost === null || !Number.isFinite(item.unit_cost) || item.unit_cost <= 0) {
+      return {
+        id: item.id,
+        name: item.name,
+        status: 'incomplete',
+        current_cost: null,
+        simulated_cost: null,
+        current_price: item.selling_price !== null && item.selling_price > 0 ? item.selling_price : null,
+        simulated_price: null,
+        current_food_cost_pct: null,
+        simulated_food_cost_pct: null,
+        current_margin: null,
+        simulated_margin: null,
+      };
+    }
+
+    const currentPrice = item.selling_price !== null && Number.isFinite(item.selling_price) && item.selling_price > 0
+      ? item.selling_price
+      : null;
+    const simulatedCost = item.unit_cost * (1 + input.cost_delta_pct / 100);
+    const simulatedPrice = currentPrice === null
+      ? null
+      : Math.round((currentPrice * (1 + input.price_delta_pct / 100)) / roundingIncrement) * roundingIncrement;
+
+    const currentScenario = calculatePricingScenario({
+      unit_cost: item.unit_cost,
+      status: 'complete',
+      currency: 'ARS',
+      target_food_cost_pct: targetFoodCostPct,
+      rounding_increment: roundingIncrement,
+      rounding_mode: 'nearest',
+      ...(currentPrice !== null ? { selling_price: currentPrice } : {}),
+    });
+    const simulatedScenario = calculatePricingScenario({
+      unit_cost: simulatedCost,
+      status: 'complete',
+      currency: 'ARS',
+      target_food_cost_pct: targetFoodCostPct,
+      rounding_increment: roundingIncrement,
+      rounding_mode: 'nearest',
+      ...(simulatedPrice !== null ? { selling_price: simulatedPrice } : {}),
+    });
+
+    return {
+      id: item.id,
+      name: item.name,
+      status: 'complete',
+      current_cost: item.unit_cost,
+      simulated_cost: simulatedCost,
+      current_price: currentPrice,
+      simulated_price: simulatedPrice,
+      current_food_cost_pct: currentScenario.food_cost_pct,
+      simulated_food_cost_pct: simulatedScenario.food_cost_pct,
+      current_margin: currentScenario.gross_profit === null ? null : Number(currentScenario.gross_profit),
+      simulated_margin: simulatedScenario.gross_profit === null ? null : Number(simulatedScenario.gross_profit),
+    };
+  });
+
+  const pricedRows = rows.filter((row) => row.status === 'complete' && row.current_price !== null && row.simulated_price !== null);
+  const currentRevenue = pricedRows.reduce((sum, row) => sum + (row.current_price ?? 0), 0);
+  const simulatedRevenue = pricedRows.reduce((sum, row) => sum + (row.simulated_price ?? 0), 0);
+  const currentCost = pricedRows.reduce((sum, row) => sum + (row.current_cost ?? 0), 0);
+  const simulatedCost = pricedRows.reduce((sum, row) => sum + (row.simulated_cost ?? 0), 0);
+
+  return {
+    rows,
+    complete_items: rows.filter((row) => row.status === 'complete').length,
+    incomplete_items: rows.filter((row) => row.status === 'incomplete').length,
+    current_revenue: currentRevenue,
+    simulated_revenue: simulatedRevenue,
+    current_cost: currentCost,
+    simulated_cost: simulatedCost,
+    current_food_cost_pct: currentRevenue > 0 ? (currentCost / currentRevenue) * 100 : null,
+    simulated_food_cost_pct: simulatedRevenue > 0 ? (simulatedCost / simulatedRevenue) * 100 : null,
+    current_margin: currentRevenue > 0 ? ((currentRevenue - currentCost) / currentRevenue) * 100 : null,
+    simulated_margin: simulatedRevenue > 0 ? ((simulatedRevenue - simulatedCost) / simulatedRevenue) * 100 : null,
+  };
 }
