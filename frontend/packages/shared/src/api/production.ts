@@ -1,6 +1,5 @@
 import type { ApiClient } from './client';
 import type {
-  DoughCalculation,
   DoughProfile,
   DoughProfileInput,
   RecipeStudioResponse,
@@ -8,13 +7,6 @@ import type {
   BusinessCostsResponse,
   BusinessCostInput,
 } from '../types';
-
-export interface DoughCalculateParams {
-  profile_id?: number;
-  units: number;
-  batches?: number;
-}
-
 
 export function productionApi(client: ApiClient) {
   return {
