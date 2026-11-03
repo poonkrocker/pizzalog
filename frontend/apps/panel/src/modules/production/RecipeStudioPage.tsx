@@ -308,7 +308,11 @@ export function RecipeStudioPage() {
     setRecipeModalOpen(true);
   }
 
-  const draftCostResult = useMemo<CostResult | null>(() => {
+  const draftEngineContext = useMemo<{
+    engine: CostEngine;
+    recipeId: string;
+    result: CostResult;
+  } | null>(() => {
     const yieldUnitCode = toEngineUnit(yieldUnit);
     if (!yieldUnitCode) return null;
     const draftRecipeId = editingId ? String(editingId) : '__draft_recipe__';
@@ -349,11 +353,13 @@ export function RecipeStudioPage() {
         ...costEngineModel.catalog,
         recipes: [...recipesWithoutDraft, draft],
       });
-      return engine.calculateRecipeCost(draftRecipeId);
+      return { engine, recipeId: draftRecipeId, result: engine.calculateRecipeCost(draftRecipeId) };
     } catch {
       return null;
     }
   }, [costEngineModel, components, editingId, recipeName, recipeType, yieldQuantity, yieldUnit, supplies]);
+
+  const draftCostResult = draftEngineContext?.result ?? null;
 
   const computedBatchCost = draftCostResult?.status === 'complete' ? draftCostResult.raw_batch_cost : null;
   const computedUnitCost = draftCostResult?.status === 'complete' ? draftCostResult.raw_unit_cost : null;
@@ -426,6 +432,29 @@ export function RecipeStudioPage() {
         return;
       }
     }
+    const costByProduct = new Map<number, number>();
+    if (draftEngineContext) {
+      for (const savedRecipe of rawRecipes) {
+        if (savedRecipe.recipe_type !== 'product') continue;
+        const productId = savedRecipe.id === editingId ? linkedProductId : (savedRecipe.linked_product_id ?? 0);
+        if (!productId) continue;
+        if (savedRecipe.id === editingId && recipeType !== 'product') continue;
+        try {
+          const result = draftEngineContext.engine.calculateRecipeCost(String(savedRecipe.id));
+          if (result.status === 'complete' && result.raw_unit_cost !== null) {
+            costByProduct.set(productId, result.raw_unit_cost);
+          }
+        } catch {
+          // Una receta incompleta no actualiza el costo almacenado del producto.
+        }
+      }
+      if (!editingId && recipeType === 'product' && linkedProductId > 0 &&
+          draftEngineContext.result.status === 'complete' && draftEngineContext.result.raw_unit_cost !== null) {
+        costByProduct.set(linkedProductId, draftEngineContext.result.raw_unit_cost);
+      }
+    }
+    const costSnapshots = Array.from(costByProduct, ([linked_product_id, unit_cost]) => ({ linked_product_id, unit_cost }));
+
     const body: SaveStudioRecipeInput = {
       ...(editingId ? { id: editingId } : {}),
       name: recipeName.trim(), recipe_type: recipeType, linked_product_id: linkedProductId || null,
@@ -433,6 +462,7 @@ export function RecipeStudioPage() {
       price: recipeType === 'product' ? Math.max(0, price) : 0,
       target_food_cost_pct: targetPct,
       components: validComponents,
+      cost_snapshots: costSnapshots,
     };
     saveRecipe.mutate(body);
   }
