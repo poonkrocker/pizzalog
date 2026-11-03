@@ -1,6 +1,7 @@
 import {
   CostEngine,
   expandBakersDoughSpec,
+  expandFainaSpec,
   type CostCatalog,
   type Ingredient,
   type PurchasePrice,
@@ -87,8 +88,7 @@ function makeCostEngineResult(
     currency: 'ARS',
     components,
   };
-  const engine = new CostEngine({ ...catalog, recipes: [recipe] });
-  return engine.calculateRecipeCost(recipe.id);
+  return new CostEngine({ ...catalog, recipes: [recipe] }).calculateRecipeCost(recipe.id);
 }
 
 export function calculateDoughWithCostEngine(
@@ -99,56 +99,58 @@ export function calculateDoughWithCostEngine(
 ): DoughCalculation {
   const safeUnits = Math.max(1, Math.floor(units));
   const safeBatches = Math.max(1, Math.floor(batches));
+  const perBatch = (value: number) => value / safeBatches;
   const isFaina = /fain[aá]/i.test(profile.name);
 
   if (isFaina) {
-    const flourKg = safeUnits * 0.185;
-    const waterLiters = flourKg * 2.25;
-    const saltGrams = flourKg * 50;
-    const oilMl = safeUnits * 12;
-    const components: RecipeComponent[] = [
-      { component_type: 'ingredient', ingredient_id: supplyRef(profile, 'chickpea_flour_id', supplies, 'mass'), quantity: flourKg, unit: 'kg' },
-      { component_type: 'ingredient', ingredient_id: supplyRef(profile, 'salt_id', supplies, 'mass'), quantity: saltGrams, unit: 'g' },
-      { component_type: 'ingredient', ingredient_id: supplyRef(profile, 'oil_id', supplies, 'volume'), quantity: oilMl, unit: 'ml' },
-    ];
     const waterId = profile.ingredient_map?.water_id;
     const waterSupply = supplies.find((item) => item.id === waterId);
     const waterUnit = waterSupply ? toEngineUnit(waterSupply.unit) : null;
-    if (typeof waterId === 'number' && waterId > 0 && waterUnit && dimensionForUnit(waterUnit) === 'volume') {
-      components.push({ component_type: 'ingredient', ingredient_id: `supply_${waterId}`, quantity: waterLiters, unit: 'L' });
-    }
-    const result = makeCostEngineResult(profile, supplies, components, safeUnits, 'unit');
-    const totalWeightKg = flourKg + waterLiters;
+    const fainaSpec = {
+      units_count: safeUnits,
+      chickpea_flour_ingredient_id: supplyRef(profile, 'chickpea_flour_id', supplies, 'mass'),
+      salt_ingredient_id: supplyRef(profile, 'salt_id', supplies, 'mass'),
+      oil_ingredient_id: supplyRef(profile, 'oil_id', supplies, 'volume'),
+      ...(waterUnit && dimensionForUnit(waterUnit) === 'mass' && typeof waterId === 'number'
+        ? { water_ingredient_id: `supply_${waterId}` }
+        : {}),
+    };
+    const expanded = expandFainaSpec(fainaSpec);
+    const result = makeCostEngineResult(profile, supplies, expanded.components, safeUnits, 'unit');
+    const flourKg = expanded.chickpeaFlourG / 1000;
+    const waterLiters = expanded.waterG / 1000;
+    const saltGrams = expanded.saltG;
+    const oilLiters = expanded.oilMl / 1000;
+    const totalWeightKg = expanded.totalWeightG / 1000;
     const totalCost = result.raw_batch_cost;
-    const perBatch = (value: number) => value / safeBatches;
     const whatsapp = [
       `🥣 *RECETA FAINÁ - ${safeUnits} MOLDES*`,
       '──────────────────',
       `• Harina de garbanzo: ${flourKg.toFixed(3)} kg`,
       `• Agua: ${waterLiters.toFixed(3)} L`,
       `• Sal fina: ${saltGrams.toFixed(1)} g`,
-      `• Aceite de oliva: ${oilMl.toFixed(0)} ml`,
+      `• Aceite de oliva: ${expanded.oilMl.toFixed(0)} ml`,
       '──────────────────',
       'Batir enérgicamente sin grumos y reposar mínimo 4 horas.',
     ].join('\n');
     return {
       type: 'faina',
       total_weight_kg: totalWeightKg,
-      weight_per_unit_g: 185,
+      weight_per_unit_g: expanded.chickpeaFlourG / safeUnits,
       units: safeUnits,
       batches: safeBatches,
       total: {
         chickpea_flour_kg: flourKg,
         water_liters: waterLiters,
         salt_grams: saltGrams,
-        oil_liters: oilMl / 1000,
+        oil_liters: oilLiters,
       },
       per_batch: {
         batches: safeBatches,
         chickpea_flour_kg: perBatch(flourKg),
         water_liters: perBatch(waterLiters),
         salt_grams: perBatch(saltGrams),
-        oil_liters: perBatch(oilMl / 1000),
+        oil_liters: perBatch(oilLiters),
       },
       cost: {
         total: totalCost,
@@ -160,17 +162,16 @@ export function calculateDoughWithCostEngine(
     };
   }
 
-  const flours = [
-    { ingredient_id: supplyRef(profile, 'flour_white_id', supplies, 'mass'), share_pct: profile.flour_white_pct },
-    { ingredient_id: supplyRef(profile, 'flour_integral_id', supplies, 'mass'), share_pct: profile.flour_integral_pct },
-    { ingredient_id: supplyRef(profile, 'flour_semola_id', supplies, 'mass'), share_pct: profile.flour_semola_pct },
-  ];
   const spec = {
     unit_weight_g: profile.unit_weight_grams,
     units_count: safeUnits,
     hydration_pct: profile.hydration_pct,
     yield_basis: 'flour_plus_water' as const,
-    flours,
+    flours: [
+      { ingredient_id: supplyRef(profile, 'flour_white_id', supplies, 'mass'), share_pct: profile.flour_white_pct },
+      { ingredient_id: supplyRef(profile, 'flour_integral_id', supplies, 'mass'), share_pct: profile.flour_integral_pct },
+      { ingredient_id: supplyRef(profile, 'flour_semola_id', supplies, 'mass'), share_pct: profile.flour_semola_pct },
+    ],
     ...(profile.biga_pct > 0 ? {
       biga: {
         flour_pct: profile.biga_pct,
@@ -197,8 +198,6 @@ export function calculateDoughWithCostEngine(
     oil_ingredient_id: supplyRef(profile, 'oil_id', supplies, 'mass'),
   };
   const expanded = expandBakersDoughSpec(spec);
-  // CostEngine expands bakers_dough specs on Recipe; attach the exact spec used above.
-  const catalog = buildCatalog(supplies);
   const engineRecipe: Recipe = {
     id: `dough_profile_${profile.id}`,
     name: profile.name,
@@ -208,27 +207,31 @@ export function calculateDoughWithCostEngine(
     currency: 'ARS',
     bakers_dough: spec,
   };
-  const engineResult = new CostEngine({ ...catalog, recipes: [engineRecipe] }).calculateRecipeCost(engineRecipe.id);
+  const engineResult = new CostEngine({
+    ...buildCatalog(supplies),
+    recipes: [engineRecipe],
+  }).calculateRecipeCost(engineRecipe.id);
+
+  const flourWhiteKg = (expanded.flourBreakdown.find((item) => item.index === 0)?.quantityG ?? 0) / 1000;
+  const flourIntegralKg = (expanded.flourBreakdown.find((item) => item.index === 1)?.quantityG ?? 0) / 1000;
+  const flourSemolaKg = (expanded.flourBreakdown.find((item) => item.index === 2)?.quantityG ?? 0) / 1000;
   const flourKg = expanded.flourTotalG / 1000;
   const waterKg = expanded.waterTotalG / 1000;
-  const bigaFlourKg = flourKg * profile.biga_pct / 100;
-  const bigaWaterKg = bigaFlourKg * profile.biga_water_pct / 100;
-  const bigaYeastKg = bigaFlourKg * profile.biga_yeast_pct / 100;
-  const poolishFlourKg = flourKg * profile.poolish_pct / 100;
-  const poolishWaterKg = poolishFlourKg * profile.poolish_water_pct / 100;
-  const poolishYeastKg = poolishFlourKg * profile.poolish_yeast_pct / 100;
-  const totalCost = engineResult.raw_batch_cost;
-  const perBatch = (value: number) => value / safeBatches;
-  const flourWhiteKg = flourKg * profile.flour_white_pct / 100;
-  const flourSemolaKg = flourKg * profile.flour_semola_pct / 100;
-  const flourIntegralKg = flourKg * profile.flour_integral_pct / 100;
-  const saltG = flourKg * 1000 * profile.salt_pct / 100;
-  const directYeastG = flourKg * 1000 * profile.direct_yeast_pct / 100;
-  const sugarG = flourKg * 1000 * profile.sugar_pct / 100;
-  const oilG = flourKg * 1000 * profile.oil_pct / 100;
-  const finalFlourKg = flourKg - bigaFlourKg - poolishFlourKg;
-  const finalWaterKg = waterKg - bigaWaterKg - poolishWaterKg;
+  const bigaFlourKg = expanded.biga.flourG / 1000;
+  const bigaWaterKg = expanded.biga.waterG / 1000;
+  const bigaYeastKg = expanded.biga.yeastG / 1000;
+  const poolishFlourKg = expanded.poolish.flourG / 1000;
+  const poolishWaterKg = expanded.poolish.waterG / 1000;
+  const poolishYeastKg = expanded.poolish.yeastG / 1000;
+  const saltG = expanded.direct.saltG;
+  const directYeastG = expanded.direct.yeastG;
+  const sugarG = expanded.direct.sugarG;
+  const oilG = expanded.direct.oilG;
+  const finalFlourKg = expanded.final.flourG / 1000;
+  const finalWaterKg = expanded.final.waterG / 1000;
   const totalWeightKg = expanded.yieldQuantityG / 1000;
+  const totalCost = engineResult.raw_batch_cost;
+
   const whatsapp = [
     `🍕 *AMASADO — ${safeUnits} BOLLOS (${profile.unit_weight_grams}g)*`,
     `Perfil: *${profile.name}* (Hidr: ${profile.hydration_pct}%)`,
@@ -255,6 +258,7 @@ export function calculateDoughWithCostEngine(
     ...(sugarG > 0 ? [`• Azúcar: ${sugarG.toFixed(1)} g`] : []),
     ...(oilG > 0 ? [`• Aceite: ${oilG.toFixed(1)} g`] : []),
   ].join('\n');
+
   return {
     type: 'pizza',
     total_weight_kg: totalWeightKg,
@@ -268,14 +272,14 @@ export function calculateDoughWithCostEngine(
       biga: {
         active: true, pct: profile.biga_pct, flour_kg: bigaFlourKg,
         water_kg: bigaWaterKg, yeast_g: bigaYeastKg * 1000,
-        total_kg: bigaFlourKg + bigaWaterKg + bigaYeastKg,
+        total_kg: expanded.biga.totalG / 1000,
       },
     } : {}),
     ...(poolishFlourKg > 0 ? {
       poolish: {
         active: true, pct: profile.poolish_pct, flour_kg: poolishFlourKg,
         water_kg: poolishWaterKg, yeast_g: poolishYeastKg * 1000,
-        total_kg: poolishFlourKg + poolishWaterKg + poolishYeastKg,
+        total_kg: expanded.poolish.totalG / 1000,
       },
     } : {}),
     empaste: {
@@ -286,7 +290,7 @@ export function calculateDoughWithCostEngine(
       batches: safeBatches,
       flour_kg: perBatch(flourKg),
       water_kg: perBatch(waterKg),
-      ...(bigaFlourKg > 0 ? { biga_kg: perBatch(bigaFlourKg + bigaWaterKg + bigaYeastKg) } : {}),
+      ...(bigaFlourKg > 0 ? { biga_kg: perBatch(expanded.biga.totalG / 1000) } : {}),
       salt_g: perBatch(saltG),
     },
     cost: {
