@@ -25,7 +25,7 @@ SET @has_cost_input_hash = (
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'products' AND COLUMN_NAME = 'cost_input_hash'
 );
 SET @sql = IF(@has_cost_input_hash = 0,
-  'ALTER TABLE products ADD COLUMN cost_input_hash CHAR(64) NULL AFTER cost_engine_version',
+  'ALTER TABLE products ADD COLUMN cost_input_hash CHAR(16) NULL AFTER cost_engine_version',
   'SELECT 1');
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
