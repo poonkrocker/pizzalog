@@ -397,3 +397,32 @@ table.kit-table select {
     grid-template-columns: 1fr 1fr;
   }
 }
+
+
+.tools-auth {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #211b17;
+  color: #f8f2eb;
+}
+.tools-auth-card {
+  width: min(100%, 430px);
+  display: grid;
+  gap: 16px;
+  padding: 34px;
+  border: 1px solid #59483c;
+  border-radius: 16px;
+  background: #2c241e;
+  box-shadow: 0 24px 70px rgba(0,0,0,.28);
+}
+.tools-auth-card h1 { margin: 0; font-size: 27px; line-height: 1.15; }
+.tools-auth-card p { margin: -6px 0 8px; color: #cbbbad; font-size: 14px; }
+.tools-auth-kicker { color: #d7a35a; font-size: 11px; font-weight: 800; letter-spacing: .16em; }
+.tools-auth-card .field { display: grid; gap: 7px; }
+.tools-auth-card .field span { color: #e5d9cd; font-size: 12px; font-weight: 700; }
+.tools-auth-card input { width: 100%; min-height: 44px; }
+.tools-auth-submit { width: 100%; min-height: 46px; justify-content: center; }
+.tools-auth-card small { color: #b9a99a; font-size: 11px; line-height: 1.5; text-align: center; }
+.tools-account-label { align-self: center; color: var(--muted); font-size: 12px; font-weight: 700; }
