@@ -16,7 +16,7 @@ export interface ItemReportRow {
   category_name: string;
   units: number;
   gross_sales: number;
-  cost: number;
+  cost: number | null;
   margin_pct: number | null;
   share_pct: number;
 }
@@ -25,8 +25,9 @@ export interface ItemsReportResponse {
   summary: {
     total_units: number;
     total_gross: number;
-    total_cost: number;
+    total_cost: number | null;
     margin_pct: number | null;
+    has_incomplete_cost: boolean;
     items_count: number;
   };
   items: ItemReportRow[];
