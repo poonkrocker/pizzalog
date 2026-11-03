@@ -18,7 +18,34 @@ class ToolsAuthController
             Response::error('Ingresá email y contraseña', 422);
         }
 
-        $stmt = Database::pdo()->prepare(
+        $pdo = Database::pdo();
+        $jwtConfig = Config::get('jwt', []);
+        $emailHash = hash('sha256', $email);
+        $clientIp = (string)($_SERVER['REMOTE_ADDR'] ?? 'unknown');
+        $ipHash = hash_hmac('sha256', $clientIp, (string)($jwtConfig['secret'] ?? ''));
+        $attemptQuery = $pdo->prepare(
+            'SELECT attempts, window_started_at FROM tools_login_attempts
+              WHERE email_hash = ? AND ip_hash = ? LIMIT 1'
+        );
+        $attemptQuery->execute([$emailHash, $ipHash]);
+        $attemptRow = $attemptQuery->fetch();
+        if ($attemptRow && strtotime((string)$attemptRow['window_started_at']) > time() - 900) {
+            if ((int)$attemptRow['attempts'] >= 10) {
+                Response::error('Demasiados intentos. Esperá 15 minutos antes de volver a ingresar.', 429);
+            }
+            $pdo->prepare(
+                'UPDATE tools_login_attempts SET attempts = attempts + 1
+                  WHERE email_hash = ? AND ip_hash = ?'
+            )->execute([$emailHash, $ipHash]);
+        } else {
+            $pdo->prepare(
+                'INSERT INTO tools_login_attempts (email_hash, ip_hash, attempts, window_started_at)
+                 VALUES (?, ?, 1, NOW())
+                 ON DUPLICATE KEY UPDATE attempts = 1, window_started_at = NOW()'
+            )->execute([$emailHash, $ipHash]);
+        }
+
+        $stmt = $pdo->prepare(
             'SELECT id, email, name, password_hash, is_active, expires_at
                FROM tools_accounts
               WHERE email = ?
@@ -38,7 +65,8 @@ class ToolsAuthController
             Response::error('El acceso a Pizzalog Tools ha vencido', 403);
         }
 
-        $pdo = Database::pdo();
+        $pdo->prepare('DELETE FROM tools_login_attempts WHERE email_hash = ? AND ip_hash = ?')
+            ->execute([$emailHash, $ipHash]);
         $pdo->prepare('UPDATE tools_accounts SET last_login_at = NOW() WHERE id = ?')
             ->execute([(int) $account['id']]);
 
