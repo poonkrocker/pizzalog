@@ -2,6 +2,7 @@
 namespace Pizzalog\Controllers;
 
 use Pizzalog\Core\Request;
+use Pizzalog\Core\Database;
 use Pizzalog\Core\Response;
 use Pizzalog\Repositories\SupplyRepository;
 
