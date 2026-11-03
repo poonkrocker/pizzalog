@@ -43,7 +43,7 @@ class ToolsImportController
         }
 
         // DeepSeek solo necesita una muestra acotada para identificar encabezados y columnas.
-        // El resto de las filas permanece en el navegador y nunca se envía al proveedor de IA.
+        // El resto de las filas llega solo a nuestra API y nunca se envía al proveedor de IA.
         $aiSample = array_map(static function(array $sheet): array {
             return [
                 'name' => substr((string)($sheet['name'] ?? 'Hoja'), 0, 80),
