@@ -80,6 +80,7 @@ export function App({
   const [simulationBatches, setSimulationBatches] = useState(1);
   const [productionUnits, setProductionUnits] = useState<Record<string, number>>({});
   const [profitScenario, setProfitScenario] = useState({ units: 0, price: 0, variableCost: 0, fixedCosts: 0 });
+  const [profitProductId, setProfitProductId] = useState('');
   const [importError, setImportError] = useState<string | null>(null);
   const [importNotice, setImportNotice] = useState<string | null>(null);
   const [isSmartImporting, setIsSmartImporting] = useState(false);
@@ -938,9 +939,23 @@ export function App({
           <h2>Ingeniería de menú</h2>
           <p className="lead">Clasificación por popularidad y contribución unitaria usando ventas cargadas y costos calculables. No se asignan ventas estimadas.</p>
           {!monthlySummary.hasSalesData ? <div className="empty-state">No hay ventas vinculadas a productos para construir la matriz. Importá ventas o vinculá los registros en «Ventas importadas».</div> : (
-            <div className="table-wrap"><table className="kit-table"><thead><tr><th>Producto</th><th>Unidades del período</th><th>Contribución unitaria</th><th>Clasificación</th></tr></thead><tbody>
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12, margin: '16px 0' }}>
+                {([
+                  { key: 'puzzle', title: 'Rompecabezas', subtitle: 'Baja popularidad · Alta contribución', rows: monthlySummary.rows.filter((r) => r.matrixClass === 'puzzle') },
+                  { key: 'star', title: 'Estrellas', subtitle: 'Alta popularidad · Alta contribución', rows: monthlySummary.rows.filter((r) => r.matrixClass === 'star') },
+                  { key: 'dog', title: 'Perros', subtitle: 'Baja popularidad · Baja contribución', rows: monthlySummary.rows.filter((r) => r.matrixClass === 'dog') },
+                  { key: 'horse', title: 'Caballos de batalla', subtitle: 'Alta popularidad · Baja contribución', rows: monthlySummary.rows.filter((r) => r.matrixClass === 'horse') },
+                ]).map((quadrant) => <div key={quadrant.key} className="kpi-card" style={{ minHeight: 120, textAlign: 'left' }}>
+                  <strong>{quadrant.title}</strong>
+                  <small style={{ display: 'block', opacity: 0.75, margin: '4px 0 10px' }}>{quadrant.subtitle}</small>
+                  {quadrant.rows.length ? <ul style={{ margin: 0, paddingLeft: 18 }}>{quadrant.rows.map((r) => <li key={r.prod.id}>{r.prod.name} <small>({formatDecimal(r.units ?? 0, 0)} u.)</small></li>)}</ul> : <small>Sin productos en este cuadrante</small>}
+                </div>)}
+              </div>
+              <div className="table-wrap"><table className="kit-table"><thead><tr><th>Producto</th><th>Unidades del período</th><th>Contribución unitaria</th><th>Clasificación</th></tr></thead><tbody>
               {monthlySummary.rows.filter((r) => r.hasSalesData).sort((a,b) => (b.units ?? 0) - (a.units ?? 0)).map((r) => <tr key={r.prod.id}><td>{r.prod.name}</td><td>{formatDecimal(r.units ?? 0, 0)}</td><td>{r.isComplete ? `${state.currency} ${formatDecimal(r.unitGrossProfit, 2)}` : 'Costo incompleto'}</td><td>{r.matrixLabel}</td></tr>)}
             </tbody></table></div>
+            </>
           )}
         </section>
       )}
@@ -1007,11 +1022,22 @@ export function App({
           <h2>Simulador de rentabilidad</h2>
           <p className="lead">Escenario manual independiente del histórico. Completá los valores con tus supuestos; el resultado es una contribución estimada antes de impuestos y conceptos no incluidos.</p>
           <div className="builder-grid">
+            <label className="field"><span>Vincular producto del catálogo</span><select value={profitProductId} onChange={(e) => setProfitProductId(e.target.value)}><option value="">Escenario manual</option>{state.catalog.recipes.filter((r) => r.recipe_type === 'product').map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></label>
             <label className="field"><span>Unidades por mes</span><input type="number" min="0" value={profitScenario.units} onChange={(e) => setProfitScenario((p) => ({ ...p, units: Math.max(0, Number(e.target.value) || 0) }))} /></label>
             <label className="field"><span>Precio de venta unitario ({state.currency})</span><input type="number" min="0" value={profitScenario.price} onChange={(e) => setProfitScenario((p) => ({ ...p, price: Math.max(0, Number(e.target.value) || 0) }))} /></label>
             <label className="field"><span>Costo variable unitario ({state.currency})</span><input type="number" min="0" value={profitScenario.variableCost} onChange={(e) => setProfitScenario((p) => ({ ...p, variableCost: Math.max(0, Number(e.target.value) || 0) }))} /></label>
             <label className="field"><span>Gastos fijos mensuales ({state.currency})</span><input type="number" min="0" value={profitScenario.fixedCosts} onChange={(e) => setProfitScenario((p) => ({ ...p, fixedCosts: Math.max(0, Number(e.target.value) || 0) }))} /></label>
           </div>
+          {profitProductId && (() => {
+            const product = state.catalog.recipes.find((r) => r.id === profitProductId);
+            const cost = recipeResults.get(profitProductId);
+            const price = state.productSalesMap?.[profitProductId]?.sellingPrice;
+            const canUse = Boolean(product && cost?.status === 'complete' && cost.raw_unit_cost !== null && Number(price) > 0);
+            return <div style={{ marginTop: 10 }}>
+              <button type="button" className="btn btn--ocre" disabled={!canUse} onClick={() => setProfitScenario((prev) => ({ ...prev, price: Number(price), variableCost: cost!.raw_unit_cost! + state.defaultPackagingCost + Number(price) * state.defaultChannelFeePct / 100 }))}>Cargar precio y costo del catálogo</button>
+              {!canUse && <small style={{ display: 'block', marginTop: 6 }}>Para vincularlo necesitás costo completo y precio de venta cargado en el catálogo. El costo variable incluye packaging y comisión configurados.</small>}
+            </div>;
+          })()}
           {(() => { const revenue = profitScenario.units * profitScenario.price; const contribution = profitScenario.units * (profitScenario.price - profitScenario.variableCost); const result = contribution - profitScenario.fixedCosts; const margin = revenue > 0 ? contribution / revenue * 100 : null; return <div className="kpi-grid" style={{ marginTop: 16 }}><div className="kpi-card"><span>Facturación escenario</span><strong>{state.currency} {formatDecimal(revenue, 2)}</strong></div><div className="kpi-card"><span>Contribución</span><strong>{state.currency} {formatDecimal(contribution, 2)}</strong></div><div className="kpi-card"><span>Resultado operativo estimado</span><strong>{state.currency} {formatDecimal(result, 2)}</strong></div><div className="kpi-card"><span>Margen de contribución</span><strong>{margin == null ? 'Sin datos' : `${formatDecimal(margin, 1)}%`}</strong></div></div>; })()}
         </section>
       )}
