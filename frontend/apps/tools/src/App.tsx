@@ -307,13 +307,7 @@ export function App({
         ...prev.catalog,
         recipes: nextRecipes,
       },
-      productSalesMap:
-        editingRecipe.recipe_type === 'product' && !prev.productSalesMap[editingRecipe.id]
-          ? {
-              ...prev.productSalesMap,
-              [editingRecipe.id]: { monthlyUnitsSold: 150, sellingPrice: null },
-            }
-          : prev.productSalesMap,
+      productSalesMap: prev.productSalesMap,
     }));
     setEditingRecipe(null);
   }
@@ -485,7 +479,7 @@ export function App({
     const products = state.catalog.recipes.filter((r) => r.recipe_type === 'product');
     const rows = products.map((prod) => {
       const res = recipeResults.get(prod.id);
-      const salesPlan = state.productSalesMap?.[prod.id] ?? { monthlyUnitsSold: 120, sellingPrice: null };
+      const salesPlan = state.productSalesMap?.[prod.id] ?? { sellingPrice: null };
       const customPrice = salesPlan.sellingPrice && salesPlan.sellingPrice > 0 ? salesPlan.sellingPrice : undefined;
       const pricing = res
         ? calculatePricingScenario({
@@ -502,7 +496,9 @@ export function App({
         : null;
 
       const isComplete = res?.status === 'complete' && pricing?.status === 'complete';
-      const units = Math.max(0, Number(salesPlan.monthlyUnitsSold) || 0);
+      const hasSalesData = salesPlan.monthlyUnitsSold !== null && salesPlan.monthlyUnitsSold !== undefined &&
+        Number.isFinite(Number(salesPlan.monthlyUnitsSold));
+      const units = hasSalesData ? Math.max(0, Number(salesPlan.monthlyUnitsSold)) : null;
       const unitCost = isComplete && res?.raw_unit_cost ? res.raw_unit_cost : 0;
       const evaluatedPrice = isComplete && pricing?.raw_evaluated_price ? pricing.raw_evaluated_price : 0;
       const unitGrossProfit = isComplete && pricing?.raw_gross_profit ? pricing.raw_gross_profit : 0;
@@ -513,34 +509,36 @@ export function App({
         pricing,
         isComplete,
         units,
+        hasSalesData,
         customPrice: salesPlan.sellingPrice ?? null,
         unitCost,
         evaluatedPrice,
         unitGrossProfit,
-        monthlyRevenue: isComplete ? evaluatedPrice * units : 0,
-        monthlyCogs: isComplete ? unitCost * units : 0,
-        monthlyContribution: isComplete ? unitGrossProfit * units : 0,
+        monthlyRevenue: isComplete && hasSalesData ? evaluatedPrice * units! : 0,
+        monthlyCogs: isComplete && hasSalesData ? unitCost * units! : 0,
+        monthlyContribution: isComplete && hasSalesData ? unitGrossProfit * units! : null,
       };
     });
 
     const completeRows = rows.filter((x) => x.isComplete);
-    const totalUnits = completeRows.reduce((a, b) => a + b.units, 0);
-    const avgUnits = completeRows.length > 0 ? totalUnits / completeRows.length : 0;
+    const salesRows = completeRows.filter((x) => x.hasSalesData);
+    const totalUnits = salesRows.reduce((a, b) => a + (b.units ?? 0), 0);
+    const avgUnits = salesRows.length > 0 ? totalUnits / salesRows.length : 0;
     const avgUnitProfit =
-      completeRows.length > 0
-        ? completeRows.reduce((a, b) => a + b.unitGrossProfit, 0) / completeRows.length
+      salesRows.length > 0
+        ? salesRows.reduce((a, b) => a + b.unitGrossProfit, 0) / salesRows.length
         : 0;
 
     const totalRevenue = completeRows.reduce((a, b) => a + b.monthlyRevenue, 0);
     const totalCogs = completeRows.reduce((a, b) => a + b.monthlyCogs, 0);
     const totalContribution = completeRows.reduce((a, b) => a + b.monthlyContribution, 0);
-    const weightedMarginPct = totalRevenue > 0 ? (totalContribution / totalRevenue) * 100 : 70;
+    const weightedMarginPct = totalRevenue > 0 ? (totalContribution / totalRevenue) * 100 : 0;
 
     return {
       rows: rows.map((r) => {
         let matrixClass: 'star' | 'horse' | 'puzzle' | 'dog' | null = null;
         let matrixLabel = '—';
-        if (r.isComplete) {
+        if (r.isComplete && r.hasSalesData) {
           const highPop = r.units >= avgUnits;
           const highMargin = r.unitGrossProfit >= avgUnitProfit;
           if (highPop && highMargin) {
@@ -560,6 +558,7 @@ export function App({
         return { ...r, matrixClass, matrixLabel };
       }),
       totalUnits,
+      hasSalesData: salesRows.length > 0,
       totalRevenue,
       totalCogs,
       totalContribution,
@@ -1217,7 +1216,7 @@ export function App({
                               productSalesMap: {
                                 ...prev.productSalesMap,
                                 [prod.id]: {
-                                  monthlyUnitsSold: prev.productSalesMap?.[prod.id]?.monthlyUnitsSold ?? 120,
+                                  monthlyUnitsSold: prev.productSalesMap?.[prod.id]?.monthlyUnitsSold,
                                   sellingPrice: raw === '' ? null : Number(raw),
                                 },
                               },
@@ -1250,7 +1249,8 @@ export function App({
                           type="number"
                           min={0}
                           step={10}
-                          value={units}
+                          value={units ?? ''}
+                          placeholder="Sin datos"
                           onChange={(e) => {
                             const nextUnits = Math.max(0, Number(e.target.value) || 0);
                             setState((prev) => ({
@@ -1267,7 +1267,7 @@ export function App({
                         />
                       </td>
                       <td>
-                        {isComplete ? (
+                        {isComplete && monthlyContribution !== null ? (
                           <strong>
                             {state.currency} {formatDecimal(monthlyContribution, 0)}
                           </strong>
@@ -1301,8 +1301,8 @@ export function App({
           <div className="kpi-grid">
             <div className="kpi-box">
               <div className="kpi-box__label">Unidades Mensuales Totales</div>
-              <div className="kpi-box__value">{monthlySummary.totalUnits} u/mes</div>
-              <div className="kpi-box__sub">Suma de productos completos</div>
+              <div className="kpi-box__value">{monthlySummary.hasSalesData ? String(monthlySummary.totalUnits) + ' u/mes' : 'Sin datos'}</div>
+              <div className="kpi-box__sub">Suma de productos con ventas cargadas</div>
             </div>
             <div className="kpi-box">
               <div className="kpi-box__label">Facturación Mensual Proyectada</div>
