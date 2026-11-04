@@ -39,6 +39,31 @@ return [
         'driver' => 'stub',
     ],
 
+    // Servidor SMTP para envío de emails transaccionales (Ferozo / hosting).
+    'smtp' => [
+        'host'       => 'mail.pizzalog.net',
+        'port'       => 465,                  // 465 (SSL) o 587 (TLS)
+        'username'   => 'no-reply@pizzalog.net',
+        'password'   => '',
+        'from_email' => 'no-reply@pizzalog.net',
+        'from_name'  => 'Pizzalog Tools',
+    ],
+
+    // Cobros y suscripciones automáticas (Mercado Pago para Argentina/Latam).
+    'mercadopago' => [
+        'access_token'   => '',               // Access Token de producción o test
+        'webhook_secret' => '',
+    ],
+
+    // Cobros y suscripciones automáticas (LemonSqueezy para internacional).
+    'lemonsqueezy' => [
+        'webhook_secret' => '',               // Webhook Signing Secret de LemonSqueezy
+    ],
+
+    'tools' => [
+        'url' => 'https://tools.pizzalog.net',
+    ],
+
     'cors' => [
         // Orígenes autorizados a consumir la API.
         'allowed_origins' => [
