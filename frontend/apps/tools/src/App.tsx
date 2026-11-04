@@ -81,6 +81,7 @@ export function App({
   const [simulationComponentPct, setSimulationComponentPct] = useState<Record<string, number>>({});
   const [simulationHydrationPct, setSimulationHydrationPct] = useState<Record<string, number>>({});
   const [historyRecipeId, setHistoryRecipeId] = useState('');
+  const [snapshotNotice, setSnapshotNotice] = useState<string | null>(null);
   const [productionUnits, setProductionUnits] = useState<Record<string, number>>({});
   const [profitScenario, setProfitScenario] = useState({ units: 0, price: 0, variableCost: 0, fixedCosts: 0 });
   const [profitProductId, setProfitProductId] = useState('');
@@ -375,20 +376,27 @@ export function App({
 
   function captureAllSnapshots() {
     const products = state.catalog.recipes.filter((r) => r.recipe_type === 'product');
-    const newSnaps = products.map((r) =>
-      createCostSnapshot(state.catalog, r.id, {
-        target_food_cost_pct: r.target_food_cost_pct ?? state.defaultTargetFoodCostPct,
-        rounding_increment: state.defaultRoundingIncrement,
-        rounding_mode: 'ceil',
-        selling_price: state.productSalesMap?.[r.id]?.sellingPrice || undefined,
-        packaging_cost: state.defaultPackagingCost,
-        channel_fee_pct: state.defaultChannelFeePct,
-      })
-    );
-    setState((prev) => ({
-      ...prev,
-      snapshots: [...newSnaps, ...prev.snapshots].slice(0, 30),
-    }));
+    const newSnaps = [];
+    let failed = 0;
+    for (const recipe of products) {
+      try {
+        newSnaps.push(createCostSnapshot(state.catalog, recipe.id, {
+          target_food_cost_pct: recipe.target_food_cost_pct ?? state.defaultTargetFoodCostPct,
+          rounding_increment: state.defaultRoundingIncrement,
+          rounding_mode: 'ceil',
+          selling_price: state.productSalesMap?.[recipe.id]?.sellingPrice || undefined,
+          packaging_cost: state.defaultPackagingCost,
+          channel_fee_pct: state.defaultChannelFeePct,
+        }));
+      } catch { failed += 1; }
+    }
+    const existingIds = new Set(state.snapshots.map((snapshot) => snapshot.snapshot_id));
+    const uniqueSnapshots = newSnaps.filter((snapshot) => !existingIds.has(snapshot.snapshot_id));
+    setState((prev) => ({ ...prev, snapshots: [...uniqueSnapshots, ...prev.snapshots].slice(0, 30) }));
+    const failureNote = failed ? failed + ' producto(s) no pudieron calcularse.' : '';
+    setSnapshotNotice(uniqueSnapshots.length === 0
+      ? 'No se agregaron capturas nuevas. ' + (failureNote || 'Los costos y parámetros coinciden con los últimos snapshots.')
+      : 'Se guardaron ' + uniqueSnapshots.length + ' snapshot(s). ' + failureNote);
     setActiveTab('snapshots');
   }
 
@@ -741,6 +749,7 @@ export function App({
       {importError && <div className="alert-banner">⚠️ Error de validación al importar: {importError}</div>}
       {workspaceSaveError && <div className="alert-banner">⚠️ No se pudieron guardar tus cambios: {workspaceSaveError}</div>}
       {importNotice && <div className="notice-banner">{importNotice}</div>}
+      {snapshotNotice && <div className="notice-banner">{snapshotNotice}</div>}
 
       <section className="tools-toolbar">
         <label className="field">
@@ -984,8 +993,8 @@ export function App({
               {!selectedProduct ? <div className="empty-state">No hay productos en el catálogo.</div> :
                 entries.length === 0 ? <div className="empty-state">Este producto todavía no tiene snapshots. Guardá una captura para iniciar su historial.</div> : <>
                   <div className="kpi-grid" style={{ marginTop: 16 }}>
-                    <div className="kpi-card"><span>Primer costo registrado</span><strong>{state.currency} {formatDecimal(entries[0].cost_result.raw_unit_cost ?? 0, 2)}</strong><small>{new Date(entries[0].created_at).toLocaleString()}</small></div>
-                    <div className="kpi-card"><span>Último costo registrado</span><strong>{state.currency} {formatDecimal(entries[entries.length - 1].cost_result.raw_unit_cost ?? 0, 2)}</strong><small>{new Date(entries[entries.length - 1].created_at).toLocaleString()}</small></div>
+                    <div className="kpi-card"><span>Primer costo registrado</span><strong>{entries[0].cost_result.raw_unit_cost == null ? 'Incompleto' : `${state.currency} ${formatDecimal(entries[0].cost_result.raw_unit_cost, 2)}`}</strong><small>{new Date(entries[0].created_at).toLocaleString()}</small></div>
+                    <div className="kpi-card"><span>Último costo registrado</span><strong>{entries[entries.length - 1].cost_result.raw_unit_cost == null ? 'Incompleto' : `${state.currency} ${formatDecimal(entries[entries.length - 1].cost_result.raw_unit_cost, 2)}`}</strong><small>{new Date(entries[entries.length - 1].created_at).toLocaleString()}</small></div>
                     <div className="kpi-card"><span>Capturas</span><strong>{entries.length}</strong><small>Orden cronológico</small></div>
                   </div>
                   <div className="card" style={{ marginTop: 16 }}>
