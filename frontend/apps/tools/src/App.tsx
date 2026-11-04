@@ -1949,6 +1949,7 @@ export function App({
             </div>
 
             {isDoughMode && editingRecipe.bakers_dough ? (
+              <>
               <div className="builder-grid">
                 <label className="field">
                   <span>Harina Total del Batch (g)</span>
@@ -2235,6 +2236,7 @@ export function App({
                   </label>
                 </div>
               </div>
+              </>
             ) : (
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
