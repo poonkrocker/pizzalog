@@ -74,7 +74,7 @@ export function App({
   const [state, setState] = useState<ToolsWorkspaceState>(initialWorkspace);
 
   const [activeTab, setActiveTab] = useState<
-    'ingredients' | 'subrecipes' | 'recipes' | 'expenses' | 'snapshots'
+    'ingredients' | 'subrecipes' | 'recipes' | 'expenses' | 'sales' | 'snapshots'
   >('recipes');
   const [importError, setImportError] = useState<string | null>(null);
   const [importNotice, setImportNotice] = useState<string | null>(null);
@@ -466,6 +466,7 @@ export function App({
         ? state.operatingExpenses.filter((expense) => !['exp_1', 'exp_2', 'exp_3', 'exp_4'].includes(expense.id))
         : [],
       snapshots: [],
+      salesHistory: replaceWorkspaceOnImport ? [] : (state.salesHistory ?? []),
     } : state;
     const result = applyImportMappings(importBase, smartImportPreview.sheets, smartImportPreview.mappings);
     const total = Object.values(result.counts).reduce((sum, count) => sum + count, 0);
@@ -845,6 +846,13 @@ export function App({
           onClick={() => setActiveTab('expenses')}
         >
           {t.tabExpenses}
+        </button>
+        <button
+          type="button"
+          className={`tab-btn ${activeTab === 'sales' ? 'tab-btn--active' : ''}`}
+          onClick={() => setActiveTab('sales')}
+        >
+          Ventas importadas ({state.salesHistory?.length ?? 0})
         </button>
         <button
           type="button"
@@ -1547,6 +1555,51 @@ export function App({
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {activeTab === 'sales' && (
+        <div className="card">
+          <h2>Historial de ventas importado</h2>
+          <p className="lead">
+            Se conservan el período, el canal y el archivo de origen. Las filas sin coincidencia con un producto de carta quedan pendientes de vinculación; no se descartan ni se mezclan silenciosamente.
+          </p>
+          {(state.salesHistory?.length ?? 0) === 0 ? (
+            <p className="notice-banner">Todavía no hay ventas importadas. Usá «Importar XLSX / CSV» y asigná una hoja al tipo «Ventas».</p>
+          ) : (
+            <div className="table-wrap">
+              <table className="kit-table">
+                <thead>
+                  <tr>
+                    <th>Producto del TPV</th>
+                    <th>Producto vinculado</th>
+                    <th>Unidades</th>
+                    <th>Período</th>
+                    <th>Canal</th>
+                    <th>Venta bruta</th>
+                    <th>Venta neta</th>
+                    <th>Origen</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...(state.salesHistory ?? [])]
+                    .sort((a, b) => b.period_start.localeCompare(a.period_start))
+                    .map((sale) => (
+                      <tr key={sale.id}>
+                        <td>{sale.product_name}</td>
+                        <td>{sale.product_id ? state.catalog.recipes.find((recipe) => recipe.id === sale.product_id)?.name ?? 'Producto eliminado' : 'Pendiente de vincular'}</td>
+                        <td>{formatDecimal(sale.quantity, 2)}</td>
+                        <td>{sale.period_start === sale.period_end ? sale.period_start : `${sale.period_start} → ${sale.period_end}`}</td>
+                        <td>{sale.channel || '—'}</td>
+                        <td>{sale.gross_revenue == null ? '—' : `${state.currency} ${formatDecimal(sale.gross_revenue, 0)}`}</td>
+                        <td>{sale.net_revenue == null ? '—' : `${state.currency} ${formatDecimal(sale.net_revenue, 0)}`}</td>
+                        <td>{sale.source}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
