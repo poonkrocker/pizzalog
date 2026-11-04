@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { createInitialDemoWorkspace, type ToolsWorkspaceState } from './demoData';
 import { App } from './App';
+import { CommercialPlansModal } from './CommercialPlansModal';
 
 const API_URL = ((import.meta.env.VITE_API_URL as string | undefined) ?? 'https://api.pizzalog.net').replace(/\/+$/, '');
 const TOKEN_KEY = 'pizzalog_tools_session';
@@ -102,6 +103,7 @@ export function ToolsAuthGate() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPlans, setShowPlans] = useState(false);
 
   useEffect(() => {
     // Detectar parámetros URL (?activate=TOKEN o ?reset=TOKEN)
@@ -420,7 +422,20 @@ export function ToolsAuthGate() {
         <small style={{ marginTop: '0.75rem', display: 'block', color: '#666' }}>
           ¿Todavía no tenés acceso? La cuenta se habilita automáticamente al suscribirte.
         </small>
+        <div style={{ marginTop: '0.75rem', borderTop: '1px solid #44372e', paddingTop: '0.75rem', textAlign: 'center' }}>
+          <button
+            type="button"
+            className="link"
+            style={{ color: '#d7a35a', fontWeight: 600, fontSize: '0.86rem' }}
+            onClick={() => setShowPlans(true)}
+          >
+            ✨ Ver Planes, Precios y Medios de Pago
+          </button>
+        </div>
       </form>
+      {showPlans && (
+        <CommercialPlansModal onClose={() => setShowPlans(false)} userEmail={email} />
+      )}
     </main>
   );
 }
