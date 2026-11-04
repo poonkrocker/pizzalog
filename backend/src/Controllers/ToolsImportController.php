@@ -146,6 +146,7 @@ Reglas de clasificación importantes:
 - Usá "purchase_prices" solo cuando la hoja represente compras/precios históricos con datos explícitos de presentación/envase y esté destinada a vincularse con insumos ya existentes.
 - Una tabla normalizada de recetas con nombre de receta, tipo, rendimiento, unidad de rendimiento, ingrediente/componente, cantidad y unidad del componente debe clasificarse como "recipes" y mapear esos siete campos.
 - Los valores "product", "subrecipe", "producto" y "subreceta" representan tipos válidos de receta.
+- Una tabla de ventas debe clasificarse como "sales" cuando contenga producto, unidades/cantidad y fecha o período; mapear producto, cantidad, inicio/fin del período y, si existen, canal, venta bruta, venta neta y origen.
 En columns, cada valor debe ser el índice entero de la columna o null. Mapeá solo campos que estén claramente representados por un encabezado. No deduzcas la unidad base desde el nombre del ingrediente. Si una hoja mezcla varios tipos de datos, elegí unknown y explicalo en warnings.
 PROMPT;
 
@@ -303,7 +304,7 @@ PROMPT;
             'expense_amount' => ['importe', 'monto', 'importe del gasto', 'monto del gasto', 'amount', 'expense amount'],
             'product_name' => ['producto', 'nombre del producto', 'articulo', 'item', 'product', 'product name'],
             'quantity' => ['unidades vendidas', 'cantidad vendida', 'cantidad', 'unidades', 'units sold', 'quantity'],
-            'period_start' => ['inicio del periodo', 'desde', 'fecha', 'fecha de venta', 'date', 'period start'],
+            'period_start' => ['inicio del periodo', 'desde', 'fecha', 'fecha de venta', 'periodo', 'período', 'mes', 'month', 'date', 'period start'],
             'period_end' => ['fin del periodo', 'hasta', 'period end'],
             'channel' => ['canal', 'channel', 'tipo de venta'],
             'gross_revenue' => ['venta bruta', 'importe bruto', 'gross sales', 'gross revenue'],
