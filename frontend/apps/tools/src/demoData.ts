@@ -16,6 +16,20 @@ export interface ProductSalesPlan {
   sellingPrice?: number | null;
 }
 
+export interface SalesImportRecord {
+  id: string;
+  product_id: string | null;
+  product_name: string;
+  quantity: number;
+  period_start: string;
+  period_end: string;
+  channel?: string | null;
+  gross_revenue?: number | null;
+  net_revenue?: number | null;
+  source: string;
+  imported_at: string;
+}
+
 export interface ToolsWorkspaceState {
   businessName: string;
   currency: string;
@@ -27,6 +41,7 @@ export interface ToolsWorkspaceState {
   defaultChannelFeePct: number;
   catalog: CostCatalog;
   productSalesMap: Record<string, ProductSalesPlan>;
+  salesHistory?: SalesImportRecord[];
   operatingExpenses: OperatingExpenseItem[];
   snapshots: CostSnapshot[];
 }
