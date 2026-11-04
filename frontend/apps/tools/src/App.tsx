@@ -904,9 +904,9 @@ export function App({
             if (!selected) return <p className="empty-state">Todavía no hay recetas para simular. Creá una receta en la pestaña correspondiente.</p>;
             const result = recipeResults.get(selected.id);
             if (!result || result.status !== 'complete') return <div className="alert-banner">No se puede calcular esta receta: faltan precios o componentes válidos. Revisá la ficha y los insumos.</div>;
-            const total = result.raw_total_cost * simulationBatches;
+            const total = (result.raw_batch_cost ?? 0) * simulationBatches;
             return <div className="kpi-grid" style={{ marginTop: 16 }}>
-              <div className="kpi-card"><span>Costo por rendimiento</span><strong>{state.currency} {formatDecimal(result.raw_total_cost, 2)}</strong></div>
+              <div className="kpi-card"><span>Costo por rendimiento</span><strong>{state.currency} {formatDecimal(result.raw_batch_cost ?? 0, 2)}</strong></div>
               <div className="kpi-card"><span>Rendimiento por tanda</span><strong>{formatDecimal(selected.yield_quantity, 2)} {selected.yield_unit}</strong></div>
               <div className="kpi-card"><span>Costo de la simulación</span><strong>{state.currency} {formatDecimal(total, 2)}</strong></div>
               <div className="kpi-card"><span>Rendimiento total estimado</span><strong>{formatDecimal(selected.yield_quantity * simulationBatches, 2)} {selected.yield_unit}</strong></div>
@@ -924,7 +924,7 @@ export function App({
               {state.catalog.recipes.filter((r) => r.recipe_type === 'product').map((recipe) => {
                 const entries = state.snapshots.filter((snap) => snap.recipe_id === recipe.id).slice().reverse();
                 const first = entries[0]; const last = entries[entries.length - 1];
-                const before = first?.raw_unit_cost; const after = last?.raw_unit_cost;
+                const before = first?.cost_result.raw_unit_cost; const after = last?.cost_result.raw_unit_cost;
                 const delta = typeof before === 'number' && before !== 0 && typeof after === 'number' ? ((after - before) / before) * 100 : null;
                 return <tr key={recipe.id}><td>{recipe.name}</td><td>{before == null ? '—' : `${state.currency} ${formatDecimal(before, 2)}`}</td><td>{after == null ? '—' : `${state.currency} ${formatDecimal(after, 2)}`}</td><td>{delta == null ? 'Datos insuficientes' : `${delta > 0 ? '+' : ''}${formatDecimal(delta, 1)}%`}</td></tr>;
               })}
