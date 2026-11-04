@@ -539,7 +539,7 @@ export function App({
         let matrixClass: 'star' | 'horse' | 'puzzle' | 'dog' | null = null;
         let matrixLabel = '—';
         if (r.isComplete && r.hasSalesData) {
-          const highPop = r.units >= avgUnits;
+          const highPop = (r.units ?? 0) >= avgUnits;
           const highMargin = r.unitGrossProfit >= avgUnitProfit;
           if (highPop && highMargin) {
             matrixClass = 'star';
