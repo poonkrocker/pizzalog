@@ -11,7 +11,7 @@ export interface OperatingExpenseItem {
 }
 
 export interface ProductSalesPlan {
-  monthlyUnitsSold: number;
+  monthlyUnitsSold?: number | null;
   /** Si es 0 o null, usa el Precio Sugerido calculado automáticamente */
   sellingPrice?: number | null;
 }
