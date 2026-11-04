@@ -467,6 +467,7 @@ export function App({
         : [],
       snapshots: [],
       salesHistory: replaceWorkspaceOnImport ? [] : (state.salesHistory ?? []),
+      salesPeriod: replaceWorkspaceOnImport ? null : (state.salesPeriod ?? null),
     } : state;
     const result = applyImportMappings(importBase, smartImportPreview.sheets, smartImportPreview.mappings);
     const total = Object.values(result.counts).reduce((sum, count) => sum + count, 0);
@@ -1365,7 +1366,7 @@ export function App({
             <div className="kpi-box">
               <div className="kpi-box__label">Unidades Mensuales Totales</div>
               <div className="kpi-box__value">{monthlySummary.hasSalesData ? String(monthlySummary.totalUnits) + ' u/mes' : 'Sin datos'}</div>
-              <div className="kpi-box__sub">Suma de productos con ventas cargadas</div>
+              <div className="kpi-box__sub">{state.salesPeriod ? `Ventas importadas para ${state.salesPeriod}` : 'Suma de productos con ventas cargadas'}</div>
             </div>
             <div className="kpi-box">
               <div className="kpi-box__label">Facturación Mensual Proyectada</div>
@@ -1563,6 +1564,7 @@ export function App({
           <h2>Historial de ventas importado</h2>
           <p className="lead">
             Se conservan el período, el canal y el archivo de origen. Las filas sin coincidencia con un producto de carta quedan pendientes de vinculación; no se descartan ni se mezclan silenciosamente.
+            {state.salesPeriod ? ` El resumen de ventas usa el período ${state.salesPeriod}.` : ''}
           </p>
           {(state.salesHistory?.length ?? 0) === 0 ? (
             <p className="notice-banner">Todavía no hay ventas importadas. Usá «Importar XLSX / CSV» y asigná una hoja al tipo «Ventas».</p>
