@@ -74,8 +74,12 @@ export function App({
   const [state, setState] = useState<ToolsWorkspaceState>(initialWorkspace);
 
   const [activeTab, setActiveTab] = useState<
-    'ingredients' | 'subrecipes' | 'recipes' | 'expenses' | 'sales' | 'snapshots'
+    'ingredients' | 'subrecipes' | 'recipes' | 'expenses' | 'sales' | 'snapshots' | 'simulator' | 'cost-history' | 'menu-engineering' | 'production' | 'profit-simulator'
   >('recipes');
+  const [simulationRecipeId, setSimulationRecipeId] = useState('');
+  const [simulationBatches, setSimulationBatches] = useState(1);
+  const [productionUnits, setProductionUnits] = useState<Record<string, number>>({});
+  const [profitScenario, setProfitScenario] = useState({ units: 0, price: 0, variableCost: 0, fixedCosts: 0 });
   const [importError, setImportError] = useState<string | null>(null);
   const [importNotice, setImportNotice] = useState<string | null>(null);
   const [isSmartImporting, setIsSmartImporting] = useState(false);
@@ -880,7 +884,93 @@ export function App({
         >
           {t.tabSnapshots}
         </button>
+        <button type="button" className={`tab-btn ${activeTab === 'simulator' ? 'tab-btn--active' : ''}`} onClick={() => setActiveTab('simulator')}>Simulador de recetas</button>
+        <button type="button" className={`tab-btn ${activeTab === 'cost-history' ? 'tab-btn--active' : ''}`} onClick={() => setActiveTab('cost-history')}>Evolución de costos</button>
+        <button type="button" className={`tab-btn ${activeTab === 'menu-engineering' ? 'tab-btn--active' : ''}`} onClick={() => setActiveTab('menu-engineering')}>Ingeniería de menú</button>
+        <button type="button" className={`tab-btn ${activeTab === 'production' ? 'tab-btn--active' : ''}`} onClick={() => setActiveTab('production')}>Calculadora de producción</button>
+        <button type="button" className={`tab-btn ${activeTab === 'profit-simulator' ? 'tab-btn--active' : ''}`} onClick={() => setActiveTab('profit-simulator')}>Simulador de rentabilidad</button>
       </nav>
+
+      {activeTab === 'simulator' && (
+        <section className="card">
+          <h2>Simulador de recetas y costos</h2>
+          <p className="lead">Probá cantidades de producción sin modificar la ficha guardada. El costo unitario se calcula con el Cost Engine y los precios vigentes.</p>
+          <div className="builder-grid">
+            <label className="field"><span>Producto o subreceta</span><select value={simulationRecipeId || state.catalog.recipes.find((r) => r.recipe_type === 'product')?.id || ''} onChange={(e) => setSimulationRecipeId(e.target.value)}><option value="">Seleccionar receta</option>{state.catalog.recipes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></label>
+            <label className="field"><span>Cantidad de tandas</span><input type="number" min="0.01" step="0.25" value={simulationBatches} onChange={(e) => setSimulationBatches(Math.max(0.01, Number(e.target.value) || 0.01))} /></label>
+          </div>
+          {(() => {
+            const selected = state.catalog.recipes.find((r) => r.id === (simulationRecipeId || state.catalog.recipes.find((x) => x.recipe_type === 'product')?.id));
+            if (!selected) return <p className="empty-state">Todavía no hay recetas para simular. Creá una receta en la pestaña correspondiente.</p>;
+            const result = recipeResults.get(selected.id);
+            if (!result || result.status !== 'complete') return <div className="alert-banner">No se puede calcular esta receta: faltan precios o componentes válidos. Revisá la ficha y los insumos.</div>;
+            const total = result.raw_total_cost * simulationBatches;
+            return <div className="kpi-grid" style={{ marginTop: 16 }}>
+              <div className="kpi-card"><span>Costo por rendimiento</span><strong>{state.currency} {formatDecimal(result.raw_total_cost, 2)}</strong></div>
+              <div className="kpi-card"><span>Rendimiento por tanda</span><strong>{formatDecimal(selected.yield_quantity, 2)} {selected.yield_unit}</strong></div>
+              <div className="kpi-card"><span>Costo de la simulación</span><strong>{state.currency} {formatDecimal(total, 2)}</strong></div>
+              <div className="kpi-card"><span>Rendimiento total estimado</span><strong>{formatDecimal(selected.yield_quantity * simulationBatches, 2)} {selected.yield_unit}</strong></div>
+            </div>;
+          })()}
+        </section>
+      )}
+
+      {activeTab === 'cost-history' && (
+        <section className="card">
+          <h2>Evolución histórica de costos</h2>
+          <p className="lead">Comparación entre snapshots guardados. Cada captura conserva la composición y los precios de ese momento; no se reconstruye historia que todavía no fue registrada.</p>
+          {state.snapshots.length < 2 ? <div className="empty-state">Necesitás al menos dos snapshots para comparar la evolución. Usá «Guardar Snapshot» después de actualizar precios o recetas.</div> : (
+            <div className="table-wrap"><table className="kit-table"><thead><tr><th>Producto</th><th>Snapshot anterior</th><th>Snapshot reciente</th><th>Variación</th></tr></thead><tbody>
+              {state.catalog.recipes.filter((r) => r.recipe_type === 'product').map((recipe) => {
+                const entries = state.snapshots.filter((snap) => snap.recipe_id === recipe.id).slice().reverse();
+                const first = entries[0]; const last = entries[entries.length - 1];
+                const before = first?.raw_unit_cost; const after = last?.raw_unit_cost;
+                const delta = typeof before === 'number' && before !== 0 && typeof after === 'number' ? ((after - before) / before) * 100 : null;
+                return <tr key={recipe.id}><td>{recipe.name}</td><td>{before == null ? '—' : `${state.currency} ${formatDecimal(before, 2)}`}</td><td>{after == null ? '—' : `${state.currency} ${formatDecimal(after, 2)}`}</td><td>{delta == null ? 'Datos insuficientes' : `${delta > 0 ? '+' : ''}${formatDecimal(delta, 1)}%`}</td></tr>;
+              })}
+            </tbody></table></div>
+          )}
+        </section>
+      )}
+
+      {activeTab === 'menu-engineering' && (
+        <section className="card">
+          <h2>Ingeniería de menú</h2>
+          <p className="lead">Clasificación por popularidad y contribución unitaria usando ventas cargadas y costos calculables. No se asignan ventas estimadas.</p>
+          {!monthlySummary.hasSalesData ? <div className="empty-state">No hay ventas vinculadas a productos para construir la matriz. Importá ventas o vinculá los registros en «Ventas importadas».</div> : (
+            <div className="table-wrap"><table className="kit-table"><thead><tr><th>Producto</th><th>Unidades del período</th><th>Contribución unitaria</th><th>Clasificación</th></tr></thead><tbody>
+              {monthlySummary.rows.filter((r) => r.hasSalesData).sort((a,b) => (b.units ?? 0) - (a.units ?? 0)).map((r) => <tr key={r.prod.id}><td>{r.prod.name}</td><td>{formatDecimal(r.units ?? 0, 0)}</td><td>{r.isComplete ? `${state.currency} ${formatDecimal(r.unitGrossProfit, 2)}` : 'Costo incompleto'}</td><td>{r.matrixLabel}</td></tr>)}
+            </tbody></table></div>
+          )}
+        </section>
+      )}
+
+      {activeTab === 'production' && (
+        <section className="card">
+          <h2>Calculadora de producción</h2>
+          <p className="lead">Indicá cuántas unidades querés producir. Se calculan los rendimientos de las recetas seleccionadas; la explosión detallada de insumos se habilita cuando la receta tiene componentes validados.</p>
+          {state.catalog.recipes.filter((r) => r.recipe_type === 'product').length === 0 ? <div className="empty-state">No hay productos de carta cargados.</div> : <>
+            <div className="table-wrap"><table className="kit-table"><thead><tr><th>Producto</th><th>Unidades a producir</th><th>Rendimiento de receta</th><th>Estado del costo</th></tr></thead><tbody>
+              {state.catalog.recipes.filter((r) => r.recipe_type === 'product').map((r) => <tr key={r.id}><td>{r.name}</td><td><input aria-label={`Unidades de ${r.name}`} type="number" min="0" step="1" value={productionUnits[r.id] ?? 0} onChange={(e) => setProductionUnits((prev) => ({ ...prev, [r.id]: Math.max(0, Number(e.target.value) || 0) }))} /></td><td>{formatDecimal(r.yield_quantity, 2)} {r.yield_unit}</td><td>{recipeResults.get(r.id)?.status === 'complete' ? 'Costo validado' : 'Revisar receta / precios'}</td></tr>)}
+            </tbody></table></div>
+            <p className="lead">Producción total solicitada: <strong>{Object.values(productionUnits).reduce((sum, n) => sum + n, 0)} unidades</strong>. Los valores se mantienen como escenario y no modifican las ventas históricas.</p>
+          </>}
+        </section>
+      )}
+
+      {activeTab === 'profit-simulator' && (
+        <section className="card">
+          <h2>Simulador de rentabilidad</h2>
+          <p className="lead">Escenario manual independiente del histórico. Completá los valores con tus supuestos; el resultado es una contribución estimada antes de impuestos y conceptos no incluidos.</p>
+          <div className="builder-grid">
+            <label className="field"><span>Unidades por mes</span><input type="number" min="0" value={profitScenario.units} onChange={(e) => setProfitScenario((p) => ({ ...p, units: Math.max(0, Number(e.target.value) || 0) }))} /></label>
+            <label className="field"><span>Precio de venta unitario ({state.currency})</span><input type="number" min="0" value={profitScenario.price} onChange={(e) => setProfitScenario((p) => ({ ...p, price: Math.max(0, Number(e.target.value) || 0) }))} /></label>
+            <label className="field"><span>Costo variable unitario ({state.currency})</span><input type="number" min="0" value={profitScenario.variableCost} onChange={(e) => setProfitScenario((p) => ({ ...p, variableCost: Math.max(0, Number(e.target.value) || 0) }))} /></label>
+            <label className="field"><span>Gastos fijos mensuales ({state.currency})</span><input type="number" min="0" value={profitScenario.fixedCosts} onChange={(e) => setProfitScenario((p) => ({ ...p, fixedCosts: Math.max(0, Number(e.target.value) || 0) }))} /></label>
+          </div>
+          {(() => { const revenue = profitScenario.units * profitScenario.price; const contribution = profitScenario.units * (profitScenario.price - profitScenario.variableCost); const result = contribution - profitScenario.fixedCosts; const margin = revenue > 0 ? contribution / revenue * 100 : null; return <div className="kpi-grid" style={{ marginTop: 16 }}><div className="kpi-card"><span>Facturación escenario</span><strong>{state.currency} {formatDecimal(revenue, 2)}</strong></div><div className="kpi-card"><span>Contribución</span><strong>{state.currency} {formatDecimal(contribution, 2)}</strong></div><div className="kpi-card"><span>Resultado operativo estimado</span><strong>{state.currency} {formatDecimal(result, 2)}</strong></div><div className="kpi-card"><span>Margen de contribución</span><strong>{margin == null ? 'Sin datos' : `${formatDecimal(margin, 1)}%`}</strong></div></div>; })()}
+        </section>
+      )}
 
       {activeTab === 'ingredients' && (
         <div className="card">
