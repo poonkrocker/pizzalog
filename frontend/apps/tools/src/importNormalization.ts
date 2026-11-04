@@ -634,7 +634,7 @@ export function applyImportMappings(
     latestMonthUnits.set(record.product_id!, (latestMonthUnits.get(record.product_id!) ?? 0) + record.quantity);
   }
   const productSalesMap = { ...current.productSalesMap };
-  if (latestImportedMonth) {
+  if (latestImportedMonth && latestMonthUnits.size > 0) {
     for (const product of recipes.filter((recipe) => recipe.recipe_type === 'product')) {
       productSalesMap[product.id] = {
         ...productSalesMap[product.id],
@@ -656,11 +656,13 @@ export function applyImportMappings(
       operatingExpenses: expenses,
       productSalesMap,
       salesHistory,
-      ...(latestImportedMonth ? { salesPeriod: latestImportedMonth } : {}),
+      ...(latestImportedMonth && latestMonthUnits.size > 0 ? { salesPeriod: latestImportedMonth } : {}),
     },
     counts,
     warnings: [
-      ...(latestImportedMonth ? [`El resumen de ventas se actualizó con el período más reciente: ${latestImportedMonth}. El historial conserva todos los períodos importados.`] : []),
+      ...(latestImportedMonth && latestMonthUnits.size > 0
+        ? [`El resumen de ventas se actualizó con el período más reciente: ${latestImportedMonth}. El historial conserva todos los períodos importados.`]
+        : latestImportedMonth ? ['Las ventas se guardaron en el historial, pero no se actualizaron los indicadores porque ningún producto coincidió con el catálogo.'] : []),
       ...warnings.slice(0, 60),
     ],
   };
