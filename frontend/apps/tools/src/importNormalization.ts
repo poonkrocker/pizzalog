@@ -5,7 +5,7 @@ import type { ToolsWorkspaceState, OperatingExpenseItem } from './demoData';
 export interface ImportSheetMapping {
   sheet_index: number;
   name: string;
-  kind: 'ingredients' | 'purchase_prices' | 'recipes' | 'operating_expenses' | 'unknown';
+  kind: 'ingredients' | 'purchase_prices' | 'recipes' | 'operating_expenses' | 'sales' | 'unknown';
   header_row_index: number;
   headers: string[];
   columns: Record<string, number | null>;
@@ -16,7 +16,7 @@ export interface ImportSheetMapping {
 
 export interface AppliedImport {
   workspace: ToolsWorkspaceState;
-  counts: { ingredients: number; prices: number; recipes: number; expenses: number };
+  counts: { ingredients: number; prices: number; recipes: number; expenses: number; sales: number };
   warnings: string[];
 }
 
@@ -159,6 +159,8 @@ export function applyImportMappings(
   const purchasePrices = [...current.catalog.purchase_prices];
   const recipes = [...current.catalog.recipes];
   const expenses = [...current.operatingExpenses];
+  const salesHistory = [...(current.salesHistory ?? [])];
+  const knownProducts = new Map(recipes.filter((recipe) => recipe.recipe_type === 'product').map((recipe) => [normalizedName(recipe.name), recipe]));
   const usedIngredientIds = new Set(ingredients.map((item) => item.id));
   const usedRecipeIds = new Set(recipes.map((item) => item.id));
   const knownIngredients = new Map(ingredients.map((item) => [normalizedName(item.name), item]));
@@ -166,7 +168,7 @@ export function applyImportMappings(
   const doughRecipesByName = new Map<string, Recipe>();
   let doughProfilesAdded = false;
   const warnings: string[] = [];
-  const counts = { ingredients: 0, prices: 0, recipes: 0, expenses: 0 };
+  const counts = { ingredients: 0, prices: 0, recipes: 0, expenses: 0, sales: 0 };
   const pendingPrices: Array<{ name: string; price: PurchasePrice }> = [];
   const recipeRows = new Map<string, { name: string; type: Recipe['recipe_type']; yieldQuantity: number; yieldUnit: UnitCode; components: NonNullable<Recipe['components']> }>();
   const invalidRecipeKeys = new Set<string>();
@@ -263,7 +265,7 @@ export function applyImportMappings(
   };
 
   const orderedMappings = [...mappings].sort((a, b) => {
-    const order = { ingredients: 0, purchase_prices: 1, recipes: 2, operating_expenses: 3, unknown: 4 };
+    const order = { ingredients: 0, purchase_prices: 1, recipes: 2, operating_expenses: 3, sales: 4, unknown: 5 };
     return order[a.kind] - order[b.kind];
   });
 
@@ -429,6 +431,55 @@ export function applyImportMappings(
         return;
       }
 
+      if (mapping.kind === 'sales') {
+        const productName = cell(row, mapping, 'product_name', 'product', 'recipe_name');
+        const quantity = parseNumber(cell(row, mapping, 'quantity', 'units', 'units_sold'));
+        const rawStart = cell(row, mapping, 'period_start', 'date', 'sale_date');
+        const rawEnd = cell(row, mapping, 'period_end') || rawStart;
+        const parseDate = (raw: string): string | null => {
+          const value = raw.trim();
+          if (!value) return null;
+          if (/^\\d{4}-\\d{2}$/.test(value)) {
+            const [year, month] = value.split('-').map(Number);
+            const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+            return `${year}-${String(month).padStart(2, '0')}-01`;
+          }
+          let iso = value;
+          const local = value.match(/^(\\d{1,2})[\\/.\\-](\\d{1,2})[\\/.\\-](\\d{4})$/);
+          if (local) iso = `${local[3]}-${local[2].padStart(2, '0')}-${local[1].padStart(2, '0')}`;
+          if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(iso)) return null;
+          const parsed = new Date(`${iso}T00:00:00Z`);
+          return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === iso ? iso : null;
+        };
+        const periodStart = parseDate(rawStart);
+        const periodEnd = parseDate(rawEnd);
+        if (!productName || quantity === null || quantity < 0 || !periodStart || !periodEnd || periodEnd < periodStart) {
+          warnings.push(`${mapping.name}, fila ${sourceRow}: falta producto, cantidad o período válido; se omitió la fila de ventas.`);
+          return;
+        }
+        const product = knownProducts.get(normalizedName(productName));
+        if (!product) {
+          warnings.push(`${mapping.name}, fila ${sourceRow}: "${productName}" no coincide con un producto de carta; se guardó como venta sin vincular.`);
+        }
+        const grossRevenue = parseNumber(cell(row, mapping, 'gross_revenue'));
+        const netRevenue = parseNumber(cell(row, mapping, 'net_revenue'));
+        salesHistory.push({
+          id: makeId('imp_sale', `${productName}_${periodStart}_${salesHistory.length}`, new Set(salesHistory.map((item) => item.id))),
+          product_id: product?.id ?? null,
+          product_name: productName,
+          quantity,
+          period_start: periodStart,
+          period_end: periodEnd,
+          channel: cell(row, mapping, 'channel') || null,
+          ...(grossRevenue !== null ? { gross_revenue: grossRevenue } : {}),
+          ...(netRevenue !== null ? { net_revenue: netRevenue } : {}),
+          source: cell(row, mapping, 'source') || mapping.name,
+          imported_at: new Date().toISOString(),
+        });
+        counts.sales += 1;
+        return;
+      }
+
       if (mapping.kind === 'operating_expenses') {
         const name = cell(row, mapping, 'expense_name', 'name');
         const amount = parseNumber(cell(row, mapping, 'expense_amount'));
@@ -549,6 +600,7 @@ export function applyImportMappings(
       ...current,
       catalog: { ...current.catalog, ingredients, purchase_prices: purchasePrices, recipes },
       operatingExpenses: expenses,
+      salesHistory,
     },
     counts,
     warnings: warnings.slice(0, 60),
