@@ -587,7 +587,7 @@ export function applyImportMappings(
       warnings.push(`La receta ${name} ya existe; no se duplicó.`);
       continue;
     }
-    recipes.push({
+    const importedRecipe: Recipe = {
       id: makeId('imp_recipe', name, usedRecipeIds),
       name,
       recipe_type: row.type,
@@ -595,15 +595,17 @@ export function applyImportMappings(
       yield_unit: row.yieldUnit,
       currency: current.currency,
       components: row.components ?? [],
-    });
+    };
+    recipes.push(importedRecipe);
+    knownProducts.set(normalizedName(name), importedRecipe);
     counts.recipes += 1;
   }
 
-  const latestImportedMonth = importedSalesRecords
+  const importedMonths = importedSalesRecords
     .map((record) => record.period_start.slice(0, 7))
     .filter((month) => /^\\d{4}-\\d{2}$/.test(month))
-    .sort()
-    .at(-1) ?? null;
+    .sort();
+  const latestImportedMonth = importedMonths.length ? importedMonths[importedMonths.length - 1] : null;
   const salesForLatestMonth = latestImportedMonth
     ? salesHistory.filter((record) =>
         record.period_start.slice(0, 7) === latestImportedMonth &&
