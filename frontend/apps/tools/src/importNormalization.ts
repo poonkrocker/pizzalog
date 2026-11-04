@@ -125,9 +125,9 @@ function purchaseDateValue(raw: string): string | null | undefined {
   const value = raw.trim();
   if (!value) return undefined;
   let iso = value;
-  const local = value.match(/^(\\d{1,2})[\\/.\\-](\\d{1,2})[\\/.\\-](\\d{4})$/);
+  const local = value.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})$/);
   if (local) iso = `${local[3]}-${local[2].padStart(2, '0')}-${local[1].padStart(2, '0')}`;
-  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(iso)) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
   const parsed = new Date(`${iso}T00:00:00Z`);
   return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === iso ? iso : null;
 }
@@ -440,16 +440,16 @@ export function applyImportMappings(
         const parseDate = (raw: string, endOfMonth = false): string | null => {
           const value = raw.trim();
           if (!value) return null;
-          if (/^\\d{4}-\\d{2}$/.test(value)) {
+          if (/^\d{4}-\d{2}$/.test(value)) {
             const [year, month] = value.split('-').map(Number);
             const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
             const day = endOfMonth ? lastDay : 1;
             return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
           }
           let iso = value;
-          const local = value.match(/^(\\d{1,2})[\\/.\\-](\\d{1,2})[\\/.\\-](\\d{4})$/);
+          const local = value.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})$/);
           if (local) iso = `${local[3]}-${local[2].padStart(2, '0')}-${local[1].padStart(2, '0')}`;
-          if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(iso)) return null;
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
           const parsed = new Date(`${iso}T00:00:00Z`);
           return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === iso ? iso : null;
         };
@@ -619,7 +619,7 @@ export function applyImportMappings(
 
   const importedMonths = importedSalesRecords
     .map((record) => record.period_start.slice(0, 7))
-    .filter((month) => /^\\d{4}-\\d{2}$/.test(month))
+    .filter((month) => /^\d{4}-\d{2}$/.test(month))
     .sort();
   const latestImportedMonth = importedMonths.length ? importedMonths[importedMonths.length - 1] : null;
   const salesForLatestMonth = latestImportedMonth
