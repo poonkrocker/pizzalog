@@ -1301,7 +1301,8 @@ export function App({
                           value={units ?? ''}
                           placeholder="Sin datos"
                           onChange={(e) => {
-                            const nextUnits = Math.max(0, Number(e.target.value) || 0);
+                            const raw = e.target.value;
+                            const nextUnits = raw === '' ? null : Math.max(0, Number(raw) || 0);
                             setState((prev) => ({
                               ...prev,
                               productSalesMap: {
