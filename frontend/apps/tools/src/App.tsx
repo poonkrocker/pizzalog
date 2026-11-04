@@ -79,6 +79,8 @@ export function App({
   const [simulationRecipeId, setSimulationRecipeId] = useState('');
   const [simulationBatches, setSimulationBatches] = useState(1);
   const [simulationComponentPct, setSimulationComponentPct] = useState<Record<string, number>>({});
+  const [simulationHydrationPct, setSimulationHydrationPct] = useState<Record<string, number>>({});
+  const [historyRecipeId, setHistoryRecipeId] = useState('');
   const [productionUnits, setProductionUnits] = useState<Record<string, number>>({});
   const [profitScenario, setProfitScenario] = useState({ units: 0, price: 0, variableCost: 0, fixedCosts: 0 });
   const [profitProductId, setProfitProductId] = useState('');
@@ -906,13 +908,19 @@ export function App({
             if (!selected) return <p className="empty-state">Todavía no hay recetas para simular. Creá una receta en la pestaña correspondiente.</p>;
             const result = recipeResults.get(selected.id);
             const adjustable = selected.components ?? [];
-            const simulatedRecipes = state.catalog.recipes.map((recipe) => recipe.id !== selected.id ? recipe : ({
-              ...recipe,
-              components: adjustable.map((component, index) => ({
+            const simulatedRecipes = state.catalog.recipes.map((recipe) => {
+              if (recipe.id !== selected.id) return recipe;
+              if (recipe.bakers_dough) {
+                return { ...recipe, bakers_dough: {
+                  ...recipe.bakers_dough,
+                  hydration_pct: simulationHydrationPct[selected.id] ?? recipe.bakers_dough.hydration_pct,
+                }};
+              }
+              return { ...recipe, components: adjustable.map((component, index) => ({
                 ...component,
                 quantity: component.quantity * (simulationComponentPct[`${selected.id}:${index}`] ?? 100) / 100,
-              })),
-            }));
+              })) };
+            });
             let simulatedResult: ReturnType<CostEngine['calculateRecipeCost']> | null = null;
             try {
               simulatedResult = new CostEngine({ ...state.catalog, recipes: simulatedRecipes }).calculateRecipeCost(selected.id);
@@ -921,9 +929,22 @@ export function App({
             const simulatedCost = simulatedResult?.status === 'complete' ? simulatedResult.raw_batch_cost : null;
             const total = (simulatedCost ?? 0) * simulationBatches;
             return <>
-              {adjustable.length > 0 ? <div className="table-wrap" style={{ marginTop: 16 }}><table className="kit-table"><thead><tr><th>Componente</th><th>Cantidad original</th><th>Variación simulada (%)</th></tr></thead><tbody>
-                {result.components.map((component, index) => <tr key={`${selected.id}:${index}`}><td>{component.name}</td><td>{formatDecimal(component.quantity, 3)} {component.unit}</td><td><input aria-label={`Variación de ${component.name}`} type="number" min="0" step="5" value={simulationComponentPct[`${selected.id}:${index}`] ?? 100} onChange={(e) => setSimulationComponentPct((prev) => ({ ...prev, [`${selected.id}:${index}`]: Math.max(0, Number(e.target.value) || 0) }))} /></td></tr>)}
-              </tbody></table></div> : <p className="lead">Esta receta usa una fórmula panadera parametrizada. La simulación de cambios por componente todavía no está disponible para ese tipo de fórmula.</p>}
+              {selected.bakers_dough ? (
+                <label className="field" style={{ maxWidth: 320, marginTop: 16 }}>
+                  <span>Hidratación simulada (%)</span>
+                  <input type="number" min="0" max="250" step="0.5"
+                    value={simulationHydrationPct[selected.id] ?? selected.bakers_dough.hydration_pct}
+                    onChange={(e) => setSimulationHydrationPct((prev) => ({
+                      ...prev, [selected.id]: Math.max(0, Math.min(250, Number(e.target.value) || 0)),
+                    }))}
+                  />
+                  <small>Recalcula la fórmula panadera completa sin modificar la receta guardada.</small>
+                </label>
+              ) : adjustable.length > 0 ? (
+                <div className="table-wrap" style={{ marginTop: 16 }}><table className="kit-table"><thead><tr><th>Componente</th><th>Cantidad original</th><th>Variación simulada (%)</th></tr></thead><tbody>
+                  {result.components.map((component, index) => <tr key={`${selected.id}:${index}`}><td>{component.name}</td><td>{formatDecimal(component.quantity, 3)} {component.unit}</td><td><input aria-label={`Variación de ${component.name}`} type="number" min="0" step="5" value={simulationComponentPct[`${selected.id}:${index}`] ?? 100} onChange={(e) => setSimulationComponentPct((prev) => ({ ...prev, [`${selected.id}:${index}`]: Math.max(0, Number(e.target.value) || 0) }))} /></td></tr>)}
+                </tbody></table></div>
+              ) : <p className="lead">Esta receta no tiene componentes ajustables.</p>}
               {simulatedCost === null && <div className="alert-banner">La variación produce un costo incompleto. Revisá unidades, cantidades y precios.</div>}
               <div className="kpi-grid" style={{ marginTop: 16 }}>
                 <div className="kpi-card"><span>Costo original por tanda</span><strong>{state.currency} {formatDecimal(result.raw_batch_cost ?? 0, 2)}</strong></div>
@@ -939,18 +960,73 @@ export function App({
       {activeTab === 'cost-history' && (
         <section className="card">
           <h2>Evolución histórica de costos</h2>
-          <p className="lead">Comparación entre snapshots guardados. Cada captura conserva la composición y los precios de ese momento; no se reconstruye historia que todavía no fue registrada.</p>
-          {state.snapshots.length < 2 ? <div className="empty-state">Necesitás al menos dos snapshots para comparar la evolución. Usá «Guardar Snapshot» después de actualizar precios o recetas.</div> : (
-            <div className="table-wrap"><table className="kit-table"><thead><tr><th>Producto</th><th>Snapshot anterior</th><th>Snapshot reciente</th><th>Variación</th></tr></thead><tbody>
-              {state.catalog.recipes.filter((r) => r.recipe_type === 'product').map((recipe) => {
-                const entries = state.snapshots.filter((snap) => snap.recipe_id === recipe.id).slice().reverse();
-                const first = entries[0]; const last = entries[entries.length - 1];
-                const before = first?.cost_result.raw_unit_cost; const after = last?.cost_result.raw_unit_cost;
-                const delta = typeof before === 'number' && before !== 0 && typeof after === 'number' ? ((after - before) / before) * 100 : null;
-                return <tr key={recipe.id}><td>{recipe.name}</td><td>{before == null ? '—' : `${state.currency} ${formatDecimal(before, 2)}`}</td><td>{after == null ? '—' : `${state.currency} ${formatDecimal(after, 2)}`}</td><td>{delta == null ? 'Datos insuficientes' : `${delta > 0 ? '+' : ''}${formatDecimal(delta, 1)}%`}</td></tr>;
-              })}
-            </tbody></table></div>
-          )}
+          <p className="lead">Seguimiento cronológico de snapshots guardados. Solo se muestran costos registrados; no se estiman períodos sin capturas.</p>
+          {state.snapshots.length === 0 ? (
+            <div className="empty-state">Todavía no hay snapshots. Guardá una captura desde la pestaña Snapshots para comenzar el historial.</div>
+          ) : (() => {
+            const products = state.catalog.recipes.filter((r) => r.recipe_type === 'product');
+            const selectedProduct = products.find((r) => r.id === historyRecipeId) ?? products[0];
+            const entries = selectedProduct ? state.snapshots
+              .filter((snap) => snap.recipe_id === selectedProduct.id)
+              .slice().sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) : [];
+            const values = entries.map((entry) => entry.cost_result.raw_unit_cost)
+              .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+            const minValue = values.length ? Math.min(...values) : 0;
+            const maxValue = values.length ? Math.max(...values) : 0;
+            const range = maxValue - minValue;
+            return <>
+              <label className="field" style={{ maxWidth: 420, marginTop: 16 }}>
+                <span>Producto</span>
+                <select value={selectedProduct?.id ?? ''} onChange={(e) => setHistoryRecipeId(e.target.value)}>
+                  {products.map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.name}</option>)}
+                </select>
+              </label>
+              {!selectedProduct ? <div className="empty-state">No hay productos en el catálogo.</div> :
+                entries.length === 0 ? <div className="empty-state">Este producto todavía no tiene snapshots. Guardá una captura para iniciar su historial.</div> : <>
+                  <div className="kpi-grid" style={{ marginTop: 16 }}>
+                    <div className="kpi-card"><span>Primer costo registrado</span><strong>{state.currency} {formatDecimal(entries[0].cost_result.raw_unit_cost ?? 0, 2)}</strong><small>{new Date(entries[0].created_at).toLocaleString()}</small></div>
+                    <div className="kpi-card"><span>Último costo registrado</span><strong>{state.currency} {formatDecimal(entries[entries.length - 1].cost_result.raw_unit_cost ?? 0, 2)}</strong><small>{new Date(entries[entries.length - 1].created_at).toLocaleString()}</small></div>
+                    <div className="kpi-card"><span>Capturas</span><strong>{entries.length}</strong><small>Orden cronológico</small></div>
+                  </div>
+                  <div className="card" style={{ marginTop: 16 }}>
+                    <strong>Evolución del costo unitario</strong>
+                    <div style={{ display: 'grid', gap: 12, marginTop: 14 }}>
+                      {entries.map((entry, index) => {
+                        const value = entry.cost_result.raw_unit_cost;
+                        const previous = index > 0 ? entries[index - 1].cost_result.raw_unit_cost : null;
+                        const delta = typeof value === 'number' && typeof previous === 'number' && previous !== 0 ? ((value - previous) / previous) * 100 : null;
+                        const width = typeof value === 'number' ? (range === 0 ? 100 : Math.max(4, ((value - minValue) / range) * 100)) : 0;
+                        return <div key={entry.snapshot_id} style={{ display: 'grid', gridTemplateColumns: 'minmax(100px, 1fr) minmax(90px, 2fr) minmax(100px, 1fr)', alignItems: 'center', gap: 10 }}>
+                          <small>{new Date(entry.created_at).toLocaleDateString()}</small>
+                          <div style={{ background: 'var(--border-color, #ddd)', borderRadius: 6, height: 12, overflow: 'hidden' }}>
+                            <div style={{ width: `${width}%`, height: '100%', background: 'var(--accent, #b33)', borderRadius: 6 }} />
+                          </div>
+                          <strong style={{ textAlign: 'right' }}>{value == null ? 'Incompleto' : `${state.currency} ${formatDecimal(value, 2)}`}</strong>
+                          <small style={{ gridColumn: '2 / 4', opacity: 0.75 }}>{delta == null ? 'Sin comparación previa' : `${delta > 0 ? '+' : ''}${formatDecimal(delta, 1)}% respecto de la captura anterior`}</small>
+                        </div>;
+                      })}
+                    </div>
+                  </div>
+                  <div className="table-wrap" style={{ marginTop: 16 }}>
+                    <table className="kit-table">
+                      <thead><tr><th>Fecha</th><th>Costo unitario</th><th>Costo por tanda</th><th>Variación</th><th>Estado</th></tr></thead>
+                      <tbody>{entries.map((entry, index) => {
+                        const previous = index > 0 ? entries[index - 1].cost_result.raw_unit_cost : null;
+                        const value = entry.cost_result.raw_unit_cost;
+                        const delta = typeof value === 'number' && typeof previous === 'number' && previous !== 0 ? ((value - previous) / previous) * 100 : null;
+                        return <tr key={entry.snapshot_id}>
+                          <td>{new Date(entry.created_at).toLocaleString()}</td>
+                          <td>{value == null ? '—' : `${state.currency} ${formatDecimal(value, 2)}`}</td>
+                          <td>{entry.cost_result.raw_batch_cost == null ? '—' : `${state.currency} ${formatDecimal(entry.cost_result.raw_batch_cost, 2)}`}</td>
+                          <td>{delta == null ? '—' : `${delta > 0 ? '+' : ''}${formatDecimal(delta, 1)}%`}</td>
+                          <td>{entry.cost_result.status === 'complete' ? 'Completo' : 'Incompleto'}</td>
+                        </tr>;
+                      })}</tbody>
+                    </table>
+                  </div>
+                </>}
+            </>;
+          })()}
         </section>
       )}
 
