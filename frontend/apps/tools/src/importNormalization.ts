@@ -160,6 +160,7 @@ export function applyImportMappings(
   const recipes = [...current.catalog.recipes];
   const expenses = [...current.operatingExpenses];
   const salesHistory = [...(current.salesHistory ?? [])];
+  const importedSalesRecords: NonNullable<ToolsWorkspaceState['salesHistory']> = [];
   const knownProducts = new Map(recipes.filter((recipe) => recipe.recipe_type === 'product').map((recipe) => [normalizedName(recipe.name), recipe]));
   const usedIngredientIds = new Set(ingredients.map((item) => item.id));
   const usedRecipeIds = new Set(recipes.map((item) => item.id));
@@ -464,7 +465,7 @@ export function applyImportMappings(
         }
         const grossRevenue = parseNumber(cell(row, mapping, 'gross_revenue'));
         const netRevenue = parseNumber(cell(row, mapping, 'net_revenue'));
-        salesHistory.push({
+        const saleRecord = {
           id: makeId('imp_sale', `${productName}_${periodStart}_${salesHistory.length}`, new Set(salesHistory.map((item) => item.id))),
           product_id: product?.id ?? null,
           product_name: productName,
@@ -476,7 +477,9 @@ export function applyImportMappings(
           ...(netRevenue !== null ? { net_revenue: netRevenue } : {}),
           source: cell(row, mapping, 'source') || mapping.name,
           imported_at: new Date().toISOString(),
-        });
+        };
+        salesHistory.push(saleRecord);
+        importedSalesRecords.push(saleRecord);
         counts.sales += 1;
         return;
       }
@@ -596,14 +599,43 @@ export function applyImportMappings(
     counts.recipes += 1;
   }
 
+  const latestImportedMonth = importedSalesRecords
+    .map((record) => record.period_start.slice(0, 7))
+    .filter((month) => /^\\d{4}-\\d{2}$/.test(month))
+    .sort()
+    .at(-1) ?? null;
+  const salesForLatestMonth = latestImportedMonth
+    ? salesHistory.filter((record) =>
+        record.period_start.slice(0, 7) === latestImportedMonth &&
+        record.period_end.slice(0, 7) === latestImportedMonth &&
+        record.product_id !== null
+      )
+    : [];
+  const latestMonthUnits = new Map<string, number>();
+  for (const record of salesForLatestMonth) {
+    latestMonthUnits.set(record.product_id!, (latestMonthUnits.get(record.product_id!) ?? 0) + record.quantity);
+  }
+  const productSalesMap = { ...current.productSalesMap };
+  for (const [productId, monthlyUnitsSold] of latestMonthUnits) {
+    productSalesMap[productId] = {
+      ...productSalesMap[productId],
+      monthlyUnitsSold,
+    };
+  }
+
   return {
     workspace: {
       ...current,
       catalog: { ...current.catalog, ingredients, purchase_prices: purchasePrices, recipes },
       operatingExpenses: expenses,
+      productSalesMap,
       salesHistory,
+      ...(latestImportedMonth ? { salesPeriod: latestImportedMonth } : {}),
     },
     counts,
-    warnings: warnings.slice(0, 60),
+    warnings: [
+      ...(latestImportedMonth ? [`El resumen de ventas se actualizó con el período más reciente: ${latestImportedMonth}. El historial conserva todos los períodos importados.`] : []),
+      ...warnings.slice(0, 60),
+    ],
   };
 }
