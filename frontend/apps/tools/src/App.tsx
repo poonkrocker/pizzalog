@@ -494,6 +494,7 @@ export function App({
     ];
     setImportNotice(summary.join(' '));
     setSmartImportPreview(null);
+    setReplaceWorkspaceOnImport(false);
   }
 
   function handleImportJson(file: File) {
