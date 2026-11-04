@@ -100,7 +100,7 @@ Devolvé exclusivamente JSON válido, sin markdown, con esta estructura:
   "sheets": [
     {
       "sheet_index": 0,
-      "kind": "ingredients|purchase_prices|recipes|operating_expenses|unknown",
+      "kind": "ingredients|purchase_prices|recipes|operating_expenses|sales|unknown",
       "header_row_index": 0,
       "columns": {
         "name": null,
@@ -126,7 +126,15 @@ Devolvé exclusivamente JSON válido, sin markdown, con esta estructura:
         "expense_name": null,
         "expense_category": null,
         "expense_period": null,
-        "expense_amount": null
+        "expense_amount": null,
+        "product_name": null,
+        "quantity": null,
+        "period_start": null,
+        "period_end": null,
+        "channel": null,
+        "gross_revenue": null,
+        "net_revenue": null,
+        "source": null
       },
       "confidence": 0.0,
       "warnings": []
@@ -187,6 +195,8 @@ PROMPT;
             'unit_weight_g', 'supplier', 'recipe_name', 'recipe_type', 'yield_quantity',
             'yield_unit', 'component_name', 'component_quantity', 'component_unit',
             'expense_name', 'expense_category', 'expense_period', 'expense_amount',
+            'product_name', 'quantity', 'period_start', 'period_end', 'channel',
+            'gross_revenue', 'net_revenue', 'source',
         ];
         $safeSheets = [];
         $seenSheetIndexes = [];
@@ -200,7 +210,7 @@ PROMPT;
             if ($headerIndex === false || $headerIndex < 0 || $headerIndex >= count($source['rows'])) $headerIndex = 0;
 
             $kind = (string) ($mapping['kind'] ?? 'unknown');
-            if (!in_array($kind, ['ingredients', 'purchase_prices', 'recipes', 'operating_expenses', 'unknown'], true)) {
+            if (!in_array($kind, ['ingredients', 'purchase_prices', 'recipes', 'operating_expenses', 'sales', 'unknown'], true)) {
                 $kind = 'unknown';
             }
 
@@ -291,6 +301,14 @@ PROMPT;
             'expense_category' => ['categoria', 'categoría', 'rubro', 'expense category'],
             'expense_period' => ['periodo', 'período', 'frecuencia', 'expense period'],
             'expense_amount' => ['importe', 'monto', 'importe del gasto', 'monto del gasto', 'amount', 'expense amount'],
+            'product_name' => ['producto', 'nombre del producto', 'articulo', 'item', 'product', 'product name'],
+            'quantity' => ['unidades vendidas', 'cantidad vendida', 'cantidad', 'unidades', 'units sold', 'quantity'],
+            'period_start' => ['inicio del periodo', 'desde', 'fecha', 'fecha de venta', 'date', 'period start'],
+            'period_end' => ['fin del periodo', 'hasta', 'period end'],
+            'channel' => ['canal', 'channel', 'tipo de venta'],
+            'gross_revenue' => ['venta bruta', 'importe bruto', 'gross sales', 'gross revenue'],
+            'net_revenue' => ['venta neta', 'importe neto', 'net sales', 'net revenue'],
+            'source' => ['origen', 'sistema', 'tpv', 'source', 'pos'],
         ];
 
         $normalize = static function ($value): string {
@@ -337,6 +355,8 @@ PROMPT;
                 $kind = 'recipes';
             } elseif ($has('expense_name') && $has('expense_amount')) {
                 $kind = 'operating_expenses';
+            } elseif ($has('product_name') && $has('quantity') && $has('period_start')) {
+                $kind = 'sales';
             } elseif ($has('ingredient_name') && $has('purchase_price') && $has('pack_quantity')) {
                 $kind = 'purchase_prices';
             } elseif ($has('name') && $has('base_unit')) {
