@@ -2102,7 +2102,7 @@ export function App({
                     <button
                       type="button"
                       className="btn btn--sm btn--danger"
-                      disabled={editingRecipe.bakers_dough.flours.length <= 1}
+                      disabled={editingRecipe.bakers_dough!.flours.length <= 1}
                       onClick={() => setEditingRecipe({
                         ...editingRecipe,
                         bakers_dough: {
