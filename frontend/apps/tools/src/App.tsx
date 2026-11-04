@@ -993,8 +993,8 @@ export function App({
               {!selectedProduct ? <div className="empty-state">No hay productos en el catálogo.</div> :
                 entries.length === 0 ? <div className="empty-state">Este producto todavía no tiene snapshots. Guardá una captura para iniciar su historial.</div> : <>
                   <div className="kpi-grid" style={{ marginTop: 16 }}>
-                    <div className="kpi-card"><span>Primer costo registrado</span><strong>{entries[0].cost_result.raw_unit_cost == null ? 'Incompleto' : `${state.currency} ${formatDecimal(entries[0].cost_result.raw_unit_cost, 2)}`}</strong><small>{new Date(entries[0].created_at).toLocaleString()}</small></div>
-                    <div className="kpi-card"><span>Último costo registrado</span><strong>{entries[entries.length - 1].cost_result.raw_unit_cost == null ? 'Incompleto' : `${state.currency} ${formatDecimal(entries[entries.length - 1].cost_result.raw_unit_cost, 2)}`}</strong><small>{new Date(entries[entries.length - 1].created_at).toLocaleString()}</small></div>
+                    <div className="kpi-card"><span>Primer costo registrado</span><strong>{entries[0].cost_result.raw_unit_cost == null ? 'Incompleto' : `${state.currency} ${formatDecimal(Number(entries[0].cost_result.raw_unit_cost), 2)}`}</strong><small>{new Date(entries[0].created_at).toLocaleString()}</small></div>
+                    <div className="kpi-card"><span>Último costo registrado</span><strong>{entries[entries.length - 1].cost_result.raw_unit_cost == null ? 'Incompleto' : `${state.currency} ${formatDecimal(Number(entries[entries.length - 1].cost_result.raw_unit_cost), 2)}`}</strong><small>{new Date(entries[entries.length - 1].created_at).toLocaleString()}</small></div>
                     <div className="kpi-card"><span>Capturas</span><strong>{entries.length}</strong><small>Orden cronológico</small></div>
                   </div>
                   <div className="card" style={{ marginTop: 16 }}>
