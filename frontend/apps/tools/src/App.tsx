@@ -1557,26 +1557,32 @@ export function App({
               </div>
             </div>
             <div className="kpi-box">
-              <div className="kpi-box__label">Venta de Equilibrio (Break-Even)</div>
+              <div className="kpi-box__label">Venta de equilibrio estimada</div>
               <div className="kpi-box__value">
-                {state.currency} {formatDecimal(breakEvenRevenue, 0)}
+                {monthlySummary.hasSalesData && monthlySummary.weightedMarginPct > 0
+                  ? `${state.currency} ${formatDecimal(breakEvenRevenue, 0)}`
+                  : 'Sin datos'}
               </div>
               <div className="kpi-box__sub">
-                Al {formatDecimal(monthlySummary.weightedMarginPct, 1)}% de margen bruto ponderado
+                {monthlySummary.hasSalesData && monthlySummary.weightedMarginPct > 0
+                  ? `Con margen de contribución ponderado del ${formatDecimal(monthlySummary.weightedMarginPct, 1)}%`
+                  : 'Requiere ventas registradas y margen calculable'}
               </div>
             </div>
             <div className="kpi-box kpi-box--highlight">
-              <div className="kpi-box__label">Resultado Operativo Neto (EBITDA)</div>
+              <div className="kpi-box__label">Resultado operativo estimado</div>
               <div
                 className="kpi-box__value"
-                style={{ color: netOperatingProfit >= 0 ? '#4ade80' : '#f87171' }}
+                style={{ color: netOperatingProfit === null ? 'inherit' : netOperatingProfit >= 0 ? '#4ade80' : '#f87171' }}
               >
-                {state.currency} {formatDecimal(netOperatingProfit, 0)}
+                {netOperatingProfit === null ? 'Sin datos' : `${state.currency} ${formatDecimal(netOperatingProfit, 0)}`}
               </div>
               <div className="kpi-box__sub">
-                {monthlySummary.totalRevenue > 0
-                  ? `${formatDecimal((netOperatingProfit / monthlySummary.totalRevenue) * 100, 1)}% neto sobre facturación`
-                  : 'Cargá unidades en la Pestaña 3'}
+                {netOperatingProfit === null
+                  ? 'Requiere ventas registradas'
+                  : monthlySummary.totalRevenue > 0
+                    ? `${formatDecimal((netOperatingProfit / monthlySummary.totalRevenue) * 100, 1)}% sobre facturación; antes de impuestos y costos no registrados`
+                    : 'Sin facturación registrada'}
               </div>
             </div>
           </div>
