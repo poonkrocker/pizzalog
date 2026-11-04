@@ -469,6 +469,7 @@ export function App({
     setState(result.workspace);
     const summary = [
       `Importados: ${result.counts.ingredients} insumos, ${result.counts.prices} precios, ${result.counts.recipes} recetas y ${result.counts.expenses} gastos.`,
+      ...(hasDemoSeed ? ['Se limpiaron los datos de demostración para evitar mezclarlos con la importación.'] : []),
       ...result.warnings,
     ];
     setImportNotice(summary.join(' '));
