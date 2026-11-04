@@ -425,7 +425,34 @@ export function App({
     if (!smartImportPreview) return;
     setImportError(null);
     setImportNotice(null);
-    const result = applyImportMappings(state, smartImportPreview.sheets, smartImportPreview.mappings);
+
+    // Al importar sobre el workspace de demostración, partir de un catálogo limpio
+    // evita mezclar recetas, precios y ventas ficticias con los datos del negocio.
+    const demoIngredientIds = new Set([
+      'ing_harina', 'ing_levadura', 'ing_sal', 'ing_agua', 'ing_tomate',
+      'ing_aceite', 'ing_mozzarella', 'ing_pollo', 'ing_garbanzo', 'ing_trufa',
+    ]);
+    const demoRecipeIds = new Set([
+      'sub_masa_poolish', 'sub_salsa', 'prod_margherita', 'prod_focaccia_a',
+      'prod_pollo_merma', 'prod_trufa_incompleta',
+    ]);
+    const hasDemoSeed = state.catalog.ingredients.some((item) => demoIngredientIds.has(item.id)) ||
+      state.catalog.recipes.some((item) => demoRecipeIds.has(item.id));
+    const importBase = hasDemoSeed ? {
+      ...state,
+      catalog: {
+        ...state.catalog,
+        ingredients: state.catalog.ingredients.filter((item) => !demoIngredientIds.has(item.id)),
+        purchase_prices: state.catalog.purchase_prices.filter((price) => !demoIngredientIds.has(price.ingredient_id)),
+        recipes: state.catalog.recipes.filter((recipe) => !demoRecipeIds.has(recipe.id)),
+      },
+      productSalesMap: Object.fromEntries(
+        Object.entries(state.productSalesMap).filter(([id]) => !demoRecipeIds.has(id))
+      ),
+      operatingExpenses: state.operatingExpenses.filter((expense) => !['exp_1', 'exp_2', 'exp_3', 'exp_4'].includes(expense.id)),
+      snapshots: [],
+    } : state;
+    const result = applyImportMappings(importBase, smartImportPreview.sheets, smartImportPreview.mappings);
     const total = Object.values(result.counts).reduce((sum, count) => sum + count, 0);
     if (total === 0) {
       const detected = smartImportPreview.mappings
