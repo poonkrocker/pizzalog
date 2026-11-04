@@ -42,6 +42,7 @@ export interface ToolsWorkspaceState {
   catalog: CostCatalog;
   productSalesMap: Record<string, ProductSalesPlan>;
   salesHistory?: SalesImportRecord[];
+  salesPeriod?: string | null;
   operatingExpenses: OperatingExpenseItem[];
   snapshots: CostSnapshot[];
 }
