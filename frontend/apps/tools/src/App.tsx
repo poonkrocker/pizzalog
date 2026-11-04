@@ -646,7 +646,9 @@ export function App({
     );
   }, [state.operatingExpenses]);
 
-  const netOperatingProfit = monthlySummary.totalContribution - totalMonthlyExpenses;
+  const netOperatingProfit = monthlySummary.hasSalesData
+    ? monthlySummary.totalContribution - totalMonthlyExpenses
+    : null;
   const breakEvenRevenue =
     monthlySummary.weightedMarginPct > 0
       ? totalMonthlyExpenses / (monthlySummary.weightedMarginPct / 100)
@@ -1385,33 +1387,39 @@ export function App({
               <div className="kpi-box__sub">{state.salesPeriod ? `Ventas importadas para ${state.salesPeriod}` : 'Suma de productos con ventas cargadas'}</div>
             </div>
             <div className="kpi-box">
-              <div className="kpi-box__label">Facturación Mensual Proyectada</div>
+              <div className="kpi-box__label">Facturación del período</div>
               <div className="kpi-box__value">
-                {state.currency} {formatDecimal(monthlySummary.totalRevenue, 0)}
+                {monthlySummary.hasSalesData ? `${state.currency} ${formatDecimal(monthlySummary.totalRevenue, 0)}` : 'Sin datos'}
               </div>
               <div className="kpi-box__sub">
-                CMV Ingredientes: {state.currency} {formatDecimal(monthlySummary.totalCogs, 0)}
+                {monthlySummary.hasSalesData
+                  ? `CMV de ingredientes: ${state.currency} ${formatDecimal(monthlySummary.totalCogs, 0)}`
+                  : 'Importá ventas o cargá unidades por producto'}
               </div>
             </div>
             <div className="kpi-box">
-              <div className="kpi-box__label">Contribución Marginal Mensual</div>
+              <div className="kpi-box__label">Contribución marginal del período</div>
               <div className="kpi-box__value">
-                {state.currency} {formatDecimal(monthlySummary.totalContribution, 0)}
+                {monthlySummary.hasSalesData ? `${state.currency} ${formatDecimal(monthlySummary.totalContribution, 0)}` : 'Sin datos'}
               </div>
               <div className="kpi-box__sub">
-                Margen Bruto Ponderado: {formatDecimal(monthlySummary.weightedMarginPct, 1)}%
+                {monthlySummary.hasSalesData
+                  ? `Margen de contribución ponderado: ${formatDecimal(monthlySummary.weightedMarginPct, 1)}%`
+                  : 'Se calcula cuando hay ventas registradas'}
               </div>
             </div>
             <div className="kpi-box kpi-box--highlight">
-              <div className="kpi-box__label">Ganancia Neta Real (Tras Alquiler y Costos Fijos)</div>
+              <div className="kpi-box__label">Resultado operativo estimado</div>
               <div
                 className="kpi-box__value"
-                style={{ color: netOperatingProfit >= 0 ? '#4ade80' : '#f87171' }}
+                style={{ color: netOperatingProfit === null ? 'inherit' : netOperatingProfit >= 0 ? '#4ade80' : '#f87171' }}
               >
-                {state.currency} {formatDecimal(netOperatingProfit, 0)}
+                {netOperatingProfit === null ? 'Sin datos' : `${state.currency} ${formatDecimal(netOperatingProfit, 0)}`}
               </div>
               <div className="kpi-box__sub">
-                Descontando {state.currency} {formatDecimal(totalMonthlyExpenses, 0)} de gastos fijos (Pestaña 4)
+                {netOperatingProfit === null
+                  ? 'Requiere ventas registradas y gastos cargados'
+                  : `Contribución menos ${state.currency} ${formatDecimal(totalMonthlyExpenses, 0)} de gastos registrados. No incluye impuestos ni costos omitidos.`}
               </div>
             </div>
           </div>
