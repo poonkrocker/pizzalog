@@ -21,7 +21,16 @@ import {
   type ToolsWorkspaceState,
 } from './demoData';
 import { downloadCustomProfitKitXlsx } from './xlsxExporter';
-import { parseImportFile, type ParsedImportSheet } from './importFileParser';
+import { parseImportFile, type ParsedImportSheet } from '@pizzalog/price-list/file';
+import {
+  detectPriceListColumns,
+  extractPriceListItems,
+  matchPriceList,
+  rematch,
+  summarizeMatches,
+  type PriceListMatch,
+  type CatalogEntry,
+} from '@pizzalog/price-list';
 import { applyImportMappings, type ImportSheetMapping } from './importNormalization';
 
 const ALL_UNITS: UnitCode[] = ['g', 'kg', 'mg', 'lb', 'oz', 'ml', 'cc', 'L', 'fl_oz_us', 'gal_us', 'unit', 'dozen'];
@@ -74,7 +83,7 @@ export function App({
   const [state, setState] = useState<ToolsWorkspaceState>(initialWorkspace);
 
   const [activeTab, setActiveTab] = useState<
-    'ingredients' | 'subrecipes' | 'recipes' | 'expenses' | 'sales' | 'snapshots' | 'simulator' | 'cost-history' | 'menu-engineering' | 'production' | 'profit-simulator'
+    'ingredients' | 'subrecipes' | 'recipes' | 'expenses' | 'sales' | 'snapshots' | 'simulator' | 'cost-history' | 'menu-engineering' | 'production' | 'profit-simulator' | 'sync'
   >('recipes');
   const [simulationRecipeId, setSimulationRecipeId] = useState('');
   const [simulationBatches, setSimulationBatches] = useState(1);
@@ -84,6 +93,13 @@ export function App({
   const [snapshotNotice, setSnapshotNotice] = useState<string | null>(null);
   const [productionUnits, setProductionUnits] = useState<Record<string, number>>({});
   const [profitScenario, setProfitScenario] = useState({ units: 0, price: 0, variableCost: 0, fixedCosts: 0 });
+  const [syncStatus, setSyncStatus] = useState<{ linked: boolean; business_id?: number | null; business_name?: string | null; app_user_email?: string | null } | null>(null);
+  const [syncLinkEmail, setSyncLinkEmail] = useState('');
+  const [syncLinkPassword, setSyncLinkPassword] = useState('');
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
+  const [syncPreviewData, setSyncPreviewData] = useState<any | null>(null);
   const [profitProductId, setProfitProductId] = useState('');
   const [importError, setImportError] = useState<string | null>(null);
   const [importNotice, setImportNotice] = useState<string | null>(null);
@@ -100,6 +116,14 @@ export function App({
     note: string;
     mappingMode: 'local' | 'ai';
   } | null>(null);
+
+  // Estado del Actualizador de Precios por Lista de Proveedor
+  const [showPriceListModal, setShowPriceListModal] = useState(false);
+  const [priceListMatches, setPriceListMatches] = useState<PriceListMatch[]>([]);
+  const [priceListFileName, setPriceListFileName] = useState<string>('');
+  const [priceListSelectedRows, setPriceListSelectedRows] = useState<Record<number, boolean>>({});
+  const [priceListFilter, setPriceListFilter] = useState<'all' | 'matched' | 'unmatched' | 'warnings'>('all');
+  const [priceListLoading, setPriceListLoading] = useState(false);
 
   // Estado del Constructor Visual Interactivo (Modal)
   const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
@@ -554,6 +578,121 @@ export function App({
     setReplaceWorkspaceOnImport(false);
   }
 
+  async function handlePriceListUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPriceListLoading(true);
+    setImportError(null);
+    setPriceListFileName(file.name);
+
+    try {
+      const sheets = await parseImportFile(file, { raw: true });
+      if (!sheets.length || !sheets[0]?.rows?.length) {
+        throw new Error('No se encontraron filas con datos en la planilla.');
+      }
+      const sheet = sheets[0];
+      const columns = detectPriceListColumns(sheet.rows);
+      if (!columns) {
+        throw new Error('No se pudo identificar una columna de producto y otra de precio en el archivo.');
+      }
+      const items = extractPriceListItems(sheet.rows, columns);
+      if (!items.length) {
+        throw new Error('No se encontraron filas con productos y precios válidos.');
+      }
+
+      const catalog: CatalogEntry[] = state.catalog.ingredients.map((ing) => {
+        const priceRec = selectEffectivePurchasePrice(
+          ing.id,
+          state.catalog.purchase_prices,
+          state.catalog.as_of_date
+        );
+        return {
+          id: ing.id,
+          name: ing.name,
+          unit: ing.base_unit,
+          current_price_per_unit: priceRec?.purchase_price != null ? Number(priceRec.purchase_price) : null,
+        };
+      });
+
+      const matchedList = matchPriceList(items, catalog);
+      setPriceListMatches(matchedList);
+
+      const initialSelected: Record<number, boolean> = {};
+      matchedList.forEach((m, idx) => {
+        if (m.target_id && m.new_price_per_unit != null) {
+          initialSelected[idx] = true;
+        }
+      });
+      setPriceListSelectedRows(initialSelected);
+      setShowPriceListModal(true);
+    } catch (err: any) {
+      setImportError(err?.message || 'Error al procesar la lista de precios');
+    } finally {
+      setPriceListLoading(false);
+      e.target.value = '';
+    }
+  }
+
+  function handlePriceListTargetChange(index: number, newTargetId: string) {
+    const catalog: CatalogEntry[] = state.catalog.ingredients.map((ing) => {
+      const priceRec = selectEffectivePurchasePrice(
+        ing.id,
+        state.catalog.purchase_prices,
+        state.catalog.as_of_date
+      );
+      return {
+        id: ing.id,
+        name: ing.name,
+        unit: ing.base_unit,
+        current_price_per_unit: priceRec?.purchase_price != null ? Number(priceRec.purchase_price) : null,
+      };
+    });
+    const updated = rematch(priceListMatches[index]!, catalog, { target_id: newTargetId || null });
+    const next = [...priceListMatches];
+    next[index] = updated;
+    setPriceListMatches(next);
+
+    if (newTargetId) {
+      setPriceListSelectedRows((prev) => ({ ...prev, [index]: true }));
+    } else {
+      setPriceListSelectedRows((prev) => ({ ...prev, [index]: false }));
+    }
+  }
+
+  function confirmPriceListApply() {
+    const today = new Date().toISOString().slice(0, 10);
+    const toApply = priceListMatches.filter((m, idx) => priceListSelectedRows[idx] && m.target_id && m.new_price_per_unit != null);
+    if (!toApply.length) return;
+
+    setState((prev) => {
+      const newPrices = [...prev.catalog.purchase_prices];
+      toApply.forEach((m) => {
+        const ing = prev.catalog.ingredients.find((i) => i.id === m.target_id);
+        if (!ing) return;
+        newPrices.push({
+          ingredient_id: m.target_id!,
+          purchase_date: today,
+          purchase_price: m.item.price,
+          currency: prev.currency,
+          pack_quantity: m.presentation?.quantity ?? 1,
+          pack_unit: (m.presentation?.unit as UnitCode) ?? ing.base_unit,
+          yield_pct: 100,
+          supplier: priceListFileName ? `Lista: ${priceListFileName}` : undefined,
+        });
+      });
+      return {
+        ...prev,
+        catalog: {
+          ...prev.catalog,
+          purchase_prices: newPrices,
+        },
+      };
+    });
+
+    setImportNotice(`Se aplicaron ${toApply.length} precios actualizados con fecha de hoy (${today}) preservando el historial.`);
+    setShowPriceListModal(false);
+  }
+
   function handleImportJson(file: File) {
     setImportError(null);
     setImportNotice(null);
@@ -578,6 +717,103 @@ export function App({
       }
     };
     reader.readAsText(file);
+  }
+
+  async function loadSyncStatus() {
+    setSyncLoading(true);
+    setSyncError(null);
+    try {
+      const res = await fetch(`${API_URL}/tools/sync/status`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (data.ok && data.data) {
+        setSyncStatus(data.data);
+      }
+    } catch {
+      // Ignorar si no hay conexión
+    } finally {
+      setSyncLoading(false);
+    }
+  }
+
+  async function handleLinkApp(e: React.FormEvent) {
+    e.preventDefault();
+    setSyncLoading(true);
+    setSyncError(null);
+    setSyncNotice(null);
+    try {
+      const res = await fetch(`${API_URL}/tools/sync/link-app`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ email: syncLinkEmail, password: syncLinkPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Error al vincular cuenta');
+      setSyncStatus(data.data);
+      setSyncNotice(`¡Vinculación exitosa con "${data.data.business_name}"!`);
+      setSyncLinkPassword('');
+    } catch (err: any) {
+      setSyncError(err?.message || 'No se pudo vincular la cuenta');
+    } finally {
+      setSyncLoading(false);
+    }
+  }
+
+  async function handleSyncPreview(direction: 'to_app' | 'from_app') {
+    setSyncLoading(true);
+    setSyncError(null);
+    try {
+      const res = await fetch(`${API_URL}/tools/sync/preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ direction }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Error al obtener previsualización');
+      setSyncPreviewData(data.data);
+    } catch (err: any) {
+      setSyncError(err?.message || 'Error al previsualizar sincronización');
+    } finally {
+      setSyncLoading(false);
+    }
+  }
+
+  async function handleSyncApply(direction: 'to_app' | 'from_app') {
+    if (!confirm(direction === 'to_app'
+      ? '¿Exportar insumos y costos desde Tools hacia Pizzalog App?'
+      : '¿Importar catálogo de Pizzalog App a Tools?')) return;
+
+    setSyncLoading(true);
+    setSyncError(null);
+    setSyncNotice(null);
+    try {
+      const res = await fetch(`${API_URL}/tools/sync/apply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ direction }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Error al sincronizar');
+
+      if (direction === 'to_app') {
+        setSyncNotice(`Sincronización completada hacia Pizzalog App: ${data.data.created_supplies} insumos creados, ${data.data.updated_supplies} precios actualizados.`);
+      } else {
+        const wsRes = await fetch(`${API_URL}/tools/workspace`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const wsData = await wsRes.json();
+        if (wsData.ok && wsData.data?.workspace) {
+          setState(wsData.data.workspace);
+        }
+        setSyncNotice(`Sincronización completada desde Pizzalog App: se cargaron ${data.data.imported_ingredients} insumos y ${data.data.imported_prices} precios en tu espacio de trabajo.`);
+      }
+      setSyncPreviewData(null);
+    } catch (err: any) {
+      setSyncError(err?.message || 'Error al sincronizar');
+    } finally {
+      setSyncLoading(false);
+    }
   }
 
   // Cálculos mensuales de facturación, CMV, contribución marginal e Ingeniería de Menú
@@ -920,6 +1156,7 @@ export function App({
         <button type="button" className={`tab-btn ${activeTab === 'menu-engineering' ? 'tab-btn--active' : ''}`} onClick={() => setActiveTab('menu-engineering')}>Ingeniería de menú</button>
         <button type="button" className={`tab-btn ${activeTab === 'production' ? 'tab-btn--active' : ''}`} onClick={() => setActiveTab('production')}>Calculadora de producción</button>
         <button type="button" className={`tab-btn ${activeTab === 'profit-simulator' ? 'tab-btn--active' : ''}`} onClick={() => setActiveTab('profit-simulator')}>Simulador de rentabilidad</button>
+        <button type="button" className={`tab-btn ${activeTab === 'sync' ? 'tab-btn--active' : ''}`} onClick={() => { setActiveTab('sync'); void loadSyncStatus(); }}>🔄 Sync Pizzalog App</button>
       </nav>
 
       {activeTab === 'simulator' && (
@@ -1165,6 +1402,124 @@ export function App({
         </section>
       )}
 
+      {activeTab === 'sync' && (
+        <section className="card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <div>
+              <h2>Sincronización 1-Click con Pizzalog App</h2>
+              <p className="lead">
+                Conectá tu espacio de trabajo de Tools con tu restaurante en Pizzalog App para exportar o importar insumos, precios y recetas con un solo clic.
+              </p>
+            </div>
+            {syncStatus?.linked && (
+              <span className="badge" style={{ background: '#e8f5e9', color: '#2e7d32', padding: '6px 12px', borderRadius: 16, fontWeight: 600 }}>
+                🟢 Vinculado: {syncStatus.business_name}
+              </span>
+            )}
+          </div>
+
+          {syncNotice && (
+            <div className="alert-banner" style={{ background: '#e8f5e9', color: '#2e7d32', marginBottom: 16 }}>
+              {syncNotice}
+            </div>
+          )}
+          {syncError && (
+            <div className="alert-banner" style={{ background: '#ffebee', color: '#c62828', marginBottom: 16 }}>
+              {syncError}
+            </div>
+          )}
+
+          {!syncStatus?.linked ? (
+            <div style={{ maxWidth: 520, padding: 20, border: '1px solid #e0e0e0', borderRadius: 8, background: '#fafafa' }}>
+              <h3 style={{ marginTop: 0 }}>Vincular con tu cuenta de Pizzalog App</h3>
+              <p style={{ fontSize: '0.88rem', color: '#666' }}>
+                Ingresá las credenciales de tu usuario administrador en Pizzalog App para habilitar la sincronización directa.
+              </p>
+              <form onSubmit={handleLinkApp} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <label className="field">
+                  <span>Email en Pizzalog App</span>
+                  <input
+                    type="email"
+                    required
+                    value={syncLinkEmail}
+                    onChange={(e) => setSyncLinkEmail(e.target.value)}
+                    placeholder="admin@mitienda.com"
+                  />
+                </label>
+                <label className="field">
+                  <span>Contraseña en Pizzalog App</span>
+                  <input
+                    type="password"
+                    required
+                    value={syncLinkPassword}
+                    onChange={(e) => setSyncLinkPassword(e.target.value)}
+                  />
+                </label>
+                <button type="submit" className="btn btn--primary" disabled={syncLoading} style={{ alignSelf: 'flex-start' }}>
+                  {syncLoading ? 'Verificando...' : 'Vincular Restaurante'}
+                </button>
+              </form>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 20 }}>
+              <div style={{ padding: 20, border: '1px solid #e2e8f0', borderRadius: 8, background: '#fff' }}>
+                <h3 style={{ marginTop: 0 }}>📤 Exportar a Pizzalog App (Tools → App)</h3>
+                <p style={{ fontSize: '0.88rem', color: '#555', lineHeight: 1.5 }}>
+                  Envía los insumos creados en Tools y sus precios calculados directamente a tu catálogo de insumos de Pizzalog App. Si cambian costos, conservadoramente se invalidan los costos calculados de tus pizzas para que el sistema los recalcule.
+                </p>
+                <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    disabled={syncLoading}
+                    onClick={() => handleSyncPreview('to_app')}
+                  >
+                    Previsualizar
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    disabled={syncLoading}
+                    onClick={() => handleSyncApply('to_app')}
+                  >
+                    {syncLoading ? 'Sincronizando...' : 'Exportar a App ahora'}
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ padding: 20, border: '1px solid #e2e8f0', borderRadius: 8, background: '#fff' }}>
+                <h3 style={{ marginTop: 0 }}>📥 Importar desde Pizzalog App (App → Tools)</h3>
+                <p style={{ fontSize: '0.88rem', color: '#555', lineHeight: 1.5 }}>
+                  Trae todos tus insumos activos y precios vigentes cargados en tu Pizzalog App a este espacio de trabajo para simular variaciones de menú, costos de masa y proyecciones de rentabilidad sin afectar el sistema en vivo.
+                </p>
+                <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+                  <button
+                    type="button"
+                    className="btn btn--ocre"
+                    disabled={syncLoading}
+                    onClick={() => handleSyncApply('from_app')}
+                  >
+                    {syncLoading ? 'Importando...' : 'Traer catálogo desde App'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {syncPreviewData && (
+            <div style={{ marginTop: 20, padding: 16, background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: 8 }}>
+              <h4 style={{ margin: '0 0 10px 0' }}>Resumen de cambios detectados ({syncPreviewData.direction === 'to_app' ? 'Tools → App' : 'App → Tools'})</h4>
+              <ul style={{ margin: 0, paddingLeft: 20, fontSize: '0.88rem' }}>
+                <li>Insumos nuevos para dar de alta en App: <strong>{syncPreviewData.summary?.supplies_to_create ?? 0}</strong></li>
+                <li>Precios de insumos existentes a actualizar: <strong>{syncPreviewData.summary?.supplies_to_update_cost ?? 0}</strong></li>
+                <li>Insumos sin cambios: <strong>{syncPreviewData.summary?.supplies_unchanged ?? 0}</strong></li>
+                <li>Recetas en catálogo de Tools: <strong>{syncPreviewData.summary?.recipes_count ?? 0}</strong></li>
+              </ul>
+            </div>
+          )}
+        </section>
+      )}
+
       {activeTab === 'ingredients' && (
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
@@ -1174,9 +1529,20 @@ export function App({
                 La merma se aplica una única vez como rendimiento utilizable. Si falta el precio de compra, el insumo se marca INCOMPLETO (nunca $0 silencioso).
               </p>
             </div>
-            <button type="button" className="btn btn--primary" onClick={addIngredient}>
-              + Nuevo Insumo
-            </button>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <label className="btn btn--secondary" style={{ cursor: 'pointer', margin: 0 }}>
+                📋 Actualizar por lista de proveedor
+                <input
+                  type="file"
+                  accept=".xlsx,.csv"
+                  style={{ display: 'none' }}
+                  onChange={handlePriceListUpload}
+                />
+              </label>
+              <button type="button" className="btn btn--primary" onClick={addIngredient}>
+                + Nuevo Insumo
+              </button>
+            </div>
           </div>
           <div className="table-wrap">
             <table className="kit-table">
@@ -2067,6 +2433,234 @@ export function App({
             </div>
           </div>
         </>
+      )}
+
+      {/* Modal de Actualizador Rápido de Precios por Lista de Proveedor */}
+      {showPriceListModal && (
+        <div className="modal-backdrop">
+          <div className="modal-panel" style={{ maxWidth: '960px', width: '95%' }}>
+            <div className="modal-header">
+              <div>
+                <h3>Actualizar Precios por Lista de Proveedor</h3>
+                <small>{priceListFileName} · {priceListMatches.length} productos detectados en la lista</small>
+              </div>
+              <button type="button" className="btn" onClick={() => setShowPriceListModal(false)}>Cerrar</button>
+            </div>
+
+            {(() => {
+              const summary = summarizeMatches(priceListMatches);
+              const selectedCount = Object.values(priceListSelectedRows).filter(Boolean).length;
+              const filtered = priceListMatches
+                .map((m, idx) => ({ match: m, originalIndex: idx }))
+                .filter(({ match }) => {
+                  if (priceListFilter === 'matched') return Boolean(match.target_id);
+                  if (priceListFilter === 'unmatched') return !match.target_id;
+                  if (priceListFilter === 'warnings') return match.warnings.length > 0;
+                  return true;
+                });
+
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 12 }}>
+                  <div style={{
+                    display: 'flex',
+                    gap: 16,
+                    flexWrap: 'wrap',
+                    padding: '10px 14px',
+                    background: 'var(--color-bg-surface-2, #f5f5f5)',
+                    borderRadius: 6,
+                    fontSize: '0.85rem',
+                    alignItems: 'center',
+                  }}>
+                    <span>Total en lista: <strong>{summary.total}</strong></span>
+                    <span>Vinculados: <strong style={{ color: '#2e7d32' }}>{summary.matched}</strong></span>
+                    <span>Sin vincular: <strong style={{ color: summary.unmatched ? '#d32f2f' : '#666' }}>{summary.unmatched}</strong></span>
+                    <span>Subas: <strong style={{ color: '#c62828' }}>+{summary.increases}</strong></span>
+                    <span>Bajas: <strong style={{ color: '#2e7d32' }}>-{summary.decreases}</strong></span>
+                    {summary.average_variation_pct != null && (
+                      <span>Var. promedio: <strong>{summary.average_variation_pct > 0 ? `+${summary.average_variation_pct}%` : `${summary.average_variation_pct}%`}</strong></span>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 8, fontSize: '0.8rem' }}>
+                    <button
+                      type="button"
+                      className={`btn btn--sm ${priceListFilter === 'all' ? 'btn--primary' : 'btn--secondary'}`}
+                      onClick={() => setPriceListFilter('all')}
+                    >
+                      Todos ({priceListMatches.length})
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn btn--sm ${priceListFilter === 'matched' ? 'btn--primary' : 'btn--secondary'}`}
+                      onClick={() => setPriceListFilter('matched')}
+                    >
+                      Vinculados ({summary.matched})
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn btn--sm ${priceListFilter === 'unmatched' ? 'btn--primary' : 'btn--secondary'}`}
+                      onClick={() => setPriceListFilter('unmatched')}
+                    >
+                      Sin vincular ({summary.unmatched})
+                    </button>
+                    {summary.with_warnings > 0 && (
+                      <button
+                        type="button"
+                        className={`btn btn--sm ${priceListFilter === 'warnings' ? 'btn--primary' : 'btn--secondary'}`}
+                        style={{ color: '#e65100', borderColor: '#ffb74d' }}
+                        onClick={() => setPriceListFilter('warnings')}
+                      >
+                        ⚠️ Con advertencias ({summary.with_warnings})
+                      </button>
+                    )}
+                  </div>
+
+                  <div style={{ maxHeight: '420px', overflowY: 'auto', border: '1px solid #e0e0e0', borderRadius: 6 }}>
+                    <table className="kit-table" style={{ fontSize: '0.83rem', width: '100%' }}>
+                      <thead>
+                        <tr>
+                          <th style={{ width: 32 }}>
+                            <input
+                              type="checkbox"
+                              checked={selectedCount > 0 && selectedCount === priceListMatches.filter((m) => m.target_id && m.new_price_per_unit != null).length}
+                              onChange={(e) => {
+                                const checked = e.target.checked;
+                                const next: Record<number, boolean> = {};
+                                priceListMatches.forEach((m, idx) => {
+                                  if (m.target_id && m.new_price_per_unit != null) next[idx] = checked;
+                                });
+                                setPriceListSelectedRows(next);
+                              }}
+                            />
+                          </th>
+                          <th>Ítem en lista de proveedor</th>
+                          <th>Insumo en Tools</th>
+                          <th style={{ textAlign: 'right' }}>Precio lista</th>
+                          <th style={{ textAlign: 'right' }}>Precio actual</th>
+                          <th style={{ textAlign: 'right' }}>Nuevo unitario</th>
+                          <th style={{ textAlign: 'center' }}>Variación</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filtered.map(({ match, originalIndex }) => {
+                          const isSel = Boolean(priceListSelectedRows[originalIndex]);
+                          const ing = state.catalog.ingredients.find((i) => i.id === match.target_id);
+                          const isInc = match.variation_pct != null && match.variation_pct > 0.05;
+                          const isDec = match.variation_pct != null && match.variation_pct < -0.05;
+
+                          return (
+                            <tr key={originalIndex} style={{ background: !match.target_id ? '#fffdf7' : isSel ? '#fff' : '#fafafa' }}>
+                              <td style={{ textAlign: 'center' }}>
+                                <input
+                                  type="checkbox"
+                                  disabled={!match.target_id || match.new_price_per_unit == null}
+                                  checked={isSel}
+                                  onChange={(e) => {
+                                    setPriceListSelectedRows((prev) => ({
+                                      ...prev,
+                                      [originalIndex]: e.target.checked,
+                                    }));
+                                  }}
+                                />
+                              </td>
+                              <td>
+                                <div style={{ fontWeight: 600 }}>{match.item.raw_name}</div>
+                                {match.presentation && (
+                                  <div style={{ fontSize: '0.74rem', color: '#666' }}>
+                                    Envase: {match.presentation.quantity} {match.presentation.unit}
+                                  </div>
+                                )}
+                                {match.warnings.map((w, i) => (
+                                  <div key={i} style={{ fontSize: '0.72rem', color: '#e65100' }}>
+                                    ⚠️ {w}
+                                  </div>
+                                ))}
+                              </td>
+                              <td>
+                                <select
+                                  value={match.target_id ?? ''}
+                                  onChange={(e) => handlePriceListTargetChange(originalIndex, e.target.value)}
+                                  style={{
+                                    padding: '4px 6px',
+                                    fontSize: '0.8rem',
+                                    borderRadius: 4,
+                                    border: match.target_id ? '1px solid #ccc' : '1px solid #ffa726',
+                                    background: match.target_id ? '#fff' : '#fff8e1',
+                                    maxWidth: '220px',
+                                  }}
+                                >
+                                  <option value="">— Sin vincular —</option>
+                                  {state.catalog.ingredients.map((i) => (
+                                    <option key={i.id} value={i.id}>
+                                      {i.name} ({i.base_unit})
+                                    </option>
+                                  ))}
+                                </select>
+                                {match.target_id && (
+                                  <div style={{ fontSize: '0.7rem', color: '#777', marginTop: 2 }}>
+                                    Match: {match.source === 'exact' ? 'Exacto' : `Similar (${Math.round(match.confidence * 100)}%)`}
+                                  </div>
+                                )}
+                              </td>
+                              <td style={{ textAlign: 'right' }}>
+                                {state.currency} {formatDecimal(match.item.price, 2)}
+                              </td>
+                              <td style={{ textAlign: 'right', color: '#666' }}>
+                                {match.old_price_per_unit != null ? `${state.currency} ${formatDecimal(match.old_price_per_unit, 2)}` : '—'}
+                              </td>
+                              <td style={{ textAlign: 'right', fontWeight: 600 }}>
+                                {match.new_price_per_unit != null && ing
+                                  ? `${state.currency} ${formatDecimal(match.new_price_per_unit, 2)} / ${ing.base_unit}`
+                                  : '—'}
+                              </td>
+                              <td style={{ textAlign: 'center' }}>
+                                {match.variation_pct != null ? (
+                                  <span
+                                    style={{
+                                      padding: '2px 6px',
+                                      borderRadius: 4,
+                                      fontSize: '0.75rem',
+                                      fontWeight: 600,
+                                      background: isInc ? '#ffebee' : isDec ? '#e8f5e9' : '#f5f5f5',
+                                      color: isInc ? '#c62828' : isDec ? '#2e7d32' : '#616161',
+                                    }}
+                                  >
+                                    {match.variation_pct > 0 ? `+${match.variation_pct}%` : `${match.variation_pct}%`}
+                                  </span>
+                                ) : (
+                                  '—'
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
+                    <small style={{ color: '#666' }}>
+                      Se agregarán nuevos registros de compra con fecha de hoy. Tus snapshots y cálculos históricos permanecen inalterados.
+                    </small>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button type="button" className="btn btn--secondary" onClick={() => setShowPriceListModal(false)}>
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--primary"
+                        disabled={selectedCount === 0}
+                        onClick={confirmPriceListApply}
+                      >
+                        Aplicar {selectedCount} {selectedCount === 1 ? 'precio' : 'precios'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
       )}
 
       {/* Modal del Constructor Visual Interactivo de Recetas, Subrecetas y Masas */}

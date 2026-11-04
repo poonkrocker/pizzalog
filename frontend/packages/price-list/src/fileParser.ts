@@ -217,9 +217,9 @@ function normalizeRecipeMatrix(rows: string[][]): string[][] | null {
   );
   if (productRowIndex < 0 || ingredientHeaderIndex <= productRowIndex) return null;
 
-  const productRow = rows[productRowIndex];
+  const productRow = rows[productRowIndex] ?? [];
   const typeRow = rows[productRowIndex + 1] ?? [];
-  const ingredientHeader = rows[ingredientHeaderIndex];
+  const ingredientHeader = rows[ingredientHeaderIndex] ?? [];
   const ingredientNameColumn = ingredientHeader.findIndex((value) => norm(value) === 'ingrediente');
   const unitColumn = ingredientHeader.findIndex((value) => norm(value) === 'unidad');
   if (ingredientNameColumn < 0 || unitColumn < 0) return null;
@@ -258,7 +258,7 @@ function normalizeIngredientPriceRows(rows: string[][]): string[][] | null {
     row.some((value) => norm(value).includes('precio'))
   );
   if (headerIndex < 0) return null;
-  const header = rows[headerIndex];
+  const header = rows[headerIndex] ?? [];
   const nameColumn = header.findIndex((value) => norm(value) === 'ingrediente');
   const unitColumn = header.findIndex((value) => norm(value) === 'unidad');
   const priceColumn = header.findIndex((value) => norm(value).includes('precio'));
@@ -407,7 +407,7 @@ function evaluateSafeArithmeticFormula(formula: string): string | null {
   return result !== null && index === source.length ? String(result) : null;
 }
 
-async function parseXlsx(buffer: ArrayBuffer): Promise<ParsedImportSheet[]> {
+async function parseXlsx(buffer: ArrayBuffer, options: ParseImportOptions = {}): Promise<ParsedImportSheet[]> {
   const files = await unzip(buffer);
   const fileNames = Array.from(files.keys()).map((name) => name.toLowerCase());
   if (fileNames.some((name) => name.includes('vbaproject') || name.startsWith('xl/externallinks/'))) {
@@ -482,7 +482,9 @@ async function parseXlsx(buffer: ArrayBuffer): Promise<ParsedImportSheet[]> {
         totalRows += 1;
       }
     }
-    if (rows.length) {
+    if (rows.length && options.raw) {
+      sheets.push({ name, rows, ...(hasFormulaCells ? { warnings: ['La hoja contiene fórmulas; se conservaron sus valores guardados.'] } : {}) });
+    } else if (rows.length) {
       const matrixRows = normalizeRecipeMatrix(rows);
       const ingredientPriceRows = matrixRows ? null : normalizeIngredientPriceRows(rows);
       const normalizedRows = matrixRows ?? ingredientPriceRows ?? rows;
@@ -507,7 +509,12 @@ async function parseXlsx(buffer: ArrayBuffer): Promise<ParsedImportSheet[]> {
   return sheets;
 }
 
-export async function parseImportFile(file: File): Promise<ParsedImportSheet[]> {
+export interface ParseImportOptions {
+  /** Devuelve las filas tal cual están en la planilla, sin normalizar recetas ni tablas de insumos. */
+  raw?: boolean;
+}
+
+export async function parseImportFile(file: File, options: ParseImportOptions = {}): Promise<ParsedImportSheet[]> {
   if (file.size === 0) throw new Error('El archivo está vacío');
   if (file.size > MAX_FILE_BYTES) throw new Error('El archivo supera el límite seguro de 20 MB');
   const extension = file.name.toLowerCase().split('.').pop();
@@ -521,7 +528,7 @@ export async function parseImportFile(file: File): Promise<ParsedImportSheet[]> 
     return [{ name: file.name, rows }];
   }
   if (extension === 'xlsx') {
-    const sheets = await parseXlsx(await file.arrayBuffer());
+    const sheets = await parseXlsx(await file.arrayBuffer(), options);
     if (!sheets.length) throw new Error('No se encontraron hojas con datos en el XLSX');
     return sheets;
   }

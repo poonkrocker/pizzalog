@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@pizzalog/cost-engine": "workspace:*",
+    "@pizzalog/price-list": "workspace:*",
     "@pizzalog/cost-engine-fixtures": "workspace:*",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"

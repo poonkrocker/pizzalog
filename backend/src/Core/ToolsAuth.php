@@ -28,7 +28,7 @@ class ToolsAuth
             }
 
             $stmt = Database::pdo()->prepare(
-                'SELECT ta.id, ta.email, ta.name, ta.is_active, ta.expires_at,
+                'SELECT ta.id, ta.email, ta.name, ta.is_active, ta.expires_at, ta.business_id,
                         ta.app_user_id, u.is_active AS app_user_active, u.role AS app_user_role,
                         u.email AS app_user_email
                    FROM tools_accounts ta
@@ -61,6 +61,8 @@ class ToolsAuth
                 'tools_account_id' => (int) $account['id'],
                 'tools_email' => (string) $account['email'],
                 'tools_name' => (string) $account['name'],
+                'business_id' => !empty($account['business_id']) ? (int) $account['business_id'] : null,
+                'app_user_id' => !empty($account['app_user_id']) ? (int) $account['app_user_id'] : null,
             ];
         };
     }

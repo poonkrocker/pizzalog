@@ -1,5 +1,5 @@
 import { areUnitsCompatible, type BakersDoughSpec, type Ingredient, type PurchasePrice, type Recipe, type UnitCode } from '@pizzalog/cost-engine';
-import type { ParsedDoughProfile, ParsedImportSheet } from './importFileParser';
+import type { ParsedDoughProfile, ParsedImportSheet } from '@pizzalog/price-list/file';
 import type { ToolsWorkspaceState, OperatingExpenseItem } from './demoData';
 
 export interface ImportSheetMapping {

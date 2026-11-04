@@ -41,7 +41,6 @@ async function restoreOrMigrateWorkspace(token: string): Promise<ToolsWorkspaceS
     method: 'PUT',
     body: JSON.stringify({ workspace: legacy }),
   });
-  // Delete the old browser copy only after the server confirms it was saved.
   removeLegacyWorkspace();
   return legacy;
 }
@@ -50,10 +49,10 @@ function readSessionToken(): string | null {
   try { return sessionStorage.getItem(TOKEN_KEY); } catch { return null; }
 }
 function writeSessionToken(token: string): void {
-  try { sessionStorage.setItem(TOKEN_KEY, token); } catch { /* Keep the current login in memory for this tab. */ }
+  try { sessionStorage.setItem(TOKEN_KEY, token); } catch { /* Keep current login in memory */ }
 }
 function clearSessionToken(): void {
-  try { sessionStorage.removeItem(TOKEN_KEY); } catch { /* Storage may be disabled. */ }
+  try { sessionStorage.removeItem(TOKEN_KEY); } catch { /* Storage may be disabled */ }
 }
 
 type Account = { id: number; email: string; name: string; expires_at?: string | null };
@@ -93,12 +92,35 @@ export function ToolsAuthGate() {
   const [account, setAccount] = useState<Account | null>(null);
   const [workspace, setWorkspace] = useState<ToolsWorkspaceState | null>(null);
   const [loading, setLoading] = useState(true);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [workspaceError, setWorkspaceError] = useState('');
 
+  // Form states
+  const [mode, setMode] = useState<'login' | 'activate' | 'reset' | 'forgot'>('login');
+  const [actionToken, setActionToken] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+
   useEffect(() => {
+    // Detectar parámetros URL (?activate=TOKEN o ?reset=TOKEN)
+    const params = new URLSearchParams(window.location.search);
+    const act = params.get('activate');
+    const rst = params.get('reset');
+    if (act) {
+      setMode('activate');
+      setActionToken(act);
+      setLoading(false);
+      return;
+    }
+    if (rst) {
+      setMode('reset');
+      setActionToken(rst);
+      setLoading(false);
+      return;
+    }
+
     const saved = readSessionToken();
     if (saved === null) {
       setLoading(false);
@@ -136,6 +158,7 @@ export function ToolsAuthGate() {
   async function handleLogin(event: FormEvent) {
     event.preventDefault();
     setError('');
+    setNotice('');
     setWorkspaceError('');
     setLoading(true);
     try {
@@ -154,6 +177,63 @@ export function ToolsAuthGate() {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo iniciar sesión');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleActivateOrReset(event: FormEvent) {
+    event.preventDefault();
+    if (password.length < 8) {
+      setError('La contraseña debe tener al menos 8 caracteres');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError('Las contraseñas no coinciden');
+      return;
+    }
+
+    setError('');
+    setNotice('');
+    setLoading(true);
+    const endpoint = mode === 'activate' ? '/tools/auth/activate' : '/tools/auth/reset-password';
+
+    try {
+      const result = await api<{ token: string; account: Account }>(endpoint, undefined, {
+        method: 'POST',
+        body: JSON.stringify({ token: actionToken, password }),
+      });
+      // Limpiar query params de la URL para que no quede el token expuesto
+      window.history.replaceState({}, document.title, window.location.pathname);
+      writeSessionToken(result.token);
+      setToken(result.token);
+      setAccount(result.account);
+      try {
+        const restoredWorkspace = await restoreOrMigrateWorkspace(result.token);
+        setWorkspace(restoredWorkspace);
+      } catch (err) {
+        setWorkspaceError(err instanceof Error ? err.message : 'No se pudo recuperar el espacio de trabajo');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo procesar la solicitud');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleForgotPassword(event: FormEvent) {
+    event.preventDefault();
+    setError('');
+    setNotice('');
+    setLoading(true);
+    try {
+      await api<{ sent: boolean }>('/tools/auth/forgot-password', undefined, {
+        method: 'POST',
+        body: JSON.stringify({ email, environment: TOOLS_ENVIRONMENT }),
+      });
+      setNotice('Si el correo corresponde a una cuenta activa, te enviamos un enlace para restablecer tu contraseña.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo procesar la solicitud');
     } finally {
       setLoading(false);
     }
@@ -178,7 +258,12 @@ export function ToolsAuthGate() {
     setToken(null);
     setAccount(null);
     setWorkspace(null);
+    setEmail('');
     setPassword('');
+    setConfirmPassword('');
+    setError('');
+    setNotice('');
+    setMode('login');
   }
 
   if (loading) {
@@ -206,12 +291,106 @@ export function ToolsAuthGate() {
     return <App token={token} account={account} initialWorkspace={workspace} onLogout={logout} />;
   }
 
+  if (mode === 'activate' || mode === 'reset') {
+    return (
+      <main className="tools-auth">
+        <form className="tools-auth-card" onSubmit={handleActivateOrReset}>
+          <div className="tools-auth-kicker">PIZZALOG / TOOLS</div>
+          <h1>{mode === 'activate' ? '¡Bienvenido! Creá tu contraseña' : 'Restablecer contraseña'}</h1>
+          <p>
+            {mode === 'activate'
+              ? 'Definí la contraseña para acceder a tu Restaurant Profit Kit.'
+              : 'Ingresá tu nueva contraseña para volver a acceder a tu cuenta.'}
+          </p>
+          <label className="field">
+            <span>Nueva Contraseña (mínimo 8 caracteres)</span>
+            <input
+              type="password"
+              autoComplete="new-password"
+              required
+              minLength={8}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span>Confirmar Contraseña</span>
+            <input
+              type="password"
+              autoComplete="new-password"
+              required
+              minLength={8}
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+            />
+          </label>
+          {error && <div className="alert-banner">{error}</div>}
+          <button className="btn btn--primary tools-auth-submit" type="submit" disabled={loading}>
+            {loading ? 'Guardando…' : mode === 'activate' ? 'Activar cuenta y acceder' : 'Guardar nueva contraseña'}
+          </button>
+          <div style={{ marginTop: '1rem', textAlign: 'center' }}>
+            <button
+              type="button"
+              className="link"
+              onClick={() => {
+                setMode('login');
+                window.history.replaceState({}, document.title, window.location.pathname);
+              }}
+            >
+              Volver al inicio de sesión
+            </button>
+          </div>
+        </form>
+      </main>
+    );
+  }
+
+  if (mode === 'forgot') {
+    return (
+      <main className="tools-auth">
+        <form className="tools-auth-card" onSubmit={handleForgotPassword}>
+          <div className="tools-auth-kicker">PIZZALOG / TOOLS</div>
+          <h1>Recuperar Contraseña</h1>
+          <p>Ingresá tu email registrado y te enviaremos un enlace seguro para restablecer tu contraseña.</p>
+          <label className="field">
+            <span>Email</span>
+            <input
+              type="email"
+              autoComplete="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </label>
+          {error && <div className="alert-banner">{error}</div>}
+          {notice && <div className="alert-banner alert-banner--success" style={{ background: '#e8f5e9', color: '#2e7d32' }}>{notice}</div>}
+          <button className="btn btn--primary tools-auth-submit" type="submit" disabled={loading}>
+            {loading ? 'Enviando…' : 'Enviar enlace de recuperación'}
+          </button>
+          <div style={{ marginTop: '1rem', textAlign: 'center' }}>
+            <button
+              type="button"
+              className="link"
+              onClick={() => {
+                setMode('login');
+                setError('');
+                setNotice('');
+              }}
+            >
+              ← Volver al inicio de sesión
+            </button>
+          </div>
+        </form>
+      </main>
+    );
+  }
+
   return (
     <main className="tools-auth">
       <form className="tools-auth-card" onSubmit={handleLogin}>
         <div className="tools-auth-kicker">PIZZALOG / TOOLS</div>
         <h1>Restaurant Profit Kit</h1>
-        <p>Ingresá con la cuenta que recibiste al adquirir el producto.</p>
+        <p>Ingresá con la cuenta que recibiste al adquirir el producto o vinculá tu usuario de Pizzalog App.</p>
         <label className="field">
           <span>Email</span>
           <input type="email" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} />
@@ -224,7 +403,23 @@ export function ToolsAuthGate() {
         <button className="btn btn--primary tools-auth-submit" type="submit" disabled={loading}>
           {loading ? 'Ingresando…' : 'Ingresar a mis herramientas'}
         </button>
-        <small>¿Todavía no tenés acceso? La cuenta se habilita después de la compra.</small>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '1rem', fontSize: '0.82rem' }}>
+          <button
+            type="button"
+            className="link"
+            onClick={() => {
+              setMode('forgot');
+              setError('');
+              setNotice('');
+            }}
+          >
+            ¿Olvidaste tu contraseña?
+          </button>
+          <span style={{ color: '#888' }}>Tools v1.0</span>
+        </div>
+        <small style={{ marginTop: '0.75rem', display: 'block', color: '#666' }}>
+          ¿Todavía no tenés acceso? La cuenta se habilita automáticamente al suscribirte.
+        </small>
       </form>
     </main>
   );
