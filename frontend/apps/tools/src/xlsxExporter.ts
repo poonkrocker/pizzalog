@@ -418,7 +418,7 @@ export function downloadCustomProfitKitXlsx(state: ToolsWorkspaceState): void {
     const monthlyRev = ok && unitsSold !== null ? evalPrice * unitsSold : '';
     const monthlyContrib = ok && unitsSold !== null ? grossProfit * unitsSold : '';
 
-    if (ok) {
+    if (ok && unitsSold !== null) {
       totalMonthlyRevenue += monthlyRev;
       totalMonthlyContribution += monthlyContrib;
     }
