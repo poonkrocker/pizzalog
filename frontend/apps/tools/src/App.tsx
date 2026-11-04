@@ -78,6 +78,7 @@ export function App({
   >('recipes');
   const [simulationRecipeId, setSimulationRecipeId] = useState('');
   const [simulationBatches, setSimulationBatches] = useState(1);
+  const [simulationComponentPct, setSimulationComponentPct] = useState<Record<string, number>>({});
   const [productionUnits, setProductionUnits] = useState<Record<string, number>>({});
   const [profitScenario, setProfitScenario] = useState({ units: 0, price: 0, variableCost: 0, fixedCosts: 0 });
   const [profitProductId, setProfitProductId] = useState('');
@@ -904,14 +905,33 @@ export function App({
             const selected = state.catalog.recipes.find((r) => r.id === (simulationRecipeId || state.catalog.recipes.find((x) => x.recipe_type === 'product')?.id));
             if (!selected) return <p className="empty-state">Todavía no hay recetas para simular. Creá una receta en la pestaña correspondiente.</p>;
             const result = recipeResults.get(selected.id);
+            const adjustable = selected.components ?? [];
+            const simulatedRecipes = state.catalog.recipes.map((recipe) => recipe.id !== selected.id ? recipe : ({
+              ...recipe,
+              components: adjustable.map((component, index) => ({
+                ...component,
+                quantity: component.quantity * (simulationComponentPct[`${selected.id}:${index}`] ?? 100) / 100,
+              })),
+            }));
+            let simulatedResult: ReturnType<CostEngine['calculateRecipeCost']> | null = null;
+            try {
+              simulatedResult = new CostEngine({ ...state.catalog, recipes: simulatedRecipes }).calculateRecipeCost(selected.id);
+            } catch { simulatedResult = null; }
             if (!result || result.status !== 'complete') return <div className="alert-banner">No se puede calcular esta receta: faltan precios o componentes válidos. Revisá la ficha y los insumos.</div>;
-            const total = (result.raw_batch_cost ?? 0) * simulationBatches;
-            return <div className="kpi-grid" style={{ marginTop: 16 }}>
-              <div className="kpi-card"><span>Costo por rendimiento</span><strong>{state.currency} {formatDecimal(result.raw_batch_cost ?? 0, 2)}</strong></div>
-              <div className="kpi-card"><span>Rendimiento por tanda</span><strong>{formatDecimal(selected.yield_quantity, 2)} {selected.yield_unit}</strong></div>
-              <div className="kpi-card"><span>Costo de la simulación</span><strong>{state.currency} {formatDecimal(total, 2)}</strong></div>
-              <div className="kpi-card"><span>Rendimiento total estimado</span><strong>{formatDecimal(selected.yield_quantity * simulationBatches, 2)} {selected.yield_unit}</strong></div>
-            </div>;
+            const simulatedCost = simulatedResult?.status === 'complete' ? simulatedResult.raw_batch_cost : null;
+            const total = (simulatedCost ?? 0) * simulationBatches;
+            return <>
+              {adjustable.length > 0 ? <div className="table-wrap" style={{ marginTop: 16 }}><table className="kit-table"><thead><tr><th>Componente</th><th>Cantidad original</th><th>Variación simulada (%)</th></tr></thead><tbody>
+                {result.components.map((component, index) => <tr key={`${selected.id}:${index}`}><td>{component.name}</td><td>{formatDecimal(component.quantity, 3)} {component.unit}</td><td><input aria-label={`Variación de ${component.name}`} type="number" min="0" step="5" value={simulationComponentPct[`${selected.id}:${index}`] ?? 100} onChange={(e) => setSimulationComponentPct((prev) => ({ ...prev, [`${selected.id}:${index}`]: Math.max(0, Number(e.target.value) || 0) }))} /></td></tr>)}
+              </tbody></table></div> : <p className="lead">Esta receta usa una fórmula panadera parametrizada. La simulación de cambios por componente todavía no está disponible para ese tipo de fórmula.</p>}
+              {simulatedCost === null && <div className="alert-banner">La variación produce un costo incompleto. Revisá unidades, cantidades y precios.</div>}
+              <div className="kpi-grid" style={{ marginTop: 16 }}>
+                <div className="kpi-card"><span>Costo original por tanda</span><strong>{state.currency} {formatDecimal(result.raw_batch_cost ?? 0, 2)}</strong></div>
+                <div className="kpi-card"><span>Costo simulado por tanda</span><strong>{simulatedCost === null ? 'Incompleto' : `${state.currency} ${formatDecimal(simulatedCost, 2)}`}</strong></div>
+                <div className="kpi-card"><span>Costo de la producción simulada</span><strong>{simulatedCost === null ? 'Incompleto' : `${state.currency} ${formatDecimal(total, 2)}`}</strong></div>
+                <div className="kpi-card"><span>Rendimiento total estimado</span><strong>{formatDecimal(selected.yield_quantity * simulationBatches, 2)} {selected.yield_unit}</strong></div>
+              </div>
+            </>;
           })()}
         </section>
       )}
