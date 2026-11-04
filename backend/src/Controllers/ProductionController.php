@@ -67,6 +67,10 @@ class ProductionController
         $flourWhitePct   = max(0, (float) ($b['flour_white_pct'] ?? 100));
         $flourIntegPct   = max(0, (float) ($b['flour_integral_pct'] ?? 0));
         $flourSemolaPct  = max(0, (float) ($b['flour_semola_pct'] ?? 0));
+        if (!preg_match('/fain[aá]/iu', $name) && abs(($flourWhitePct + $flourIntegPct + $flourSemolaPct) - 100.0) > 0.01) {
+            Response::error('La suma de los porcentajes de harina debe ser 100%', 422);
+            return;
+        }
         $costPerKg       = max(0, (float) ($b['cost_per_kg'] ?? 932.30));
         try {
             $ingredientMap = $this->normalizeIngredientMap($pdo, $bid, $b['ingredient_map'] ?? null);
@@ -132,6 +136,10 @@ class ProductionController
         $flourWhitePct   = max(0, (float) ($b['flour_white_pct'] ?? 100));
         $flourIntegPct   = max(0, (float) ($b['flour_integral_pct'] ?? 0));
         $flourSemolaPct  = max(0, (float) ($b['flour_semola_pct'] ?? 0));
+        if (!preg_match('/fain[aá]/iu', $name) && abs(($flourWhitePct + $flourIntegPct + $flourSemolaPct) - 100.0) > 0.01) {
+            Response::error('La suma de los porcentajes de harina debe ser 100%', 422);
+            return;
+        }
         $costPerKg       = max(0, (float) ($b['cost_per_kg'] ?? 932.30));
         try {
             $ingredientMap = $this->normalizeIngredientMap($pdo, $bid, $b['ingredient_map'] ?? null);
@@ -215,6 +223,14 @@ class ProductionController
                 KEY idx_dp_business (business_id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
         );
+
+        try {
+            if (!$pdo->query("SHOW COLUMNS FROM dough_profiles LIKE 'ingredient_map'")->fetch()) {
+                $pdo->exec("ALTER TABLE dough_profiles ADD COLUMN ingredient_map JSON NULL AFTER cost_per_kg");
+            }
+        } catch (\Throwable $e) {
+            // Ignorar si la columna ya existe o no hay permisos de ALTER
+        }
 
         // Si no hay perfiles para este negocio, sembrar perfiles por defecto
         $stmt = $pdo->prepare('SELECT COUNT(*) FROM dough_profiles WHERE business_id = ? AND is_active = 1');

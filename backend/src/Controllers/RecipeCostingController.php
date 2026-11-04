@@ -16,6 +16,7 @@ class RecipeCostingController
      */
     private function ensureTables(\PDO $pdo): void
     {
+        ProductController::ensureColumns();
         $pdo->exec("CREATE TABLE IF NOT EXISTS recipe_studio_recipes (
           id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, business_id BIGINT UNSIGNED NOT NULL,
           linked_product_id BIGINT UNSIGNED NULL, name VARCHAR(160) NOT NULL,

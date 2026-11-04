@@ -54,6 +54,7 @@ jobs:
           TARGET_BRANCH: ${{ github.ref_name }}
         run: |
           test -f frontend/apps/tools/dist/index.html
+          rm -rf tools/assets
           cp -a frontend/apps/tools/dist/. tools/
           git add tools
           if git diff --cached --quiet; then

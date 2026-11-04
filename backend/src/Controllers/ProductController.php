@@ -29,6 +29,18 @@ class ProductController
             if (!$col) {
                 $pdo->exec("ALTER TABLE products ADD COLUMN show_in_salon TINYINT(1) NOT NULL DEFAULT 1 AFTER show_online");
             }
+            if (!$pdo->query("SHOW COLUMNS FROM products LIKE 'cost_is_current'")->fetch()) {
+                $pdo->exec("ALTER TABLE products ADD COLUMN cost_is_current TINYINT(1) NOT NULL DEFAULT 0 AFTER cost");
+            }
+            if (!$pdo->query("SHOW COLUMNS FROM products LIKE 'cost_engine_version'")->fetch()) {
+                $pdo->exec("ALTER TABLE products ADD COLUMN cost_engine_version VARCHAR(32) NULL AFTER cost_is_current");
+            }
+            if (!$pdo->query("SHOW COLUMNS FROM products LIKE 'cost_input_hash'")->fetch()) {
+                $pdo->exec("ALTER TABLE products ADD COLUMN cost_input_hash VARCHAR(64) NULL AFTER cost_engine_version");
+            }
+            if (!$pdo->query("SHOW COLUMNS FROM products LIKE 'cost_calculated_at'")->fetch()) {
+                $pdo->exec("ALTER TABLE products ADD COLUMN cost_calculated_at DATETIME NULL AFTER cost_input_hash");
+            }
             self::$ensuredColumns = true;
         } catch (\Throwable $e) {
             // Ignorar si no hay permisos de alter table

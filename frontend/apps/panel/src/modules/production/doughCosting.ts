@@ -30,6 +30,11 @@ function dimensionForUnit(unit: UnitCode): Ingredient['base_dimension'] {
   return 'count';
 }
 
+function round(value: number, decimals = 2): number {
+  const factor = 10 ** decimals;
+  return Math.round((value + Number.EPSILON) * factor) / factor;
+}
+
 function buildCatalog(supplies: SupplyItem[]): CostCatalog {
   const ingredients: Ingredient[] = [];
   const purchase_prices: PurchasePrice[] = [];
@@ -37,11 +42,14 @@ function buildCatalog(supplies: SupplyItem[]): CostCatalog {
     const unit = toEngineUnit(supply.unit);
     if (!unit) continue;
     const id = `supply_${supply.id}`;
+    const isOil = /aceite|oliva/i.test(supply.name);
+    const isWater = /\bagua\b/i.test(supply.name);
     ingredients.push({
       id,
       name: supply.name,
       base_dimension: dimensionForUnit(unit),
       base_unit: unit,
+      ...(isOil ? { density_g_per_ml: 0.92 } : isWater ? { density_g_per_ml: 1.0 } : {}),
       is_active: true,
     });
     if (supply.cost !== null && Number.isFinite(supply.cost) && supply.cost > 0) {
@@ -62,13 +70,14 @@ function supplyRef(
   profile: DoughProfile,
   key: keyof NonNullable<DoughProfile['ingredient_map']>,
   supplies: SupplyItem[],
-  requiredDimension: Ingredient['base_dimension'],
+  requiredDimension: Ingredient['base_dimension'] | Array<Ingredient['base_dimension']>,
 ): string {
   const id = profile.ingredient_map?.[key];
   if (typeof id !== 'number' || id <= 0) return `missing_${key}`;
   const supply = supplies.find((item) => item.id === id);
   const unit = supply ? toEngineUnit(supply.unit) : null;
-  return unit && dimensionForUnit(unit) === requiredDimension ? `supply_${id}` : `missing_${key}`;
+  const allowed = Array.isArray(requiredDimension) ? requiredDimension : [requiredDimension];
+  return unit && allowed.includes(dimensionForUnit(unit)) ? `supply_${id}` : `missing_${key}`;
 }
 
 function makeCostEngineResult(
@@ -110,18 +119,18 @@ export function calculateDoughWithCostEngine(
       units_count: safeUnits,
       chickpea_flour_ingredient_id: supplyRef(profile, 'chickpea_flour_id', supplies, 'mass'),
       salt_ingredient_id: supplyRef(profile, 'salt_id', supplies, 'mass'),
-      oil_ingredient_id: supplyRef(profile, 'oil_id', supplies, 'volume'),
+      oil_ingredient_id: supplyRef(profile, 'oil_id', supplies, ['volume', 'mass']),
       ...(typeof waterId === 'number' && waterId > 0
-        ? { water_ingredient_id: waterUnit && dimensionForUnit(waterUnit) === 'mass' ? `supply_${waterId}` : 'missing_water_id' }
+        ? { water_ingredient_id: waterUnit && ['mass', 'volume'].includes(dimensionForUnit(waterUnit)) ? `supply_${waterId}` : 'missing_water_id' }
         : {}),
     };
     const expanded = expandFainaSpec(fainaSpec);
     const result = makeCostEngineResult(profile, supplies, expanded.components, safeUnits, 'unit');
-    const flourKg = expanded.chickpeaFlourG / 1000;
-    const waterLiters = expanded.waterG / 1000;
-    const saltGrams = expanded.saltG;
-    const oilLiters = expanded.oilMl / 1000;
-    const totalWeightKg = expanded.totalWeightG / 1000;
+    const flourKg = round(expanded.chickpeaFlourG / 1000, 3);
+    const waterLiters = round(expanded.waterG / 1000, 3);
+    const saltGrams = round(expanded.saltG, 1);
+    const oilLiters = round(expanded.oilMl / 1000, 3);
+    const totalWeightKg = round(expanded.totalWeightG / 1000, 2);
     const totalCost = result.raw_batch_cost;
     const whatsapp = [
       `🥣 *RECETA FAINÁ - ${safeUnits} MOLDES*`,
@@ -136,7 +145,7 @@ export function calculateDoughWithCostEngine(
     return {
       type: 'faina',
       total_weight_kg: totalWeightKg,
-      weight_per_unit_g: expanded.chickpeaFlourG / safeUnits,
+      weight_per_unit_g: round(expanded.chickpeaFlourG / safeUnits, 1),
       units: safeUnits,
       batches: safeBatches,
       total: {
@@ -147,10 +156,10 @@ export function calculateDoughWithCostEngine(
       },
       per_batch: {
         batches: safeBatches,
-        chickpea_flour_kg: perBatch(flourKg),
-        water_liters: perBatch(waterLiters),
-        salt_grams: perBatch(saltGrams),
-        oil_liters: perBatch(oilLiters),
+        chickpea_flour_kg: round(perBatch(flourKg), 3),
+        water_liters: round(perBatch(waterLiters), 3),
+        salt_grams: round(perBatch(saltGrams), 1),
+        oil_liters: round(perBatch(oilLiters), 3),
       },
       cost: {
         total: totalCost,
@@ -195,7 +204,7 @@ export function calculateDoughWithCostEngine(
     sugar_pct: profile.sugar_pct,
     sugar_ingredient_id: supplyRef(profile, 'sugar_id', supplies, 'mass'),
     oil_pct: profile.oil_pct,
-    oil_ingredient_id: supplyRef(profile, 'oil_id', supplies, 'mass'),
+    oil_ingredient_id: supplyRef(profile, 'oil_id', supplies, ['mass', 'volume']),
   };
   const expanded = expandBakersDoughSpec(spec);
   const engineRecipe: Recipe = {
@@ -212,24 +221,24 @@ export function calculateDoughWithCostEngine(
     recipes: [engineRecipe],
   }).calculateRecipeCost(engineRecipe.id);
 
-  const flourWhiteKg = (expanded.flourBreakdown.find((item) => item.index === 0)?.quantityG ?? 0) / 1000;
-  const flourIntegralKg = (expanded.flourBreakdown.find((item) => item.index === 1)?.quantityG ?? 0) / 1000;
-  const flourSemolaKg = (expanded.flourBreakdown.find((item) => item.index === 2)?.quantityG ?? 0) / 1000;
-  const flourKg = expanded.flourTotalG / 1000;
-  const waterKg = expanded.waterTotalG / 1000;
-  const bigaFlourKg = expanded.biga.flourG / 1000;
-  const bigaWaterKg = expanded.biga.waterG / 1000;
+  const flourWhiteKg = round((expanded.flourBreakdown.find((item) => item.index === 0)?.quantityG ?? 0) / 1000, 3);
+  const flourIntegralKg = round((expanded.flourBreakdown.find((item) => item.index === 1)?.quantityG ?? 0) / 1000, 3);
+  const flourSemolaKg = round((expanded.flourBreakdown.find((item) => item.index === 2)?.quantityG ?? 0) / 1000, 3);
+  const flourKg = round(expanded.flourTotalG / 1000, 3);
+  const waterKg = round(expanded.waterTotalG / 1000, 3);
+  const bigaFlourKg = round(expanded.biga.flourG / 1000, 3);
+  const bigaWaterKg = round(expanded.biga.waterG / 1000, 3);
   const bigaYeastKg = expanded.biga.yeastG / 1000;
-  const poolishFlourKg = expanded.poolish.flourG / 1000;
-  const poolishWaterKg = expanded.poolish.waterG / 1000;
+  const poolishFlourKg = round(expanded.poolish.flourG / 1000, 3);
+  const poolishWaterKg = round(expanded.poolish.waterG / 1000, 3);
   const poolishYeastKg = expanded.poolish.yeastG / 1000;
-  const saltG = expanded.direct.saltG;
-  const directYeastG = expanded.direct.yeastG;
-  const sugarG = expanded.direct.sugarG;
-  const oilG = expanded.direct.oilG;
-  const finalFlourKg = expanded.final.flourG / 1000;
-  const finalWaterKg = expanded.final.waterG / 1000;
-  const totalWeightKg = expanded.yieldQuantityG / 1000;
+  const saltG = round(expanded.direct.saltG, 1);
+  const directYeastG = round(expanded.direct.yeastG, 1);
+  const sugarG = round(expanded.direct.sugarG, 1);
+  const oilG = round(expanded.direct.oilG, 1);
+  const finalFlourKg = round(expanded.final.flourG / 1000, 3);
+  const finalWaterKg = round(expanded.final.waterG / 1000, 3);
+  const totalWeightKg = round(expanded.yieldQuantityG / 1000, 2);
   const totalCost = engineResult.raw_batch_cost;
 
   const whatsapp = [
@@ -271,15 +280,15 @@ export function calculateDoughWithCostEngine(
     ...(bigaFlourKg > 0 ? {
       biga: {
         active: true, pct: profile.biga_pct, flour_kg: bigaFlourKg,
-        water_kg: bigaWaterKg, yeast_g: bigaYeastKg * 1000,
-        total_kg: expanded.biga.totalG / 1000,
+        water_kg: bigaWaterKg, yeast_g: round(bigaYeastKg * 1000, 1),
+        total_kg: round(expanded.biga.totalG / 1000, 3),
       },
     } : {}),
     ...(poolishFlourKg > 0 ? {
       poolish: {
         active: true, pct: profile.poolish_pct, flour_kg: poolishFlourKg,
-        water_kg: poolishWaterKg, yeast_g: poolishYeastKg * 1000,
-        total_kg: expanded.poolish.totalG / 1000,
+        water_kg: poolishWaterKg, yeast_g: round(poolishYeastKg * 1000, 1),
+        total_kg: round(expanded.poolish.totalG / 1000, 3),
       },
     } : {}),
     empaste: {
@@ -288,10 +297,10 @@ export function calculateDoughWithCostEngine(
     },
     per_batch: {
       batches: safeBatches,
-      flour_kg: perBatch(flourKg),
-      water_kg: perBatch(waterKg),
-      ...(bigaFlourKg > 0 ? { biga_kg: perBatch(expanded.biga.totalG / 1000) } : {}),
-      salt_g: perBatch(saltG),
+      flour_kg: round(perBatch(flourKg), 3),
+      water_kg: round(perBatch(waterKg), 3),
+      ...(bigaFlourKg > 0 ? { biga_kg: round(perBatch(expanded.biga.totalG / 1000), 3) } : {}),
+      salt_g: round(perBatch(saltG), 1),
     },
     cost: {
       total: totalCost,

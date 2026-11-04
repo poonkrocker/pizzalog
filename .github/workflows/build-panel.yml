@@ -51,6 +51,7 @@ jobs:
       - name: Publish compiled panel to app/
         run: |
           test -f frontend/apps/panel/dist/index.html
+          rm -rf app/assets
           cp -a frontend/apps/panel/dist/. app/
           git add app
           if git diff --cached --quiet; then

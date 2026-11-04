@@ -119,9 +119,10 @@ export function DoughProfileModal({
       return;
     }
 
+    const isFaina = /fain[aá]/i.test(name.trim());
     const flourSum = flourWhitePct + flourSemolaPct + flourIntegralPct;
-    if (Math.abs(flourSum - 100) > 1.0) {
-      setError(`La suma de harinas debe ser 100%. Actualmente suma ${flourSum.toFixed(1)}%.`);
+    if (!isFaina && Math.abs(flourSum - 100) > 0.01) {
+      setError(`La suma de harinas debe ser exactamente 100%. Actualmente suma ${flourSum.toFixed(2)}%.`);
       return;
     }
 
@@ -453,15 +454,15 @@ export function DoughProfileModal({
                   { key: 'water_id', label: 'Agua (opcional; unidad de masa)' },
                 ]
               : [
-                  { key: 'flour_white_id', label: 'Harina blanca / 0000' },
-                  { key: 'flour_semola_id', label: 'Sémola rimacinata' },
-                  { key: 'flour_integral_id', label: 'Harina integral' },
-                  ...(bigaPct > 0 ? [{ key: 'biga_yeast_id' as const, label: 'Levadura de biga' }] : []),
-                  ...(poolishPct > 0 ? [{ key: 'poolish_yeast_id' as const, label: 'Levadura de poolish' }] : []),
-                  ...(directYeastPct > 0 ? [{ key: 'direct_yeast_id' as const, label: 'Levadura directa' }] : []),
+                  ...(flourWhitePct > 0 ? [{ key: 'flour_white_id' as const, label: 'Harina blanca / 0000' }] : []),
+                  ...(flourSemolaPct > 0 ? [{ key: 'flour_semola_id' as const, label: 'Sémola rimacinata' }] : []),
+                  ...(flourIntegralPct > 0 ? [{ key: 'flour_integral_id' as const, label: 'Harina integral' }] : []),
+                  ...(method === 'biga' && bigaPct > 0 ? [{ key: 'biga_yeast_id' as const, label: 'Levadura de biga' }] : []),
+                  ...(method === 'poolish' && poolishPct > 0 ? [{ key: 'poolish_yeast_id' as const, label: 'Levadura de poolish' }] : []),
+                  ...(method === 'direct' && directYeastPct > 0 ? [{ key: 'direct_yeast_id' as const, label: 'Levadura directa' }] : []),
                   ...(saltPct > 0 ? [{ key: 'salt_id' as const, label: 'Sal' }] : []),
                   ...(sugarPct > 0 ? [{ key: 'sugar_id' as const, label: 'Azúcar' }] : []),
-                  ...(oilPct > 0 ? [{ key: 'oil_id' as const, label: 'Aceite (unidad de masa)' }] : []),
+                  ...(oilPct > 0 ? [{ key: 'oil_id' as const, label: 'Aceite (masa o volumen)' }] : []),
                 ];
             return (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '.65rem' }}>

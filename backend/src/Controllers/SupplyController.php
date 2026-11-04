@@ -17,6 +17,7 @@ class SupplyController
 
     public function __construct()
     {
+        ProductController::ensureColumns();
         $this->repo = new SupplyRepository();
     }
 

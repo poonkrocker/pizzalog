@@ -64,7 +64,12 @@ class ToolsImportController
         $deepseek = Config::get('deepseek', []);
         $apiKey = trim((string) ($deepseek['api_key'] ?? ''));
         if ($apiKey === '') {
-            Response::error('DeepSeek no está configurado en el servidor. Agregá DEEPSEEK_API_KEY a la configuración local para usar el importador inteligente.', 503);
+            Response::ok([
+                'sheets' => $this->buildLocalMappings($sheets),
+                'ai_previews_remaining_today' => 0,
+                'note' => 'El mapeo se realizó localmente en el servidor (DeepSeek no está configurado). Revisá las columnas antes de confirmar.',
+                'mapping_mode' => 'local',
+            ]);
         }
 
         $accountId = (int) $req->auth['tools_account_id'];
@@ -80,7 +85,12 @@ class ToolsImportController
         );
         $quotaUpdate->execute([$accountId, self::DAILY_AI_LIMIT]);
         if ($quotaUpdate->rowCount() !== 1) {
-            Response::error('Alcanzaste el límite diario de 20 previsualizaciones con IA', 429);
+            Response::ok([
+                'sheets' => $this->buildLocalMappings($sheets),
+                'ai_previews_remaining_today' => 0,
+                'note' => 'Alcanzaste el límite diario de 20 previsualizaciones con IA; se utilizó el mapeo automático local.',
+                'mapping_mode' => 'local',
+            ]);
         }
         $quota = $pdo->prepare(
             'SELECT request_count FROM tools_ai_usage WHERE account_id = ? AND usage_date = CURDATE()'
@@ -177,8 +187,13 @@ PROMPT;
         curl_close($ch);
 
         if ($raw === false || $status < 200 || $status >= 300) {
-            error_log('[pizzalog-tools] DeepSeek import preview failed with HTTP ' . $status);
-            Response::error('No se pudo analizar la planilla. Probá nuevamente más tarde.', 502);
+            error_log('[pizzalog-tools] DeepSeek import preview failed with HTTP ' . $status . ', using local fallback');
+            Response::ok([
+                'sheets' => $this->buildLocalMappings($sheets),
+                'ai_previews_remaining_today' => max(0, self::DAILY_AI_LIMIT - $used),
+                'note' => 'No se pudo conectar con la IA en este momento; se utilizó el mapeo automático local.',
+                'mapping_mode' => 'local',
+            ]);
         }
 
         $response = json_decode((string) $raw, true);
@@ -187,7 +202,13 @@ PROMPT;
         $answer = trim(preg_replace('/^\x60{3}(?:json)?\s*|\s*\x60{3}$/i', '', $answer) ?? $answer);
         $mapped = json_decode($answer, true);
         if (!is_array($mapped) || !is_array($mapped['sheets'] ?? null)) {
-            Response::error('La IA devolvió una respuesta que no se pudo validar', 502);
+            error_log('[pizzalog-tools] DeepSeek returned invalid JSON structure, using local fallback');
+            Response::ok([
+                'sheets' => $this->buildLocalMappings($sheets),
+                'ai_previews_remaining_today' => max(0, self::DAILY_AI_LIMIT - $used),
+                'note' => 'La respuesta de la IA no pudo validarse; se utilizó el mapeo automático local.',
+                'mapping_mode' => 'local',
+            ]);
         }
 
         $allowedFields = [
@@ -385,6 +406,4 @@ PROMPT;
         }
         return $result;
     }
-
-
 }

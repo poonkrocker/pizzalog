@@ -162,10 +162,14 @@ export function App({
     patch: Partial<ToolsWorkspaceState['catalog']['purchase_prices'][number]>
   ) {
     setState((prev) => {
-      const exists = prev.catalog.purchase_prices.some((p) => p.ingredient_id === ingredientId);
-      const nextPrices = exists
+      const target = selectEffectivePurchasePrice(
+        ingredientId,
+        prev.catalog.purchase_prices,
+        prev.catalog.as_of_date
+      );
+      const nextPrices = target
         ? prev.catalog.purchase_prices.map((p) =>
-            p.ingredient_id === ingredientId ? { ...p, ...patch } : p
+            p === target ? { ...p, ...patch } : p
           )
         : [
             ...prev.catalog.purchase_prices,
@@ -285,7 +289,21 @@ export function App({
   function openEditRecipeBuilder(rec: Recipe) {
     setBuilderError(null);
     setIsDoughMode(Boolean(rec.bakers_dough));
-    setEditingRecipe(JSON.parse(JSON.stringify(rec)));
+    const cloned = JSON.parse(JSON.stringify(rec)) as Recipe;
+    if (cloned.bakers_dough && cloned.bakers_dough.flours.some((f) => f.share_pct === undefined && f.weight_kg !== undefined)) {
+      const totalWeight = cloned.bakers_dough.flours.reduce((sum, f) => sum + (f.weight_kg ?? 0), 0);
+      if (totalWeight > 0) {
+        let running = 0;
+        cloned.bakers_dough.flours = cloned.bakers_dough.flours.map((f, idx, arr) => {
+          const pct = idx === arr.length - 1
+            ? Math.max(0, Number((100 - running).toFixed(2)))
+            : Number((((f.weight_kg ?? 0) / totalWeight) * 100).toFixed(2));
+          running += pct;
+          return { ingredient_id: f.ingredient_id, share_pct: pct };
+        });
+      }
+    }
+    setEditingRecipe(cloned);
   }
 
   function saveEditedRecipe() {
@@ -1884,7 +1902,60 @@ export function App({
                     .map((sale) => (
                       <tr key={sale.id}>
                         <td>{sale.product_name}</td>
-                        <td>{sale.product_id ? state.catalog.recipes.find((recipe) => recipe.id === sale.product_id)?.name ?? 'Producto eliminado' : 'Pendiente de vincular'}</td>
+                        <td>
+                          <select
+                            aria-label={`Vincular ${sale.product_name}`}
+                            value={sale.product_id ?? ''}
+                            onChange={(e) => {
+                              const nextProductId = e.target.value || null;
+                              setState((prev) => {
+                                const updatedSales = (prev.salesHistory ?? []).map((item) =>
+                                  item.product_name === sale.product_name
+                                    ? { ...item, product_id: nextProductId }
+                                    : item
+                                );
+                                const targetMonth = prev.salesPeriod ?? sale.period_start.slice(0, 7);
+                                const monthSales = updatedSales.filter(
+                                  (item) =>
+                                    item.period_start.slice(0, 7) === targetMonth &&
+                                    item.period_end.slice(0, 7) === targetMonth &&
+                                    item.product_id !== null
+                                );
+                                const nextSalesMap = { ...prev.productSalesMap };
+                                if (monthSales.length > 0) {
+                                  for (const prod of prev.catalog.recipes.filter((r) => r.recipe_type === 'product')) {
+                                    nextSalesMap[prod.id] = {
+                                      ...nextSalesMap[prod.id],
+                                      monthlyUnitsSold: 0,
+                                    };
+                                  }
+                                  for (const item of monthSales) {
+                                    const pid = item.product_id!;
+                                    nextSalesMap[pid] = {
+                                      ...nextSalesMap[pid],
+                                      monthlyUnitsSold: (nextSalesMap[pid]?.monthlyUnitsSold ?? 0) + item.quantity,
+                                    };
+                                  }
+                                }
+                                return {
+                                  ...prev,
+                                  salesHistory: updatedSales,
+                                  salesPeriod: monthSales.length > 0 ? targetMonth : prev.salesPeriod,
+                                  productSalesMap: nextSalesMap,
+                                };
+                              });
+                            }}
+                          >
+                            <option value="">Pendiente de vincular</option>
+                            {state.catalog.recipes
+                              .filter((recipe) => recipe.recipe_type === 'product')
+                              .map((recipe) => (
+                                <option key={recipe.id} value={recipe.id}>
+                                  {recipe.name}
+                                </option>
+                              ))}
+                          </select>
+                        </td>
                         <td>{formatDecimal(sale.quantity, 2)}</td>
                         <td>{sale.period_start === sale.period_end ? sale.period_start : `${sale.period_start} → ${sale.period_end}`}</td>
                         <td>{sale.channel || '—'}</td>
@@ -2048,6 +2119,7 @@ export function App({
                         <option value="purchase_prices">Precios de compra</option>
                         <option value="recipes">Recetas</option>
                         <option value="operating_expenses">Gastos operativos</option>
+                        <option value="sales">Ventas</option>
                         <option value="unknown">No importar esta hoja</option>
                       </select>
                     </label>

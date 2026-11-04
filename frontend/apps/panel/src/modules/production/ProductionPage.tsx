@@ -322,16 +322,50 @@ export function ProductionPage() {
                           <td style={{ textAlign: 'right', fontWeight: 700 }}>{calculation.biga.flour_kg} kg</td>
                         </tr>
                         <tr style={{ borderBottom: '1px solid #f0f0f0' }}>
-                          <td style={{ padding: '0.5rem 0' }}>💧 Agua Biga (50%):</td>
+                          <td style={{ padding: '0.5rem 0' }}>💧 Agua Biga ({activeProfile?.biga_water_pct ?? 50}%):</td>
                           <td style={{ textAlign: 'right', fontWeight: 700 }}>{calculation.biga.water_kg} L</td>
                         </tr>
                         <tr style={{ borderBottom: '1px solid #f0f0f0' }}>
-                          <td style={{ padding: '0.5rem 0' }}>🧫 Levadura (0.5%):</td>
+                          <td style={{ padding: '0.5rem 0' }}>🧫 Levadura ({activeProfile?.biga_yeast_pct ?? 0.5}%):</td>
                           <td style={{ textAlign: 'right', fontWeight: 700 }}>{calculation.biga.yeast_g} g</td>
                         </tr>
                         <tr style={{ background: '#fafafa', fontWeight: 800 }}>
                           <td style={{ padding: '0.6rem 0' }}>Total Biga Armada:</td>
                           <td style={{ textAlign: 'right', color: '#1d3557' }}>{calculation.biga.total_kg} kg</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {calculation.type === 'pizza' && calculation.poolish?.active && (
+                  <div style={{ background: '#fff', border: '1px solid #e0e0e0', borderRadius: '8px', padding: '1.25rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.8rem' }}>
+                      <h4 style={{ margin: 0, fontSize: '1.05rem', color: '#1d3557' }}>
+                        🥣 Paso 1: Poolish ({calculation.poolish.pct}%)
+                      </h4>
+                      <span style={{ fontSize: '0.75rem', background: '#e0f2fe', color: '#0369a1', padding: '0.2rem 0.5rem', borderRadius: '4px', fontWeight: 700 }}>
+                        Prefermento
+                      </span>
+                    </div>
+
+                    <table style={{ width: '100%', fontSize: '0.9rem', borderCollapse: 'collapse' }}>
+                      <tbody>
+                        <tr style={{ borderBottom: '1px solid #f0f0f0' }}>
+                          <td style={{ padding: '0.5rem 0' }}>🌾 Harina Poolish:</td>
+                          <td style={{ textAlign: 'right', fontWeight: 700 }}>{calculation.poolish.flour_kg} kg</td>
+                        </tr>
+                        <tr style={{ borderBottom: '1px solid #f0f0f0' }}>
+                          <td style={{ padding: '0.5rem 0' }}>💧 Agua Poolish ({activeProfile?.poolish_water_pct ?? 100}%):</td>
+                          <td style={{ textAlign: 'right', fontWeight: 700 }}>{calculation.poolish.water_kg} L</td>
+                        </tr>
+                        <tr style={{ borderBottom: '1px solid #f0f0f0' }}>
+                          <td style={{ padding: '0.5rem 0' }}>🧫 Levadura ({activeProfile?.poolish_yeast_pct ?? 1}%):</td>
+                          <td style={{ textAlign: 'right', fontWeight: 700 }}>{calculation.poolish.yeast_g} g</td>
+                        </tr>
+                        <tr style={{ background: '#fafafa', fontWeight: 800 }}>
+                          <td style={{ padding: '0.6rem 0' }}>Total Poolish Armado:</td>
+                          <td style={{ textAlign: 'right', color: '#1d3557' }}>{calculation.poolish.total_kg} kg</td>
                         </tr>
                       </tbody>
                     </table>
@@ -386,6 +420,12 @@ export function ProductionPage() {
                           <tr style={{ borderBottom: '1px solid #f0f0f0' }}>
                             <td style={{ padding: '0.5rem 0' }}>🍬 Azúcar:</td>
                             <td style={{ textAlign: 'right', fontWeight: 700 }}>{calculation.empaste.sugar_g} g</td>
+                          </tr>
+                        )}
+                        {calculation.empaste && calculation.empaste.oil_g > 0 && (
+                          <tr style={{ borderBottom: '1px solid #f0f0f0' }}>
+                            <td style={{ padding: '0.5rem 0' }}>🫒 Aceite:</td>
+                            <td style={{ textAlign: 'right', fontWeight: 700 }}>{calculation.empaste.oil_g} g</td>
                           </tr>
                         )}
                       </tbody>

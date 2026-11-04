@@ -481,6 +481,7 @@ final class SalesReportController
      */
     private function ctx(Request $req): array
     {
+        ProductController::ensureColumns();
         $bid  = (int)$req->auth['business_id'];
         $from = $req->query['from'] ?? date('Y-m-d', strtotime('-29 days'));
         $to   = $req->query['to']   ?? date('Y-m-d');
