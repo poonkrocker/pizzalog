@@ -580,7 +580,7 @@ export function App({
 
     const totalRevenue = completeRows.reduce((a, b) => a + b.monthlyRevenue, 0);
     const totalCogs = completeRows.reduce((a, b) => a + b.monthlyCogs, 0);
-    const totalContribution = completeRows.reduce((a, b) => a + b.monthlyContribution, 0);
+    const totalContribution = completeRows.reduce((a, b) => a + (b.monthlyContribution ?? 0), 0);
     const weightedMarginPct = totalRevenue > 0 ? (totalContribution / totalRevenue) * 100 : 0;
 
     return {
