@@ -953,7 +953,51 @@ export function App({
             <div className="table-wrap"><table className="kit-table"><thead><tr><th>Producto</th><th>Unidades a producir</th><th>Rendimiento de receta</th><th>Estado del costo</th></tr></thead><tbody>
               {state.catalog.recipes.filter((r) => r.recipe_type === 'product').map((r) => <tr key={r.id}><td>{r.name}</td><td><input aria-label={`Unidades de ${r.name}`} type="number" min="0" step="1" value={productionUnits[r.id] ?? 0} onChange={(e) => setProductionUnits((prev) => ({ ...prev, [r.id]: Math.max(0, Number(e.target.value) || 0) }))} /></td><td>{formatDecimal(r.yield_quantity, 2)} {r.yield_unit}</td><td>{recipeResults.get(r.id)?.status === 'complete' ? 'Costo validado' : 'Revisar receta / precios'}</td></tr>)}
             </tbody></table></div>
-            <p className="lead">Producción total solicitada: <strong>{Object.values(productionUnits).reduce((sum, n) => sum + n, 0)} unidades</strong>. Los valores se mantienen como escenario y no modifican las ventas históricas.</p>
+            {(() => {
+              const ingredientTotals = new Map<string, { name: string; unit: string; quantity: number }>();
+              const warnings = new Set<string>();
+              const expandRecipe = (recipeId: string, requestedYield: number, path: string[] = []) => {
+                if (path.includes(recipeId)) {
+                  warnings.add('Se detectó una referencia circular y se omitió esa rama.');
+                  return;
+                }
+                const recipe = state.catalog.recipes.find((item) => item.id === recipeId);
+                const result = recipeResults.get(recipeId);
+                if (!recipe || !result || result.status !== 'complete' || !(recipe.yield_quantity > 0)) {
+                  warnings.add(`No se pudo explotar ${recipe?.name ?? recipeId}: receta o costo incompleto.`);
+                  return;
+                }
+                const batches = requestedYield / recipe.yield_quantity;
+                for (const component of result.components) {
+                  if (component.status !== 'complete' || component.normalized_quantity == null) {
+                    warnings.add(`Componente incompleto en ${recipe.name}.`);
+                    continue;
+                  }
+                  const quantity = component.normalized_quantity * batches;
+                  if (component.component_type === 'ingredient') {
+                    const existing = ingredientTotals.get(component.id);
+                    ingredientTotals.set(component.id, {
+                      name: component.name,
+                      unit: component.cost_unit,
+                      quantity: (existing?.quantity ?? 0) + quantity,
+                    });
+                  } else {
+                    expandRecipe(component.id, quantity, [...path, recipeId]);
+                  }
+                }
+              };
+              for (const recipe of state.catalog.recipes.filter((item) => item.recipe_type === 'product')) {
+                const units = productionUnits[recipe.id] ?? 0;
+                if (units > 0) expandRecipe(recipe.id, units);
+              }
+              const totalUnits = Object.values(productionUnits).reduce((sum, n) => sum + n, 0);
+              const ingredients = [...ingredientTotals.values()].sort((a, b) => a.name.localeCompare(b.name));
+              return <div style={{ marginTop: 18 }}>
+                <p className="lead">Producción solicitada: <strong>{formatDecimal(totalUnits, 0)} unidades</strong>. La explosión recorre las subrecetas reutilizables y consolida los insumos por unidad base. Es un escenario: no modifica recetas ni ventas.</p>
+                {warnings.size > 0 && <div className="alert-banner">{[...warnings].join(' ')}</div>}
+                {ingredients.length === 0 ? <div className="empty-state">Ingresá cantidades y verificá que las recetas y sus subrecetas tengan componentes y costos completos para calcular la demanda de insumos.</div> : <div className="table-wrap"><table className="kit-table"><thead><tr><th>Insumo requerido</th><th>Cantidad total</th><th>Unidad base</th></tr></thead><tbody>{ingredients.map((item) => <tr key={item.name}><td>{item.name}</td><td><strong>{formatDecimal(item.quantity, 3)}</strong></td><td>{item.unit}</td></tr>)}</tbody></table></div>}
+              </div>;
+            })()}
           </>}
         </section>
       )}
