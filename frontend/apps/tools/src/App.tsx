@@ -74,6 +74,7 @@ export function App({
   const [importError, setImportError] = useState<string | null>(null);
   const [importNotice, setImportNotice] = useState<string | null>(null);
   const [isSmartImporting, setIsSmartImporting] = useState(false);
+  const [replaceWorkspaceOnImport, setReplaceWorkspaceOnImport] = useState(false);
   const [workspaceSaveError, setWorkspaceSaveError] = useState<string | null>(null);
   const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -438,18 +439,27 @@ export function App({
     ]);
     const hasDemoSeed = state.catalog.ingredients.some((item) => demoIngredientIds.has(item.id)) ||
       state.catalog.recipes.some((item) => demoRecipeIds.has(item.id));
-    const importBase = hasDemoSeed ? {
+    const shouldReplaceWorkspace = replaceWorkspaceOnImport || hasDemoSeed;
+    const importBase = shouldReplaceWorkspace ? {
       ...state,
       catalog: {
         ...state.catalog,
-        ingredients: state.catalog.ingredients.filter((item) => !demoIngredientIds.has(item.id)),
-        purchase_prices: state.catalog.purchase_prices.filter((price) => !demoIngredientIds.has(price.ingredient_id)),
-        recipes: state.catalog.recipes.filter((recipe) => !demoRecipeIds.has(recipe.id)),
+        ingredients: hasDemoSeed && !replaceWorkspaceOnImport
+          ? state.catalog.ingredients.filter((item) => !demoIngredientIds.has(item.id))
+          : [],
+        purchase_prices: hasDemoSeed && !replaceWorkspaceOnImport
+          ? state.catalog.purchase_prices.filter((price) => !demoIngredientIds.has(price.ingredient_id))
+          : [],
+        recipes: hasDemoSeed && !replaceWorkspaceOnImport
+          ? state.catalog.recipes.filter((recipe) => !demoRecipeIds.has(recipe.id))
+          : [],
       },
-      productSalesMap: Object.fromEntries(
-        Object.entries(state.productSalesMap).filter(([id]) => !demoRecipeIds.has(id))
-      ),
-      operatingExpenses: state.operatingExpenses.filter((expense) => !['exp_1', 'exp_2', 'exp_3', 'exp_4'].includes(expense.id)),
+      productSalesMap: hasDemoSeed && !replaceWorkspaceOnImport
+        ? Object.fromEntries(Object.entries(state.productSalesMap).filter(([id]) => !demoRecipeIds.has(id)))
+        : {},
+      operatingExpenses: hasDemoSeed && !replaceWorkspaceOnImport
+        ? state.operatingExpenses.filter((expense) => !['exp_1', 'exp_2', 'exp_3', 'exp_4'].includes(expense.id))
+        : [],
       snapshots: [],
     } : state;
     const result = applyImportMappings(importBase, smartImportPreview.sheets, smartImportPreview.mappings);
@@ -466,10 +476,20 @@ export function App({
       ].filter(Boolean).join(' '));
       return;
     }
+    if (shouldReplaceWorkspace) {
+      const backup = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+      const backupUrl = URL.createObjectURL(backup);
+      const backupLink = document.createElement('a');
+      backupLink.href = backupUrl;
+      backupLink.download = `pizzalog-tools-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      backupLink.click();
+      URL.revokeObjectURL(backupUrl);
+    }
     setState(result.workspace);
     const summary = [
       `Importados: ${result.counts.ingredients} insumos, ${result.counts.prices} precios, ${result.counts.recipes} recetas y ${result.counts.expenses} gastos.`,
       ...(hasDemoSeed ? ['Se limpiaron los datos de demostración para evitar mezclarlos con la importación.'] : []),
+      ...(replaceWorkspaceOnImport ? ['Se reemplazaron los datos anteriores; se descargó una copia de seguridad JSON.'] : []),
       ...result.warnings,
     ];
     setImportNotice(summary.join(' '));
@@ -1739,6 +1759,14 @@ export function App({
                 </section>
               );
             })}
+            <label className="field" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 16 }}>
+              <input
+                type="checkbox"
+                checked={replaceWorkspaceOnImport}
+                onChange={(e) => setReplaceWorkspaceOnImport(e.target.checked)}
+              />
+              <span>Reemplazar mis datos actuales en lugar de combinar (se descargará una copia de seguridad)</span>
+            </label>
             <div className="smart-import-footer">
               <button type="button" className="btn" onClick={() => setSmartImportPreview(null)}>Cancelar</button>
               <button type="button" className="btn btn--primary" onClick={confirmSmartImport}>Confirmar e incorporar datos</button>
