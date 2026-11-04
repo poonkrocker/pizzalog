@@ -436,13 +436,14 @@ export function applyImportMappings(
         const quantity = parseNumber(cell(row, mapping, 'quantity', 'units', 'units_sold'));
         const rawStart = cell(row, mapping, 'period_start', 'date', 'sale_date');
         const rawEnd = cell(row, mapping, 'period_end') || rawStart;
-        const parseDate = (raw: string): string | null => {
+        const parseDate = (raw: string, endOfMonth = false): string | null => {
           const value = raw.trim();
           if (!value) return null;
           if (/^\\d{4}-\\d{2}$/.test(value)) {
             const [year, month] = value.split('-').map(Number);
             const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
-            return `${year}-${String(month).padStart(2, '0')}-01`;
+            const day = endOfMonth ? lastDay : 1;
+            return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
           }
           let iso = value;
           const local = value.match(/^(\\d{1,2})[\\/.\\-](\\d{1,2})[\\/.\\-](\\d{4})$/);
@@ -452,7 +453,7 @@ export function applyImportMappings(
           return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === iso ? iso : null;
         };
         const periodStart = parseDate(rawStart);
-        const periodEnd = parseDate(rawEnd);
+        const periodEnd = parseDate(rawEnd, true);
         if (!productName || quantity === null || quantity < 0 || !periodStart || !periodEnd || periodEnd < periodStart) {
           warnings.push(`${mapping.name}, fila ${sourceRow}: falta producto, cantidad o período válido; se omitió la fila de ventas.`);
           return;
