@@ -286,6 +286,22 @@ export function App({
       setBuilderError('El nombre de la receta es obligatorio.');
       return;
     }
+    if (editingRecipe.bakers_dough) {
+      const flourTotal = editingRecipe.bakers_dough.flours.reduce((sum, flour) => sum + (flour.share_pct ?? 0), 0);
+      if (Math.abs(flourTotal - 100) > 0.01) {
+        setBuilderError(`La mezcla de harinas debe sumar 100% (actual: ${formatDecimal(flourTotal, 1)}%).`);
+        return;
+      }
+      if (editingRecipe.bakers_dough.yield_basis === 'measured_yield' &&
+          !(Number(editingRecipe.bakers_dough.measured_yield_g) > 0)) {
+        setBuilderError('Indicá un rendimiento medido mayor a cero.');
+        return;
+      }
+    }
+    if (editingRecipe.components && editingRecipe.components.length === 0) {
+      setBuilderError('Agregá al menos un componente a la receta.');
+      return;
+    }
 
     // Probar en el motor antes de guardar para validar unidades, mermas y ausencia de ciclos
     const nextRecipes = state.catalog.recipes.some((r) => r.id === editingRecipe.id)
@@ -1977,26 +1993,233 @@ export function App({
                   />
                 </label>
                 <label className="field">
-                  <span>Insumo Harina Principal</span>
+                  <span>Base de rendimiento</span>
                   <select
-                    value={editingRecipe.bakers_dough.flours[0]?.ingredient_id ?? ''}
+                    value={editingRecipe.bakers_dough.yield_basis}
                     onChange={(e) =>
                       setEditingRecipe({
                         ...editingRecipe,
                         bakers_dough: {
                           ...editingRecipe.bakers_dough!,
-                          flours: [{ ingredient_id: e.target.value, share_pct: 100 }],
+                          yield_basis: e.target.value as NonNullable<Recipe['bakers_dough']>['yield_basis'],
                         },
                       })
                     }
                   >
-                    {state.catalog.ingredients.map((i) => (
-                      <option key={i.id} value={i.id}>
-                        {i.name}
-                      </option>
-                    ))}
+                    <option value="measured_yield">Rendimiento final medido</option>
+                    <option value="flour_plus_water">Harina + agua</option>
+                    <option value="total_formula">Fórmula completa</option>
                   </select>
                 </label>
+                {editingRecipe.bakers_dough.yield_basis === 'measured_yield' && (
+                  <label className="field">
+                    <span>Rendimiento medido (g)</span>
+                    <input
+                      type="number"
+                      min={1}
+                      value={editingRecipe.bakers_dough.measured_yield_g ?? editingRecipe.yield_quantity}
+                      onChange={(e) =>
+                        setEditingRecipe({
+                          ...editingRecipe,
+                          yield_quantity: Math.max(1, Number(e.target.value) || 1),
+                          bakers_dough: {
+                            ...editingRecipe.bakers_dough!,
+                            measured_yield_g: Math.max(1, Number(e.target.value) || 1),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                )}
+              </div>
+
+              <div className="card" style={{ marginTop: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+                  <strong>Mezcla de harinas</strong>
+                  <button
+                    type="button"
+                    className="btn btn--sm"
+                    onClick={() =>
+                      setEditingRecipe({
+                        ...editingRecipe,
+                        bakers_dough: {
+                          ...editingRecipe.bakers_dough!,
+                          flours: [
+                            ...editingRecipe.bakers_dough!.flours,
+                            { ingredient_id: state.catalog.ingredients[0]?.id ?? '', share_pct: 0 },
+                          ],
+                        },
+                      })
+                    }
+                    disabled={state.catalog.ingredients.length === 0}
+                  >
+                    + Agregar harina
+                  </button>
+                </div>
+                {(editingRecipe.bakers_dough.flours ?? []).map((flour, index) => (
+                  <div className="comp-row" key={index}>
+                    <select
+                      value={flour.ingredient_id}
+                      onChange={(e) => {
+                        const flours = [...editingRecipe.bakers_dough!.flours];
+                        flours[index] = { ...flour, ingredient_id: e.target.value };
+                        setEditingRecipe({ ...editingRecipe, bakers_dough: { ...editingRecipe.bakers_dough!, flours } });
+                      }}
+                    >
+                      {state.catalog.ingredients.filter((item) => item.base_dimension === 'mass').map((item) => (
+                        <option key={item.id} value={item.id}>{item.name}</option>
+                      ))}
+                    </select>
+                    <input
+                      aria-label="Porcentaje de harina"
+                      type="number"
+                      min={0}
+                      max={100}
+                      step={0.1}
+                      value={flour.share_pct ?? 0}
+                      onChange={(e) => {
+                        const flours = [...editingRecipe.bakers_dough!.flours];
+                        flours[index] = { ...flour, share_pct: Math.max(0, Math.min(100, Number(e.target.value) || 0)) };
+                        setEditingRecipe({ ...editingRecipe, bakers_dough: { ...editingRecipe.bakers_dough!, flours } });
+                      }}
+                    />
+                    <span>%</span>
+                    <button
+                      type="button"
+                      className="btn btn--sm btn--danger"
+                      disabled={editingRecipe.bakers_dough.flours.length <= 1}
+                      onClick={() => setEditingRecipe({
+                        ...editingRecipe,
+                        bakers_dough: {
+                          ...editingRecipe.bakers_dough!,
+                          flours: editingRecipe.bakers_dough!.flours.filter((_, i) => i !== index),
+                        },
+                      })}
+                    >✕</button>
+                  </div>
+                ))}
+                <small>
+                  Total de mezcla: {formatDecimal(editingRecipe.bakers_dough.flours.reduce((sum, flour) => sum + (flour.share_pct ?? 0), 0), 1)}%
+                  {Math.abs(editingRecipe.bakers_dough.flours.reduce((sum, flour) => sum + (flour.share_pct ?? 0), 0) - 100) > 0.01
+                    ? ' · La suma debe ser 100%.'
+                    : ' · Correcto.'}
+                </small>
+              </div>
+
+              <div className="card" style={{ marginTop: 12 }}>
+                <strong>Prefermento</strong>
+                <div className="builder-grid">
+                  <label className="field">
+                    <span>Tipo</span>
+                    <select
+                      value={editingRecipe.bakers_dough.biga ? 'biga' : editingRecipe.bakers_dough.poolish ? 'poolish' : 'none'}
+                      onChange={(e) => {
+                        const current = editingRecipe.bakers_dough!;
+                        const preferment = {
+                          flour_pct: 25,
+                          water_pct: e.target.value === 'poolish' ? 100 : 50,
+                          yeast_pct: 0.5,
+                          yeast_ingredient_id: current.yeast_ingredient_id ?? state.catalog.ingredients.find((item) => /levadura|yeast/i.test(item.name))?.id ?? state.catalog.ingredients[0]?.id ?? '',
+                        };
+                        setEditingRecipe({
+                          ...editingRecipe,
+                          bakers_dough: {
+                            ...current,
+                            biga: e.target.value === 'biga' ? preferment : undefined,
+                            poolish: e.target.value === 'poolish' ? preferment : undefined,
+                          },
+                        });
+                      }}
+                    >
+                      <option value="none">Sin prefermento</option>
+                      <option value="biga">Biga</option>
+                      <option value="poolish">Poolish</option>
+                    </select>
+                  </label>
+                  {(editingRecipe.bakers_dough.biga || editingRecipe.bakers_dough.poolish) && (() => {
+                    const key = editingRecipe.bakers_dough!.biga ? 'biga' : 'poolish';
+                    const spec = editingRecipe.bakers_dough![key]!;
+                    return (
+                      <>
+                        <label className="field">
+                          <span>Harina del prefermento (%)</span>
+                          <input type="number" min={0} max={100} step={0.1} value={spec.flour_pct}
+                            onChange={(e) => setEditingRecipe({ ...editingRecipe, bakers_dough: {
+                              ...editingRecipe.bakers_dough!, [key]: { ...spec, flour_pct: Math.max(0, Math.min(100, Number(e.target.value) || 0)) },
+                            }})}
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Hidratación del prefermento (%)</span>
+                          <input type="number" min={0} max={200} step={0.1} value={spec.water_pct}
+                            onChange={(e) => setEditingRecipe({ ...editingRecipe, bakers_dough: {
+                              ...editingRecipe.bakers_dough!, [key]: { ...spec, water_pct: Math.max(0, Math.min(200, Number(e.target.value) || 0)) },
+                            }})}
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Levadura del prefermento (%)</span>
+                          <input type="number" min={0} max={20} step={0.01} value={spec.yeast_pct}
+                            onChange={(e) => setEditingRecipe({ ...editingRecipe, bakers_dough: {
+                              ...editingRecipe.bakers_dough!, [key]: { ...spec, yeast_pct: Math.max(0, Number(e.target.value) || 0) },
+                            }})}
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Insumo de levadura</span>
+                          <select value={spec.yeast_ingredient_id}
+                            onChange={(e) => setEditingRecipe({ ...editingRecipe, bakers_dough: {
+                              ...editingRecipe.bakers_dough!, [key]: { ...spec, yeast_ingredient_id: e.target.value },
+                            }})}
+                          >
+                            {state.catalog.ingredients.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                          </select>
+                        </label>
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              <div className="card" style={{ marginTop: 12 }}>
+                <strong>Otros ingredientes de la masa</strong>
+                <div className="builder-grid">
+                  {([
+                    ['direct_yeast_pct', 'yeast_ingredient_id', 'Levadura directa (%)'],
+                    ['salt_pct', 'salt_ingredient_id', 'Sal (%)'],
+                    ['sugar_pct', 'sugar_ingredient_id', 'Azúcar (%)'],
+                    ['oil_pct', 'oil_ingredient_id', 'Aceite (%)'],
+                  ] as const).map(([pctKey, ingredientKey, label]) => (
+                    <div className="field" key={pctKey}>
+                      <label>{label}</label>
+                      <input type="number" min={0} max={100} step={0.1}
+                        value={editingRecipe.bakers_dough![pctKey] ?? 0}
+                        onChange={(e) => setEditingRecipe({ ...editingRecipe, bakers_dough: {
+                          ...editingRecipe.bakers_dough!, [pctKey]: Math.max(0, Number(e.target.value) || 0),
+                        }})}
+                      />
+                      <select value={editingRecipe.bakers_dough![ingredientKey] ?? ''}
+                        onChange={(e) => setEditingRecipe({ ...editingRecipe, bakers_dough: {
+                          ...editingRecipe.bakers_dough!, [ingredientKey]: e.target.value,
+                        }})}
+                      >
+                        <option value="">Seleccionar insumo</option>
+                        {state.catalog.ingredients.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                      </select>
+                    </div>
+                  ))}
+                  <label className="field">
+                    <span>Insumo de agua</span>
+                    <select value={editingRecipe.bakers_dough.water_ingredient_id ?? ''}
+                      onChange={(e) => setEditingRecipe({ ...editingRecipe, bakers_dough: {
+                        ...editingRecipe.bakers_dough!, water_ingredient_id: e.target.value,
+                      }})}
+                    >
+                      <option value="">Seleccionar insumo</option>
+                      {state.catalog.ingredients.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                    </select>
+                  </label>
+                </div>
               </div>
             ) : (
               <div>
