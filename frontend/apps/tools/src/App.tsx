@@ -52,6 +52,11 @@ const IMPORT_FIELD_LABELS: Record<ImportSheetMapping['kind'], Array<[string, str
     ['expense_name', 'Concepto del gasto'], ['expense_category', 'Categoría'], ['expense_period', 'Período'],
     ['expense_amount', 'Importe'],
   ],
+  sales: [
+    ['product_name', 'Producto'], ['quantity', 'Unidades vendidas'], ['period_start', 'Inicio del período'],
+    ['period_end', 'Fin del período'], ['channel', 'Canal'], ['gross_revenue', 'Venta bruta'],
+    ['net_revenue', 'Venta neta'], ['source', 'Origen'],
+  ],
   unknown: [],
 };
 
@@ -487,7 +492,7 @@ export function App({
     }
     setState(result.workspace);
     const summary = [
-      `Importados: ${result.counts.ingredients} insumos, ${result.counts.prices} precios, ${result.counts.recipes} recetas y ${result.counts.expenses} gastos.`,
+      `Importados: ${result.counts.ingredients} insumos, ${result.counts.prices} precios, ${result.counts.recipes} recetas, ${result.counts.expenses} gastos y ${result.counts.sales} registros de ventas.`,
       ...(hasDemoSeed ? ['Se limpiaron los datos de demostración para evitar mezclarlos con la importación.'] : []),
       ...(replaceWorkspaceOnImport ? ['Se reemplazaron los datos anteriores; se descargó una copia de seguridad JSON.'] : []),
       ...result.warnings,
