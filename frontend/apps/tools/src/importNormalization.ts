@@ -465,6 +465,22 @@ export function applyImportMappings(
         }
         const grossRevenue = parseNumber(cell(row, mapping, 'gross_revenue'));
         const netRevenue = parseNumber(cell(row, mapping, 'net_revenue'));
+        const channel = cell(row, mapping, 'channel') || null;
+        const source = cell(row, mapping, 'source') || mapping.name;
+        const duplicate = salesHistory.some((item) =>
+          item.product_name === productName &&
+          item.quantity === quantity &&
+          item.period_start === periodStart &&
+          item.period_end === periodEnd &&
+          (item.channel ?? null) === channel &&
+          item.source === source &&
+          (item.gross_revenue ?? null) === grossRevenue &&
+          (item.net_revenue ?? null) === netRevenue
+        );
+        if (duplicate) {
+          warnings.push(`${mapping.name}, fila ${sourceRow}: registro duplicado de ${productName} para el período indicado; se omitió.`);
+          return;
+        }
         const saleRecord = {
           id: makeId('imp_sale', `${productName}_${periodStart}_${salesHistory.length}`, new Set(salesHistory.map((item) => item.id))),
           product_id: product?.id ?? null,
@@ -472,10 +488,10 @@ export function applyImportMappings(
           quantity,
           period_start: periodStart,
           period_end: periodEnd,
-          channel: cell(row, mapping, 'channel') || null,
+          channel,
           ...(grossRevenue !== null ? { gross_revenue: grossRevenue } : {}),
           ...(netRevenue !== null ? { net_revenue: netRevenue } : {}),
-          source: cell(row, mapping, 'source') || mapping.name,
+          source,
           imported_at: new Date().toISOString(),
         };
         salesHistory.push(saleRecord);
@@ -618,6 +634,14 @@ export function applyImportMappings(
     latestMonthUnits.set(record.product_id!, (latestMonthUnits.get(record.product_id!) ?? 0) + record.quantity);
   }
   const productSalesMap = { ...current.productSalesMap };
+  if (latestImportedMonth) {
+    for (const product of recipes.filter((recipe) => recipe.recipe_type === 'product')) {
+      productSalesMap[product.id] = {
+        ...productSalesMap[product.id],
+        monthlyUnitsSold: 0,
+      };
+    }
+  }
   for (const [productId, monthlyUnitsSold] of latestMonthUnits) {
     productSalesMap[productId] = {
       ...productSalesMap[productId],
