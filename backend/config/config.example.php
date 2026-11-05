@@ -39,14 +39,42 @@ return [
         'driver' => 'stub',
     ],
 
+    // Servidor SMTP para envío de emails transaccionales (Ferozo / hosting).
+    'smtp' => [
+        'host'       => 'mail.pizzalog.net',
+        'port'       => 465,                  // 465 (SSL) o 587 (TLS)
+        'username'   => 'no-reply@pizzalog.net',
+        'password'   => '',
+        'from_email' => 'no-reply@pizzalog.net',
+        'from_name'  => 'Pizzalog Tools',
+    ],
+
+    // Cobros y suscripciones automáticas (Mercado Pago para Argentina/Latam).
+    'mercadopago' => [
+        'access_token'   => '',               // Access Token de producción o test
+        'webhook_secret' => '',
+    ],
+
+    // Cobros y suscripciones automáticas (LemonSqueezy para internacional).
+    'lemonsqueezy' => [
+        'webhook_secret' => '',               // Webhook Signing Secret de LemonSqueezy
+    ],
+
+    'tools' => [
+        'url' => 'https://tools.pizzalog.net',
+    ],
+
     'cors' => [
         // Orígenes autorizados a consumir la API.
         'allowed_origins' => [
+            'https://tools.pizzalog.net',
+            'https://staging.pizzalog.net',
             'https://app.pizzalog.net',    // panel de administración / TPV web
             'https://pizzalog.net',        // La Carta pública (pizzalog.net/{slug})
             'http://localhost:5173',       // desarrollo local panel (Vite)
             'http://localhost:5174',       // desarrollo local TPV (Vite)
             'http://localhost:5175',       // desarrollo local carta (Vite)
+            'http://localhost:5176',       // desarrollo local Pizzalog Tools (Vite)
             'http://localhost',            // app Android (Capacitor)
             'https://localhost',           // app Android (Capacitor, scheme https)
             'capacitor://localhost',       // app Android (Capacitor, scheme nativo)

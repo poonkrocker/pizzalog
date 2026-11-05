@@ -13,8 +13,12 @@ class ToolsAdminController
         $email = strtolower(trim((string) $req->input('email', '')));
         $name = trim((string) $req->input('name', ''));
         $password = (string) $req->input('password', '');
+        $environment = (string) $req->input('environment', 'production');
         $expiresAt = $req->input('expires_at');
 
+        if (!in_array($environment, ['production', 'staging'], true)) {
+            Response::error('Entorno de Tools inválido (debe ser production o staging)', 422);
+        }
         if (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 190) {
             Response::error('Ingresá un email válido', 422);
         }
@@ -37,15 +41,15 @@ class ToolsAdminController
         $hash = password_hash($password, PASSWORD_DEFAULT);
         try {
             $stmt = Database::pdo()->prepare(
-                'INSERT INTO tools_accounts (email, name, password_hash, is_active, expires_at)
-                 VALUES (?, ?, ?, 1, ?)
+                'INSERT INTO tools_accounts (email, environment, name, password_hash, is_active, expires_at)
+                 VALUES (?, ?, ?, ?, 1, ?)
                  ON DUPLICATE KEY UPDATE
                     name = VALUES(name),
                     password_hash = VALUES(password_hash),
                     is_active = 1,
                     expires_at = VALUES(expires_at)'
             );
-            $stmt->execute([$email, $name, $hash, $expiresAt]);
+            $stmt->execute([$email, $environment, $name, $hash, $expiresAt]);
         } catch (\PDOException $e) {
             Response::error('No se pudo crear la cuenta de Tools', 500);
         }
@@ -53,6 +57,7 @@ class ToolsAdminController
         Response::ok([
             'activated' => true,
             'email' => $email,
+            'environment' => $environment,
             'expires_at' => $expiresAt,
         ]);
     }

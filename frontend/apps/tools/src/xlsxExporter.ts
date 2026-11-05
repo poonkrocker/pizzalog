@@ -414,13 +414,13 @@ export function downloadCustomProfitKitXlsx(state: ToolsWorkspaceState): void {
     const unitCost = ok ? res!.raw_unit_cost! : 0;
     const evalPrice = ok ? pricing!.raw_evaluated_price! : 0;
     const grossProfit = ok ? pricing!.raw_gross_profit! : 0;
-    const unitsSold = state.productSalesMap?.[prod.id]?.monthlyUnitsSold ?? 120;
-    const monthlyRev = ok ? evalPrice * unitsSold : 0;
-    const monthlyContrib = ok ? grossProfit * unitsSold : 0;
+    const unitsSold = state.productSalesMap?.[prod.id]?.monthlyUnitsSold ?? null;
+    const monthlyRev = ok && unitsSold !== null ? evalPrice * unitsSold : '';
+    const monthlyContrib = ok && unitsSold !== null ? grossProfit * unitsSold : '';
 
-    if (ok) {
-      totalMonthlyRevenue += monthlyRev;
-      totalMonthlyContribution += monthlyContrib;
+    if (ok && unitsSold !== null) {
+      totalMonthlyRevenue += evalPrice * unitsSold;
+      totalMonthlyContribution += grossProfit * unitsSold;
     }
 
     sheet4.push([
@@ -437,9 +437,9 @@ export function downloadCustomProfitKitXlsx(state: ToolsWorkspaceState): void {
       { f: `IF(OR(C${r}<>"COMPLETO",I${r}<=0),0,(D${r}/I${r})*100)`, v: ok ? pricing!.food_cost_pct : 0, s: 6 },
       { f: `IF(OR(C${r}<>"COMPLETO",I${r}<=0),0,(J${r}/I${r})*100)`, v: ok ? pricing!.gross_margin_pct : 0, s: 6 },
       { f: `IF(OR(C${r}<>"COMPLETO",D${r}<=0),0,(J${r}/D${r})*100)`, v: ok ? pricing!.markup_pct : 0, s: 6 },
-      { v: unitsSold, s: 3 },
-      { f: `I${r}*N${r}`, v: monthlyRev, s: 4 },
-      { f: `J${r}*N${r}`, v: monthlyContrib, s: 4 },
+      { v: unitsSold ?? '', s: 3 },
+      { f: `IF(N${r}=\"\",\"\",I${r}*N${r})`, v: monthlyRev, s: 4 },
+      { f: `IF(N${r}=\"\",\"\",J${r}*N${r})`, v: monthlyContrib, s: 4 },
     ]);
   });
 
@@ -459,7 +459,7 @@ export function downloadCustomProfitKitXlsx(state: ToolsWorkspaceState): void {
     null,
     null,
     null,
-    { f: `SUM(N4:N${lastProdRow})`, v: products.reduce((a, p) => a + (state.productSalesMap?.[p.id]?.monthlyUnitsSold ?? 120), 0), s: 4 },
+    { f: `SUM(N4:N${lastProdRow})`, v: products.reduce((a, p) => a + (state.productSalesMap?.[p.id]?.monthlyUnitsSold ?? 0), 0), s: 4 },
     { f: `SUM(O4:O${lastProdRow})`, v: totalMonthlyRevenue, s: 4 },
     { f: `SUM(P4:P${lastProdRow})`, v: totalMonthlyContribution, s: 4 },
   ]);

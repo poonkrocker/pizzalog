@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - feat/tools-cost-engine-importer-v1
     paths:
       - "frontend/apps/tools/**"
       - "frontend/packages/cost-engine/**"
@@ -24,7 +25,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.ref_name }}
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -44,11 +45,16 @@ jobs:
 
       - name: Build Pizzalog Tools
         working-directory: frontend
+        env:
+          VITE_TOOLS_ENV: ${{ github.ref_name == 'main' && 'production' || 'staging' }}
         run: pnpm --filter @pizzalog/tools build
 
       - name: Publish compiled tools to tools/
+        env:
+          TARGET_BRANCH: ${{ github.ref_name }}
         run: |
           test -f frontend/apps/tools/dist/index.html
+          rm -rf tools/assets
           cp -a frontend/apps/tools/dist/. tools/
           git add tools
           if git diff --cached --quiet; then
@@ -57,5 +63,5 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git commit -m "build(tools): publish compiled Pizzalog Tools frontend"
-            git push origin HEAD:main
+            git push origin "HEAD:${TARGET_BRANCH}"
           fi
