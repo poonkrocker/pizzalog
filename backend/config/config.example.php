@@ -67,6 +67,8 @@ return [
     'cors' => [
         // Orígenes autorizados a consumir la API.
         'allowed_origins' => [
+            'https://tools.pizzalog.net',
+            'https://staging.pizzalog.net',
             'https://app.pizzalog.net',    // panel de administración / TPV web
             'https://pizzalog.net',        // La Carta pública (pizzalog.net/{slug})
             'http://localhost:5173',       // desarrollo local panel (Vite)

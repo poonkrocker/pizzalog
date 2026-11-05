@@ -130,6 +130,27 @@ export function ToolsAuthGate() {
     }
     const savedToken: string = saved;
 
+    if (savedToken === 'guest-demo-token') {
+      const guestAccount: Account = {
+        id: 0,
+        email: 'demo@pizzalog.net',
+        name: 'Invitado Demo',
+        expires_at: null,
+      };
+      let demoWs: ToolsWorkspaceState;
+      try {
+        const raw = localStorage.getItem('pizzalog_tools_guest_workspace');
+        demoWs = raw ? (JSON.parse(raw) as ToolsWorkspaceState) : createInitialDemoWorkspace();
+      } catch {
+        demoWs = createInitialDemoWorkspace();
+      }
+      setToken('guest-demo-token');
+      setAccount(guestAccount);
+      setWorkspace(demoWs);
+      setLoading(false);
+      return;
+    }
+
     async function restore() {
       try {
         const me = await api<{ account: Account }>('/tools/auth/me', savedToken);
@@ -266,6 +287,26 @@ export function ToolsAuthGate() {
     setError('');
     setNotice('');
     setMode('login');
+  }
+
+  function startGuestDemo() {
+    const guestAccount: Account = {
+      id: 0,
+      email: 'demo@pizzalog.net',
+      name: 'Invitado Demo',
+      expires_at: null,
+    };
+    let demoWs: ToolsWorkspaceState;
+    try {
+      const raw = localStorage.getItem('pizzalog_tools_guest_workspace');
+      demoWs = raw ? (JSON.parse(raw) as ToolsWorkspaceState) : createInitialDemoWorkspace();
+    } catch {
+      demoWs = createInitialDemoWorkspace();
+    }
+    writeSessionToken('guest-demo-token');
+    setToken('guest-demo-token');
+    setAccount(guestAccount);
+    setWorkspace(demoWs);
   }
 
   if (loading) {
@@ -420,13 +461,21 @@ export function ToolsAuthGate() {
           <span style={{ color: '#888' }}>Tools v1.0</span>
         </div>
         <small style={{ marginTop: '0.75rem', display: 'block', color: '#666' }}>
-          ¿Todavía no tenés acceso? La cuenta se habilita automáticamente al suscribirte.
+          ¿Todavía no tenés cuenta? Podés probar la demo interactiva en vivo o suscribirte para acceso permanente.
         </small>
-        <div style={{ marginTop: '0.75rem', borderTop: '1px solid #44372e', paddingTop: '0.75rem', textAlign: 'center' }}>
+        <div style={{ marginTop: '0.85rem', borderTop: '1px solid #44372e', paddingTop: '0.85rem', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <button
+            type="button"
+            className="btn btn--secondary"
+            style={{ width: '100%', padding: '10px 14px', fontSize: '0.88rem', borderColor: '#d7a35a', color: '#f7d399', fontWeight: 600, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8 }}
+            onClick={startGuestDemo}
+          >
+            🚀 Explorar Demo en Vivo (Sin Registro)
+          </button>
           <button
             type="button"
             className="link"
-            style={{ color: '#d7a35a', fontWeight: 600, fontSize: '0.86rem' }}
+            style={{ color: '#d7a35a', fontWeight: 600, fontSize: '0.86rem', textAlign: 'center' }}
             onClick={() => setShowPlans(true)}
           >
             ✨ Ver Planes, Precios y Medios de Pago

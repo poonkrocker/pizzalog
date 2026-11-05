@@ -1,5 +1,6 @@
 # Configuración con credenciales reales: jamás al repo
 /config/config.php
+/config/config.local.php
 
 # Logs y basura
 *.log

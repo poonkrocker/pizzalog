@@ -157,6 +157,15 @@ export function App({
 
   useEffect(() => {
     const workspaceSnapshot = state;
+    if (account.id === 0 || token === 'guest-demo-token') {
+      try {
+        localStorage.setItem('pizzalog_tools_guest_workspace', JSON.stringify(workspaceSnapshot));
+      } catch {
+        // Ignorar si el storage local está lleno
+      }
+      return;
+    }
+
     const timer = window.setTimeout(() => {
       saveQueueRef.current = saveQueueRef.current
         .catch(() => undefined)
@@ -184,7 +193,7 @@ export function App({
         });
     }, 650);
     return () => window.clearTimeout(timer);
-  }, [state, token]);
+  }, [state, token, account.id]);
 
   const t = I18N[state.locale] ?? I18N['es-AR'];
   const canChangeCurrency =
@@ -1239,6 +1248,39 @@ export function App({
       {workspaceSaveError && <div className="alert-banner">⚠️ No se pudieron guardar tus cambios: {workspaceSaveError}</div>}
       {importNotice && <div className="notice-banner">{importNotice}</div>}
       {snapshotNotice && <div className="notice-banner">{snapshotNotice}</div>}
+
+      {/* Banner de Modo Invitado / Demo en vivo */}
+      {account.id === 0 && (
+        <div style={{ background: '#7c2d12', border: '1px solid #ea580c', borderRadius: 10, padding: '12px 18px', margin: '0 0 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, color: '#ffedd5' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: '1.4rem' }}>🚀</span>
+            <div>
+              <strong style={{ color: '#fff', fontSize: '0.96rem' }}>Estás probando la Demo Interactiva en vivo (Modo Invitado)</strong>
+              <div style={{ fontSize: '0.82rem', color: '#fed7aa', marginTop: 2 }}>
+                Podés editar recetas, probar el simulador de rentabilidad y la matriz BCG. Los cambios se guardan localmente en tu navegador.
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button
+              type="button"
+              className="btn btn--primary"
+              style={{ fontSize: '0.84rem', padding: '6px 14px', background: '#ea580c', borderColor: '#ea580c', color: '#fff', fontWeight: 700 }}
+              onClick={() => setShowPlansModal(true)}
+            >
+              ✨ Ver Planes & Suscribirme
+            </button>
+            <button
+              type="button"
+              className="btn btn--secondary"
+              style={{ fontSize: '0.82rem', background: 'rgba(255,255,255,0.15)', color: '#fff', borderColor: 'transparent' }}
+              onClick={onLogout}
+            >
+              Iniciar sesión / Salir
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Banner de datos de demostración y acciones rápidas */}
       {isDemoWorkspace(state) && (
