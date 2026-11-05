@@ -78,7 +78,7 @@ export type {
   ProductListItem,
 } from './analytics';
 export type { DoughProfileInput } from '../types';
-export type { MovementInput } from './supplies';
+export type { MovementInput, PriceListAlias, PriceListApplyItem, PriceListApplyResult, SupplyPriceHistoryEntry } from './supplies';
 export type { OptionInput, VariantUpdateInput } from './variants';
 export type { BusinessUpdateInput, BusinessHoursResponse } from './business';
 export type { ComboGroupInput } from './combos';

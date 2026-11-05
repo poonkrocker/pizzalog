@@ -164,4 +164,167 @@ class ToolsAuthController
             ],
         ]);
     }
+
+    /**
+     * POST /tools/auth/activate
+     * Activa una cuenta post-pago y define la contraseña inicial a partir del token de un solo uso.
+     */
+    public function activate(Request $req): void
+    {
+        $token = trim((string) $req->input('token', ''));
+        $password = (string) $req->input('password', '');
+
+        if ($token === '' || strlen($token) > 128) {
+            Response::error('Token de activación inválido', 422);
+        }
+        if (strlen($password) < 8 || strlen($password) > 1024) {
+            Response::error('La contraseña debe tener al menos 8 caracteres', 422);
+        }
+
+        $pdo = Database::pdo();
+        $stmt = $pdo->prepare(
+            'SELECT id, email, environment, name, is_active, expires_at
+               FROM tools_accounts
+              WHERE activation_token = ?
+                AND (activation_token_expires_at IS NULL OR activation_token_expires_at > NOW())
+              LIMIT 1'
+        );
+        $stmt->execute([$token]);
+        $account = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+        if (!$account) {
+            Response::error('El enlace de activación expiró o es inválido. Si ya activaste tu cuenta, ingresá directamente con tu contraseña.', 404);
+        }
+
+        $hash = password_hash($password, PASSWORD_DEFAULT);
+        $update = $pdo->prepare(
+            'UPDATE tools_accounts
+                SET password_hash = ?,
+                    activation_token = NULL,
+                    activation_token_expires_at = NULL,
+                    is_active = 1,
+                    last_login_at = NOW()
+              WHERE id = ?'
+        );
+        $update->execute([$hash, (int) $account['id']]);
+
+        $jwtConfig = Config::get('jwt', []);
+        $jwtSecret = (string)($jwtConfig['secret'] ?? '');
+        $jwtToken = Jwt::encode(
+            [
+                'sub' => (int) $account['id'],
+                'aud' => 'pizzalog-tools',
+                'env' => $account['environment'],
+            ],
+            $jwtSecret,
+            max(300, min((int) ($jwtConfig['ttl'] ?? 28800), 43200)),
+            (string) ($jwtConfig['issuer'] ?? 'pizzalog')
+        );
+
+        Response::ok([
+            'token' => $jwtToken,
+            'account' => [
+                'id' => (int) $account['id'],
+                'email' => (string) $account['email'],
+                'name' => (string) $account['name'],
+                'expires_at' => $account['expires_at'],
+            ],
+        ]);
+    }
+
+    /**
+     * POST /tools/auth/forgot-password
+     * Envía enlace de recuperación por correo electrónico.
+     */
+    public function forgotPassword(Request $req): void
+    {
+        $email = strtolower(trim((string) $req->input('email', '')));
+        $environment = (string) $req->input('environment', 'production');
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            Response::error('Ingresá un email válido', 422);
+        }
+
+        $pdo = Database::pdo();
+        $stmt = $pdo->prepare('SELECT id, name, is_active FROM tools_accounts WHERE email = ? AND environment = ? LIMIT 1');
+        $stmt->execute([$email, $environment]);
+        $account = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+        if ($account && (int) $account['is_active'] === 1) {
+            $resetToken = bin2hex(random_bytes(32));
+            $tokenExpiresAt = date('Y-m-d H:i:s', strtotime('+2 hours'));
+            $pdo->prepare('UPDATE tools_accounts SET activation_token = ?, activation_token_expires_at = ? WHERE id = ?')
+                ->execute([$resetToken, $tokenExpiresAt, (int) $account['id']]);
+
+            $toolsBaseUrl = trim((string) (Config::get('tools', [])['url'] ?? 'https://tools.pizzalog.net'), '/');
+            $resetLink = "{$toolsBaseUrl}/?reset={$resetToken}";
+            \Pizzalog\Services\Mailer::sendPasswordReset($email, (string) $account['name'], $resetLink);
+        }
+
+        Response::ok(['sent' => true]);
+    }
+
+    /**
+     * POST /tools/auth/reset-password
+     * Establece la nueva contraseña usando el token de recuperación.
+     */
+    public function resetPassword(Request $req): void
+    {
+        $token = trim((string) $req->input('token', ''));
+        $password = (string) $req->input('password', '');
+
+        if ($token === '' || strlen($token) > 128) {
+            Response::error('Token inválido', 422);
+        }
+        if (strlen($password) < 8 || strlen($password) > 1024) {
+            Response::error('La contraseña debe tener al menos 8 caracteres', 422);
+        }
+
+        $pdo = Database::pdo();
+        $stmt = $pdo->prepare(
+            'SELECT id, email, environment, name, is_active, expires_at
+               FROM tools_accounts
+              WHERE activation_token = ?
+                AND activation_token_expires_at > NOW()
+              LIMIT 1'
+        );
+        $stmt->execute([$token]);
+        $account = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+        if (!$account) {
+            Response::error('El enlace de recuperación venció o ya fue utilizado.', 404);
+        }
+
+        $hash = password_hash($password, PASSWORD_DEFAULT);
+        $pdo->prepare(
+            'UPDATE tools_accounts
+                SET password_hash = ?,
+                    activation_token = NULL,
+                    activation_token_expires_at = NULL,
+                    last_login_at = NOW()
+              WHERE id = ?'
+        )->execute([$hash, (int) $account['id']]);
+
+        $jwtConfig = Config::get('jwt', []);
+        $jwtSecret = (string)($jwtConfig['secret'] ?? '');
+        $jwtToken = Jwt::encode(
+            [
+                'sub' => (int) $account['id'],
+                'aud' => 'pizzalog-tools',
+                'env' => $account['environment'],
+            ],
+            $jwtSecret,
+            max(300, min((int) ($jwtConfig['ttl'] ?? 28800), 43200)),
+            (string) ($jwtConfig['issuer'] ?? 'pizzalog')
+        );
+
+        Response::ok([
+            'token' => $jwtToken,
+            'account' => [
+                'id' => (int) $account['id'],
+                'email' => (string) $account['email'],
+                'name' => (string) $account['name'],
+                'expires_at' => $account['expires_at'],
+            ],
+        ]);
+    }
 }

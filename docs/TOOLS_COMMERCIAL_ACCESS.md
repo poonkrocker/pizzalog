@@ -39,7 +39,7 @@ Content-Type: application/json
 - El login limita a 10 intentos por combinación de email/IP cada 15 minutos; solo se almacenan hashes de email e IP.
 - El workspace queda aislado por `tools_account_id`; no se guarda en `localStorage`.
 - El parser del navegador solo lee valores; no ejecuta macros ni fórmulas.
-- Archivos: XLSX/CSV, hasta 8 MB, 5 hojas, 500 filas, 25 columnas y 250 caracteres por celda.
+- Archivos: XLSX/CSV, hasta 20 MB, 30 hojas, 10.000 filas en total, 200 columnas por hoja, 500.000 celdas por archivo y 2.000 caracteres por celda. Si el servicio de IA no responde o se agota la cuota diaria (20 previsualizaciones/día), el sistema pasa automáticamente al motor heurístico determinístico local sin interrumpir la importación.
 - La previsualización IA requiere sesión y tiene un límite de 20 solicitudes diarias por cuenta; DeepSeek recibe solo las primeras 20 filas de cada hoja para identificar encabezados, no la planilla completa.
 - DeepSeek propone exclusivamente el mapeo de columnas. La aplicación normaliza y valida los valores de forma determinística; la persona revisa la vista previa y confirma antes de incorporar datos.
 - La importación no inserta datos en la base operativa de App.

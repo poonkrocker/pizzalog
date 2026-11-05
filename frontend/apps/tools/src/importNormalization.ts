@@ -153,7 +153,8 @@ function hasCurrencyRate(
 export function applyImportMappings(
   current: ToolsWorkspaceState,
   sheets: ParsedImportSheet[],
-  mappings: ImportSheetMapping[]
+  mappings: ImportSheetMapping[],
+  customEquivalences?: Record<string, string>
 ): AppliedImport {
   const ingredients = [...current.catalog.ingredients];
   const purchasePrices = [...current.catalog.purchase_prices];
@@ -165,6 +166,11 @@ export function applyImportMappings(
   const usedIngredientIds = new Set(ingredients.map((item) => item.id));
   const usedRecipeIds = new Set(recipes.map((item) => item.id));
   const knownIngredients = new Map(ingredients.map((item) => [normalizedName(item.name), item]));
+  const equivalences: Record<string, string> = { ...(current.equivalences ?? {}), ...(customEquivalences ?? {}) };
+  for (const [aliasKey, targetId] of Object.entries(equivalences)) {
+    const target = ingredients.find((i) => i.id === targetId);
+    if (target) knownIngredients.set(aliasKey, target);
+  }
   const doughProfiles = sheets.flatMap((sheet) => sheet.doughProfiles ?? []);
   const doughRecipesByName = new Map<string, Recipe>();
   let doughProfilesAdded = false;
@@ -666,4 +672,32 @@ export function applyImportMappings(
       ...warnings.slice(0, 60),
     ],
   };
+}
+
+export function findUnmatchedComponents(
+  current: ToolsWorkspaceState,
+  sheets: ParsedImportSheet[],
+  mappings: ImportSheetMapping[],
+  customEquivalences?: Record<string, string>
+): string[] {
+  const equivalences = { ...(current.equivalences ?? {}), ...(customEquivalences ?? {}) };
+  const known = new Set(current.catalog.ingredients.map((i) => normalizedName(i.name)));
+  for (const alias of Object.keys(equivalences)) {
+    known.add(alias);
+  }
+  const unmatched = new Set<string>();
+
+  for (const mapping of mappings) {
+    if (mapping.kind !== 'recipes') continue;
+    const sheet = sheets[mapping.sheet_index];
+    if (!sheet) continue;
+    const rows = sheet.rows.slice(mapping.header_row_index + 1);
+    for (const row of rows) {
+      const compName = cell(row, mapping, 'component_name', 'ingredient_name').trim();
+      if (compName && !known.has(normalizedName(compName))) {
+        unmatched.add(compName);
+      }
+    }
+  }
+  return Array.from(unmatched);
 }

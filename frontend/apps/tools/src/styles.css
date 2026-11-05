@@ -455,3 +455,27 @@ table.kit-table select {
 .smart-import-field-map .field span, .smart-import-edit-grid .field span { font-size: 11px; color: var(--muted); font-weight: 700; }
 .smart-import-field-map select, .smart-import-edit-grid select { width: 100%; min-width: 0; }
 .smart-import-warning-note { margin: 8px 0; color: var(--warn); font-size: 12px; }
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .printable-report, .printable-report * {
+    visibility: visible;
+  }
+  .printable-report {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 10mm;
+    background: #fff;
+    color: #111;
+  }
+  .no-print, .modal-backdrop {
+    background: transparent !important;
+    box-shadow: none !important;
+    position: static !important;
+  }
+}

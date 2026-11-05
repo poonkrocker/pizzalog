@@ -36,7 +36,10 @@ use Pizzalog\Controllers\TableController;
 use Pizzalog\Controllers\TableSessionController;
 use Pizzalog\Controllers\UserController;
 use Pizzalog\Controllers\StaffController;
+use Pizzalog\Controllers\PriceListController;
 use Pizzalog\Controllers\ToolsAuthController;
+use Pizzalog\Controllers\BillingWebhookController;
+use Pizzalog\Controllers\ToolsSyncController;
 use Pizzalog\Controllers\ToolsWorkspaceController;
 use Pizzalog\Controllers\ToolsAdminController;
 use Pizzalog\Controllers\ToolsImportController;
@@ -60,10 +63,21 @@ $router->post('/auth/change-password', [AuthController::class, 'changePassword']
 
 // --- Pizzalog Tools (cuentas comerciales independientes de App) -------
 $router->post('/tools/auth/login', [ToolsAuthController::class, 'login']);
+$router->post('/tools/auth/activate', [ToolsAuthController::class, 'activate']);
+$router->post('/tools/auth/forgot-password', [ToolsAuthController::class, 'forgotPassword']);
+$router->post('/tools/auth/reset-password', [ToolsAuthController::class, 'resetPassword']);
 $router->get('/tools/auth/me', [ToolsAuthController::class, 'me'], [$toolsAuth]);
+
+// --- Facturación & Webhooks multicanal (LemonSqueezy + Mercado Pago) ---
+$router->post('/billing/webhook/lemonsqueezy', [BillingWebhookController::class, 'lemonSqueezy']);
+$router->post('/billing/webhook/mercadopago', [BillingWebhookController::class, 'mercadoPago']);
 $router->get('/tools/workspace', [ToolsWorkspaceController::class, 'show'], [$toolsAuth]);
 $router->put('/tools/workspace', [ToolsWorkspaceController::class, 'save'], [$toolsAuth]);
 $router->post('/tools/import/preview', [ToolsImportController::class, 'preview'], [$toolsAuth]);
+$router->get('/tools/sync/status', [ToolsSyncController::class, 'status'], [$toolsAuth]);
+$router->post('/tools/sync/link-app', [ToolsSyncController::class, 'linkApp'], [$toolsAuth]);
+$router->post('/tools/sync/preview', [ToolsSyncController::class, 'preview'], [$toolsAuth]);
+$router->post('/tools/sync/apply', [ToolsSyncController::class, 'apply'], [$toolsAuth]);
 $router->post('/tools/admin/accounts', [ToolsAdminController::class, 'createAccount'], [$auth, $admin]);
 
 // --- Categorías -------------------------------------------------------
@@ -275,6 +289,11 @@ $router->put('/suppliers/{id}', [SupplierController::class, 'update'], [$auth, $
 $router->delete('/suppliers/{id}', [SupplierController::class, 'destroy'], [$auth, $manage]);
 
 // --- Insumos ----------------------------------------------------------
+// Actualizador rápido de precios por lista de proveedor
+$router->get('/supplies/price-lists/aliases', [PriceListController::class, 'aliases'], [$auth, $manage]);
+$router->post('/supplies/price-lists/apply', [PriceListController::class, 'apply'], [$auth, $manage]);
+$router->post('/supplies/price-lists/{batch}/revert', [PriceListController::class, 'revert'], [$auth, $manage]);
+$router->get('/supplies/{id}/price-history', [PriceListController::class, 'history'], [$auth, $manage]);
 $router->get('/supplies', [SupplyController::class, 'index'], [$auth]);
 $router->get('/supplies/low-stock', [SupplyController::class, 'lowStock'], [$auth]);
 $router->post('/supplies', [SupplyController::class, 'store'], [$auth, $manage]);

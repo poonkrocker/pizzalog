@@ -16,13 +16,27 @@ import { goldenCases } from '@pizzalog/cost-engine-fixtures';
 import {
   I18N,
   createInitialDemoWorkspace,
+  createEmptyWorkspace,
+  isDemoWorkspace,
   type LocaleCode,
   type OperatingExpenseItem,
   type ToolsWorkspaceState,
 } from './demoData';
+import { CommercialPlansModal } from './CommercialPlansModal';
+import { ContextualHelpModal, type HelpTopic } from './ContextualHelpModal';
+import { ExecutiveReportModal } from './ExecutiveReportModal';
 import { downloadCustomProfitKitXlsx } from './xlsxExporter';
-import { parseImportFile, type ParsedImportSheet } from './importFileParser';
-import { applyImportMappings, type ImportSheetMapping } from './importNormalization';
+import { parseImportFile, type ParsedImportSheet } from '@pizzalog/price-list/file';
+import {
+  detectPriceListColumns,
+  extractPriceListItems,
+  matchPriceList,
+  rematch,
+  summarizeMatches,
+  type PriceListMatch,
+  type CatalogEntry,
+} from '@pizzalog/price-list';
+import { applyImportMappings, findUnmatchedComponents, type ImportSheetMapping } from './importNormalization';
 
 const ALL_UNITS: UnitCode[] = ['g', 'kg', 'mg', 'lb', 'oz', 'ml', 'cc', 'L', 'fl_oz_us', 'gal_us', 'unit', 'dozen'];
 
@@ -64,17 +78,23 @@ export function App({
   token,
   account,
   initialWorkspace,
+  initialUpdatedAt,
   onLogout,
 }: {
   token: string;
   account: ToolsAccount;
   initialWorkspace: ToolsWorkspaceState;
+  initialUpdatedAt?: string | null;
   onLogout: () => void;
 }) {
   const [state, setState] = useState<ToolsWorkspaceState>(initialWorkspace);
+  const workspaceUpdatedAtRef = useRef<string | null>(initialUpdatedAt ?? null);
+  const [workspaceConflict, setWorkspaceConflict] = useState<string | null>(null);
+  const [importEquivalences, setImportEquivalences] = useState<Record<string, string>>({});
+  const [replaceConfirmed, setReplaceConfirmed] = useState(false);
 
   const [activeTab, setActiveTab] = useState<
-    'ingredients' | 'subrecipes' | 'recipes' | 'expenses' | 'sales' | 'snapshots' | 'simulator' | 'cost-history' | 'menu-engineering' | 'production' | 'profit-simulator'
+    'ingredients' | 'subrecipes' | 'recipes' | 'expenses' | 'sales' | 'snapshots' | 'simulator' | 'cost-history' | 'menu-engineering' | 'production' | 'profit-simulator' | 'sync'
   >('recipes');
   const [simulationRecipeId, setSimulationRecipeId] = useState('');
   const [simulationBatches, setSimulationBatches] = useState(1);
@@ -84,6 +104,13 @@ export function App({
   const [snapshotNotice, setSnapshotNotice] = useState<string | null>(null);
   const [productionUnits, setProductionUnits] = useState<Record<string, number>>({});
   const [profitScenario, setProfitScenario] = useState({ units: 0, price: 0, variableCost: 0, fixedCosts: 0 });
+  const [syncStatus, setSyncStatus] = useState<{ linked: boolean; business_id?: number | null; business_name?: string | null; app_user_email?: string | null } | null>(null);
+  const [syncLinkEmail, setSyncLinkEmail] = useState('');
+  const [syncLinkPassword, setSyncLinkPassword] = useState('');
+  const [syncLoading, setSyncLoading] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
+  const [syncPreviewData, setSyncPreviewData] = useState<any | null>(null);
   const [profitProductId, setProfitProductId] = useState('');
   const [importError, setImportError] = useState<string | null>(null);
   const [importNotice, setImportNotice] = useState<string | null>(null);
@@ -101,13 +128,50 @@ export function App({
     mappingMode: 'local' | 'ai';
   } | null>(null);
 
+  // Estado del Actualizador de Precios por Lista de Proveedor
+  const [showPriceListModal, setShowPriceListModal] = useState(false);
+  const [priceListMatches, setPriceListMatches] = useState<PriceListMatch[]>([]);
+  const [priceListFileName, setPriceListFileName] = useState<string>('');
+  const [priceListSelectedRows, setPriceListSelectedRows] = useState<Record<number, boolean>>({});
+  const [priceListFilter, setPriceListFilter] = useState<'all' | 'matched' | 'unmatched' | 'warnings'>('all');
+  const [priceListLoading, setPriceListLoading] = useState(false);
+
   // Estado del Constructor Visual Interactivo (Modal)
   const [editingRecipe, setEditingRecipe] = useState<Recipe | null>(null);
   const [isDoughMode, setIsDoughMode] = useState<boolean>(false);
   const [builderError, setBuilderError] = useState<string | null>(null);
 
+  // Modales comerciales, reportes, ayuda contextual y confirmación de demo
+  const [showPlansModal, setShowPlansModal] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [showHelpModal, setShowHelpModal] = useState(false);
+  const [helpTopic, setHelpTopic] = useState<HelpTopic>('units');
+  const [showClearDemoConfirm, setShowClearDemoConfirm] = useState(false);
+
+  // Filtros y Comparación de Ingeniería de Menú
+  const [menuPeriodFilter, setMenuPeriodFilter] = useState<string>('all');
+  const [menuChannelFilter, setMenuChannelFilter] = useState<string>('all');
+  const [menuCompareMode, setMenuCompareMode] = useState<boolean>(false);
+  const [menuComparePeriod, setMenuComparePeriod] = useState<string>('');
+
+  // Simulador Estratégico de Negocio
+  const [simMode, setSimMode] = useState<'business' | 'single'>('business');
+  const [simPriceDelta, setSimPriceDelta] = useState<number>(0);
+  const [simCostDelta, setSimCostDelta] = useState<number>(0);
+  const [simVolumeDelta, setSimVolumeDelta] = useState<number>(0);
+  const [simCategoryFilter, setSimCategoryFilter] = useState<'all' | 'flour' | 'dairy' | 'meat'>('all');
+
   useEffect(() => {
     const workspaceSnapshot = state;
+    if (account.id === 0 || token === 'guest-demo-token') {
+      try {
+        localStorage.setItem('pizzalog_tools_guest_workspace', JSON.stringify(workspaceSnapshot));
+      } catch {
+        // Ignorar si el storage local está lleno
+      }
+      return;
+    }
+
     const timer = window.setTimeout(() => {
       saveQueueRef.current = saveQueueRef.current
         .catch(() => undefined)
@@ -120,13 +184,26 @@ export function App({
                 'Content-Type': 'application/json',
                 Authorization: `Bearer ${token}`,
               },
-              body: JSON.stringify({ workspace: workspaceSnapshot }),
+              body: JSON.stringify({
+                workspace: workspaceSnapshot,
+                updated_at: workspaceUpdatedAtRef.current,
+              }),
             });
-            const payload = (await response.json()) as { ok?: boolean; error?: string };
+            const payload = (await response.json()) as { ok?: boolean; error?: string; data?: { updated_at?: string } };
+            if (response.status === 409) {
+              setWorkspaceConflict(
+                'El espacio de trabajo fue modificado en otra sesión o pestaña. Para evitar sobreescribir datos ajenos, recargá la versión más reciente del servidor o descargá una copia de seguridad.'
+              );
+              throw new Error('Conflicto de versiones (409). Hay una versión más reciente en el servidor.');
+            }
             if (!response.ok || !payload.ok) {
               throw new Error(payload.error ?? 'No se pudo guardar el espacio de trabajo');
             }
+            if (payload.data?.updated_at) {
+              workspaceUpdatedAtRef.current = payload.data.updated_at;
+            }
             setWorkspaceSaveError(null);
+            setWorkspaceConflict(null);
           } catch (err) {
             setWorkspaceSaveError(err instanceof Error ? err.message : 'Error al guardar los cambios');
           } finally {
@@ -135,7 +212,7 @@ export function App({
         });
     }, 650);
     return () => window.clearTimeout(timer);
-  }, [state, token]);
+  }, [state, token, account.id]);
 
   const t = I18N[state.locale] ?? I18N['es-AR'];
   const canChangeCurrency =
@@ -519,7 +596,7 @@ export function App({
       salesHistory: replaceWorkspaceOnImport ? [] : (state.salesHistory ?? []),
       salesPeriod: replaceWorkspaceOnImport ? null : (state.salesPeriod ?? null),
     } : state;
-    const result = applyImportMappings(importBase, smartImportPreview.sheets, smartImportPreview.mappings);
+    const result = applyImportMappings(importBase, smartImportPreview.sheets, smartImportPreview.mappings, importEquivalences);
     const total = Object.values(result.counts).reduce((sum, count) => sum + count, 0);
     if (total === 0) {
       const detected = smartImportPreview.mappings
@@ -542,7 +619,13 @@ export function App({
       backupLink.click();
       URL.revokeObjectURL(backupUrl);
     }
-    setState(result.workspace);
+    setState({
+      ...result.workspace,
+      equivalences: {
+        ...(result.workspace.equivalences ?? {}),
+        ...importEquivalences,
+      },
+    });
     const summary = [
       `Importados: ${result.counts.ingredients} insumos, ${result.counts.prices} precios, ${result.counts.recipes} recetas, ${result.counts.expenses} gastos y ${result.counts.sales} registros de ventas.`,
       ...(hasDemoSeed ? ['Se limpiaron los datos de demostración para evitar mezclarlos con la importación.'] : []),
@@ -552,6 +635,123 @@ export function App({
     setImportNotice(summary.join(' '));
     setSmartImportPreview(null);
     setReplaceWorkspaceOnImport(false);
+    setImportEquivalences({});
+    setReplaceConfirmed(false);
+  }
+
+  async function handlePriceListUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPriceListLoading(true);
+    setImportError(null);
+    setPriceListFileName(file.name);
+
+    try {
+      const sheets = await parseImportFile(file, { raw: true });
+      if (!sheets.length || !sheets[0]?.rows?.length) {
+        throw new Error('No se encontraron filas con datos en la planilla.');
+      }
+      const sheet = sheets[0];
+      const columns = detectPriceListColumns(sheet.rows);
+      if (!columns) {
+        throw new Error('No se pudo identificar una columna de producto y otra de precio en el archivo.');
+      }
+      const items = extractPriceListItems(sheet.rows, columns);
+      if (!items.length) {
+        throw new Error('No se encontraron filas con productos y precios válidos.');
+      }
+
+      const catalog: CatalogEntry[] = state.catalog.ingredients.map((ing) => {
+        const priceRec = selectEffectivePurchasePrice(
+          ing.id,
+          state.catalog.purchase_prices,
+          state.catalog.as_of_date
+        );
+        return {
+          id: ing.id,
+          name: ing.name,
+          unit: ing.base_unit,
+          current_price_per_unit: priceRec?.purchase_price != null ? Number(priceRec.purchase_price) : null,
+        };
+      });
+
+      const matchedList = matchPriceList(items, catalog);
+      setPriceListMatches(matchedList);
+
+      const initialSelected: Record<number, boolean> = {};
+      matchedList.forEach((m, idx) => {
+        if (m.target_id && m.new_price_per_unit != null) {
+          initialSelected[idx] = true;
+        }
+      });
+      setPriceListSelectedRows(initialSelected);
+      setShowPriceListModal(true);
+    } catch (err: any) {
+      setImportError(err?.message || 'Error al procesar la lista de precios');
+    } finally {
+      setPriceListLoading(false);
+      e.target.value = '';
+    }
+  }
+
+  function handlePriceListTargetChange(index: number, newTargetId: string) {
+    const catalog: CatalogEntry[] = state.catalog.ingredients.map((ing) => {
+      const priceRec = selectEffectivePurchasePrice(
+        ing.id,
+        state.catalog.purchase_prices,
+        state.catalog.as_of_date
+      );
+      return {
+        id: ing.id,
+        name: ing.name,
+        unit: ing.base_unit,
+        current_price_per_unit: priceRec?.purchase_price != null ? Number(priceRec.purchase_price) : null,
+      };
+    });
+    const updated = rematch(priceListMatches[index]!, catalog, { target_id: newTargetId || null });
+    const next = [...priceListMatches];
+    next[index] = updated;
+    setPriceListMatches(next);
+
+    if (newTargetId) {
+      setPriceListSelectedRows((prev) => ({ ...prev, [index]: true }));
+    } else {
+      setPriceListSelectedRows((prev) => ({ ...prev, [index]: false }));
+    }
+  }
+
+  function confirmPriceListApply() {
+    const today = new Date().toISOString().slice(0, 10);
+    const toApply = priceListMatches.filter((m, idx) => priceListSelectedRows[idx] && m.target_id && m.new_price_per_unit != null);
+    if (!toApply.length) return;
+
+    setState((prev) => {
+      const newPrices = [...prev.catalog.purchase_prices];
+      toApply.forEach((m) => {
+        const ing = prev.catalog.ingredients.find((i) => i.id === m.target_id);
+        if (!ing) return;
+        newPrices.push({
+          ingredient_id: m.target_id!,
+          purchase_date: today,
+          purchase_price: m.item.price,
+          currency: prev.currency,
+          pack_quantity: m.presentation?.quantity ?? 1,
+          pack_unit: (m.presentation?.unit as UnitCode) ?? ing.base_unit,
+          yield_pct: 100,
+          supplier: priceListFileName ? `Lista: ${priceListFileName}` : undefined,
+        });
+      });
+      return {
+        ...prev,
+        catalog: {
+          ...prev.catalog,
+          purchase_prices: newPrices,
+        },
+      };
+    });
+
+    setImportNotice(`Se aplicaron ${toApply.length} precios actualizados con fecha de hoy (${today}) preservando el historial.`);
+    setShowPriceListModal(false);
   }
 
   function handleImportJson(file: File) {
@@ -580,97 +780,385 @@ export function App({
     reader.readAsText(file);
   }
 
-  // Cálculos mensuales de facturación, CMV, contribución marginal e Ingeniería de Menú
-  const monthlySummary = useMemo(() => {
-    const products = state.catalog.recipes.filter((r) => r.recipe_type === 'product');
+  async function loadSyncStatus() {
+    setSyncLoading(true);
+    setSyncError(null);
+    try {
+      const res = await fetch(`${API_URL}/tools/sync/status`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (data.ok && data.data) {
+        setSyncStatus(data.data);
+      }
+    } catch {
+      // Ignorar si no hay conexión
+    } finally {
+      setSyncLoading(false);
+    }
+  }
+
+  async function handleLinkApp(e: React.FormEvent) {
+    e.preventDefault();
+    setSyncLoading(true);
+    setSyncError(null);
+    setSyncNotice(null);
+    try {
+      const res = await fetch(`${API_URL}/tools/sync/link-app`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ email: syncLinkEmail, password: syncLinkPassword }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Error al vincular cuenta');
+      setSyncStatus(data.data);
+      setSyncNotice(`¡Vinculación exitosa con "${data.data.business_name}"!`);
+      setSyncLinkPassword('');
+    } catch (err: any) {
+      setSyncError(err?.message || 'No se pudo vincular la cuenta');
+    } finally {
+      setSyncLoading(false);
+    }
+  }
+
+  async function handleSyncPreview(direction: 'to_app' | 'from_app') {
+    setSyncLoading(true);
+    setSyncError(null);
+    try {
+      const res = await fetch(`${API_URL}/tools/sync/preview`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ direction }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Error al obtener previsualización');
+      setSyncPreviewData(data.data);
+    } catch (err: any) {
+      setSyncError(err?.message || 'Error al previsualizar sincronización');
+    } finally {
+      setSyncLoading(false);
+    }
+  }
+
+  async function handleSyncApply(direction: 'to_app' | 'from_app') {
+    if (!confirm(direction === 'to_app'
+      ? '¿Exportar insumos y costos desde Tools hacia Pizzalog App?'
+      : '¿Importar catálogo de Pizzalog App a Tools?')) return;
+
+    setSyncLoading(true);
+    setSyncError(null);
+    setSyncNotice(null);
+    try {
+      const res = await fetch(`${API_URL}/tools/sync/apply`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ direction }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Error al sincronizar');
+
+      if (direction === 'to_app') {
+        setSyncNotice(`Sincronización completada hacia Pizzalog App: ${data.data.created_supplies} insumos creados, ${data.data.updated_supplies} precios actualizados.`);
+      } else {
+        const wsRes = await fetch(`${API_URL}/tools/workspace`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const wsData = await wsRes.json();
+        if (wsData.ok && wsData.data?.workspace) {
+          setState(wsData.data.workspace);
+        }
+        setSyncNotice(`Sincronización completada desde Pizzalog App: se cargaron ${data.data.imported_ingredients} insumos y ${data.data.imported_prices} precios en tu espacio de trabajo.`);
+      }
+      setSyncPreviewData(null);
+    } catch (err: any) {
+      setSyncError(err?.message || 'Error al sincronizar');
+    } finally {
+      setSyncLoading(false);
+    }
+  }
+
+  // Función auxiliar de cálculo de resumen y métricas de menú con filtros de período y canal
+  function computeFilteredSummary(
+    catalogRecipes: Recipe[],
+    results: Map<string, ReturnType<CostEngine['calculateRecipeCost']>>,
+    wsState: ToolsWorkspaceState,
+    periodFilter: string = 'all',
+    channelFilter: string = 'all'
+  ) {
+    const products = catalogRecipes.filter((r) => r.recipe_type === 'product');
+    const salesHistory = wsState.salesHistory ?? [];
+
     const rows = products.map((prod) => {
-      const res = recipeResults.get(prod.id);
-      const salesPlan = state.productSalesMap?.[prod.id] ?? { sellingPrice: null };
+      const res = results.get(prod.id);
+      const salesPlan = wsState.productSalesMap?.[prod.id] ?? { sellingPrice: null };
       const customPrice = salesPlan.sellingPrice && salesPlan.sellingPrice > 0 ? salesPlan.sellingPrice : undefined;
       const pricing = res
         ? calculatePricingScenario({
             unit_cost: res.raw_unit_cost,
             status: res.status,
-            currency: state.currency,
-            target_food_cost_pct: prod.target_food_cost_pct ?? state.defaultTargetFoodCostPct,
-            rounding_increment: state.defaultRoundingIncrement,
+            currency: wsState.currency,
+            target_food_cost_pct: prod.target_food_cost_pct ?? wsState.defaultTargetFoodCostPct,
+            rounding_increment: wsState.defaultRoundingIncrement,
             rounding_mode: 'ceil',
             selling_price: customPrice,
-            packaging_cost: state.defaultPackagingCost,
-            channel_fee_pct: state.defaultChannelFeePct,
+            packaging_cost: wsState.defaultPackagingCost,
+            channel_fee_pct: wsState.defaultChannelFeePct,
           })
         : null;
 
+      // Filtrar registros de ventas para este producto
+      let units: number | null = null;
+      let periodGrossRevenue: number | null = null;
+      let periodNetRevenue: number | null = null;
+
+      const matchingSales = salesHistory.filter((sale) => {
+        if (sale.product_id !== prod.id) return false;
+        if (periodFilter !== 'all' && !sale.period_start.startsWith(periodFilter)) return false;
+        if (channelFilter !== 'all' && sale.channel !== channelFilter) return false;
+        return true;
+      });
+
+      if (matchingSales.length > 0) {
+        units = matchingSales.reduce((acc, s) => acc + s.quantity, 0);
+        periodGrossRevenue = matchingSales.reduce((acc, s) => acc + (s.gross_revenue ?? 0), 0);
+        periodNetRevenue = matchingSales.reduce((acc, s) => acc + (s.net_revenue ?? 0), 0);
+      } else if (periodFilter === 'all' && channelFilter === 'all' && salesPlan.monthlyUnitsSold !== null && salesPlan.monthlyUnitsSold !== undefined && Number.isFinite(Number(salesPlan.monthlyUnitsSold))) {
+        units = Math.max(0, Number(salesPlan.monthlyUnitsSold));
+      }
+
       const isComplete = res?.status === 'complete' && pricing?.status === 'complete';
-      const hasSalesData = salesPlan.monthlyUnitsSold !== null && salesPlan.monthlyUnitsSold !== undefined &&
-        Number.isFinite(Number(salesPlan.monthlyUnitsSold));
-      const units = hasSalesData ? Math.max(0, Number(salesPlan.monthlyUnitsSold)) : null;
+      const hasSalesData = units !== null;
       const unitCost = isComplete && res?.raw_unit_cost ? res.raw_unit_cost : 0;
       const evaluatedPrice = isComplete && pricing?.raw_evaluated_price ? pricing.raw_evaluated_price : 0;
       const unitGrossProfit = isComplete && pricing?.raw_gross_profit ? pricing.raw_gross_profit : 0;
+
+      const monthlyRevenue = isComplete && hasSalesData
+        ? (periodNetRevenue !== null && periodNetRevenue > 0 ? periodNetRevenue : evaluatedPrice * units!)
+        : null;
+      const monthlyCogs = isComplete && hasSalesData ? unitCost * units! : null;
+      const monthlyContribution = isComplete && hasSalesData ? unitGrossProfit * units! : null;
+
+      // Diagnóstico de datos incompletos
+      let incompleteReason: string | null = null;
+      if (!res || res.status !== 'complete') {
+        incompleteReason = 'Falta costo o precio de compra de algún ingrediente';
+      } else if (!pricing || pricing.status !== 'complete' || evaluatedPrice <= 0) {
+        incompleteReason = 'Falta definir precio de venta sugerido o manual';
+      }
 
       return {
         prod,
         res,
         pricing,
         isComplete,
+        incompleteReason,
         units,
         hasSalesData,
         customPrice: salesPlan.sellingPrice ?? null,
         unitCost,
         evaluatedPrice,
         unitGrossProfit,
-        monthlyRevenue: isComplete && hasSalesData ? evaluatedPrice * units! : 0,
-        monthlyCogs: isComplete && hasSalesData ? unitCost * units! : 0,
-        monthlyContribution: isComplete && hasSalesData ? unitGrossProfit * units! : null,
+        monthlyRevenue,
+        monthlyCogs,
+        monthlyContribution,
+        periodGrossRevenue,
+        periodNetRevenue,
       };
     });
 
     const completeRows = rows.filter((x) => x.isComplete);
     const salesRows = completeRows.filter((x) => x.hasSalesData);
-    const totalUnits = salesRows.reduce((a, b) => a + (b.units ?? 0), 0);
+    const hasSalesData = salesRows.length > 0;
+    const totalUnits = hasSalesData ? salesRows.reduce((a, b) => a + (b.units ?? 0), 0) : 0;
     const avgUnits = salesRows.length > 0 ? totalUnits / salesRows.length : 0;
     const avgUnitProfit =
       salesRows.length > 0
         ? salesRows.reduce((a, b) => a + b.unitGrossProfit, 0) / salesRows.length
         : 0;
 
-    const totalRevenue = completeRows.reduce((a, b) => a + b.monthlyRevenue, 0);
-    const totalCogs = completeRows.reduce((a, b) => a + b.monthlyCogs, 0);
-    const totalContribution = completeRows.reduce((a, b) => a + (b.monthlyContribution ?? 0), 0);
+    const totalRevenue = hasSalesData ? salesRows.reduce((a, b) => a + (b.monthlyRevenue ?? 0), 0) : 0;
+    const totalCogs = hasSalesData ? salesRows.reduce((a, b) => a + (b.monthlyCogs ?? 0), 0) : 0;
+    const totalContribution = hasSalesData ? salesRows.reduce((a, b) => a + (b.monthlyContribution ?? 0), 0) : 0;
     const weightedMarginPct = totalRevenue > 0 ? (totalContribution / totalRevenue) * 100 : 0;
 
     return {
       rows: rows.map((r) => {
         let matrixClass: 'star' | 'horse' | 'puzzle' | 'dog' | null = null;
         let matrixLabel = '—';
-        if (r.isComplete && r.hasSalesData) {
-          const highPop = (r.units ?? 0) >= avgUnits;
-          const highMargin = r.unitGrossProfit >= avgUnitProfit;
-          if (highPop && highMargin) {
-            matrixClass = 'star';
-            matrixLabel = '⭐ Estrella';
-          } else if (highPop && !highMargin) {
-            matrixClass = 'horse';
-            matrixLabel = '🐎 Caballo';
-          } else if (!highPop && highMargin) {
-            matrixClass = 'puzzle';
-            matrixLabel = '🧩 Rompecabezas';
-          } else {
+        if (!r.isComplete) {
+          matrixLabel = '⚠️ Incompleto';
+        } else if (r.hasSalesData) {
+          if (r.units === 0) {
             matrixClass = 'dog';
-            matrixLabel = '🐕 Perro';
+            matrixLabel = '0 ventas';
+          } else {
+            const highPop = (r.units ?? 0) >= avgUnits;
+            const highMargin = r.unitGrossProfit >= avgUnitProfit;
+            if (highPop && highMargin) {
+              matrixClass = 'star';
+              matrixLabel = '⭐ Estrella';
+            } else if (highPop && !highMargin) {
+              matrixClass = 'horse';
+              matrixLabel = '🐎 Caballo';
+            } else if (!highPop && highMargin) {
+              matrixClass = 'puzzle';
+              matrixLabel = '🧩 Rompecabezas';
+            } else {
+              matrixClass = 'dog';
+              matrixLabel = '🐕 Perro';
+            }
           }
+        } else {
+          matrixLabel = '— Sin datos';
         }
         return { ...r, matrixClass, matrixLabel };
       }),
       totalUnits,
-      hasSalesData: salesRows.length > 0,
+      hasSalesData,
       totalRevenue,
       totalCogs,
       totalContribution,
       weightedMarginPct,
+      avgUnits,
+      avgUnitProfit,
     };
-  }, [state, recipeResults]);
+  }
+
+  // Lista de períodos y canales disponibles en el historial de ventas
+  const availablePeriods = useMemo(() => {
+    const periods = new Set<string>();
+    for (const s of state.salesHistory ?? []) {
+      const ym = s.period_start.slice(0, 7);
+      if (ym) periods.add(ym);
+    }
+    return [...periods].sort().reverse();
+  }, [state.salesHistory]);
+
+  const availableChannels = useMemo(() => {
+    const channels = new Set<string>();
+    for (const s of state.salesHistory ?? []) {
+      if (s.channel && s.channel.trim()) channels.add(s.channel.trim());
+    }
+    return [...channels].sort();
+  }, [state.salesHistory]);
+
+  // Resumen calculado según los filtros activos de período y canal
+  const monthlySummary = useMemo(() => {
+    return computeFilteredSummary(
+      state.catalog.recipes,
+      recipeResults,
+      state,
+      menuPeriodFilter,
+      menuChannelFilter
+    );
+  }, [state, recipeResults, menuPeriodFilter, menuChannelFilter]);
+
+  // Resumen comparativo cuando el modo de comparación está activo
+  const compareSummary = useMemo(() => {
+    if (!menuCompareMode || !menuComparePeriod) return null;
+    return computeFilteredSummary(
+      state.catalog.recipes,
+      recipeResults,
+      state,
+      menuComparePeriod,
+      menuChannelFilter
+    );
+  }, [state, recipeResults, menuCompareMode, menuComparePeriod, menuChannelFilter]);
+
+  // Cálculos de Simulación Estratégica de Negocio (Escenarios Pesimista, Base, Optimista y Personalizado)
+  const simulatedBusinessResult = useMemo(() => {
+    const completeRows = monthlySummary.rows.filter((r) => r.isComplete);
+    const isFlour = (name: string) => /harina|masa|dough|poolish|biga/i.test(name);
+    const isDairy = (name: string) => /mozzarella|queso|cheese|leche|crema/i.test(name);
+    const isMeat = (name: string) => /pollo|carne|jamon|panceta|peperoni|salame/i.test(name);
+
+    const computeScenario = (volDeltaPct: number, priceDeltaPct: number, costDeltaPct: number) => {
+      let totRev = 0;
+      let totCogs = 0;
+      let totVarCosts = 0;
+      let totUnits = 0;
+
+      const factor: Record<string, number> = { monthly: 1, weekly: 52 / 12, yearly: 1 / 12 };
+      const currentExpenses = state.operatingExpenses.reduce(
+        (sum, item) => sum + item.amount * (factor[item.period] ?? 1),
+        0
+      );
+
+      const simulatedRows = completeRows.map((r) => {
+        const baseUnits = r.units ?? 0;
+        const simUnits = Math.max(0, Math.round(baseUnits * (1 + volDeltaPct / 100)));
+        const basePrice = r.evaluatedPrice;
+        const simPrice = Math.max(0, Math.round(basePrice * (1 + priceDeltaPct / 100)));
+
+        let itemCostDelta = costDeltaPct;
+        if (simCategoryFilter === 'flour' && !isFlour(r.prod.name)) itemCostDelta = 0;
+        if (simCategoryFilter === 'dairy' && !isDairy(r.prod.name)) itemCostDelta = 0;
+        if (simCategoryFilter === 'meat' && !isMeat(r.prod.name)) itemCostDelta = 0;
+
+        const simCost = r.unitCost * (1 + itemCostDelta / 100);
+        const packaging = state.defaultPackagingCost;
+        const channelFee = simPrice * (state.defaultChannelFeePct / 100);
+        const simUnitGrossProfit = simPrice - simCost - packaging - channelFee;
+        const simRev = simPrice * simUnits;
+        const simCogs = simCost * simUnits;
+        const simVar = (packaging + channelFee) * simUnits;
+        const simContribution = simUnitGrossProfit * simUnits;
+
+        totUnits += simUnits;
+        totRev += simRev;
+        totCogs += simCogs;
+        totVarCosts += simVar;
+
+        return {
+          prod: r.prod,
+          baseUnits,
+          simUnits,
+          basePrice,
+          simPrice,
+          baseCost: r.unitCost,
+          simCost,
+          baseProfit: r.unitGrossProfit,
+          simProfit: simUnitGrossProfit,
+          simRev,
+          simContribution,
+        };
+      });
+
+      const totContribution = totRev - totCogs - totVarCosts;
+      const marginPct = totRev > 0 ? (totContribution / totRev) * 100 : 0;
+      const netProfit = totContribution - currentExpenses;
+      const breakEven = marginPct > 0 ? currentExpenses / (marginPct / 100) : 0;
+      const avgContribUnit = totUnits > 0 ? totContribution / totUnits : 0;
+      const breakEvenUnits = avgContribUnit > 0 ? Math.round(currentExpenses / avgContribUnit) : 0;
+      const safetyMarginPct = breakEven > 0 && totRev > 0 ? ((totRev - breakEven) / totRev) * 100 : 0;
+
+      return {
+        totUnits,
+        totRev,
+        totCogs,
+        totVarCosts,
+        totContribution,
+        marginPct,
+        netProfit,
+        breakEven,
+        breakEvenUnits,
+        safetyMarginPct,
+        rows: simulatedRows,
+      };
+    };
+
+    const baseScenario = computeScenario(0, 0, 0);
+    const pessimisticScenario = computeScenario(-15, 0, 12);
+    const optimisticScenario = computeScenario(15, 5, 0);
+    const customScenario = computeScenario(simVolumeDelta, simPriceDelta, simCostDelta);
+
+    return {
+      base: baseScenario,
+      pessimistic: pessimisticScenario,
+      optimistic: optimisticScenario,
+      custom: customScenario,
+    };
+  }, [monthlySummary, simCategoryFilter, state.defaultPackagingCost, state.defaultChannelFeePct, state.operatingExpenses, simVolumeDelta, simPriceDelta, simCostDelta]);
 
   const totalMonthlyExpenses = useMemo(() => {
     const factor: Record<string, number> = { monthly: 1, weekly: 52 / 12, yearly: 1 / 12 };
@@ -690,6 +1178,37 @@ export function App({
 
   return (
     <div className="tools-shell">
+      {workspaceConflict && (
+        <div style={{ backgroundColor: '#fef2f2', border: '1px solid #f87171', color: '#991b1b', padding: '12px 16px', borderRadius: '8px', margin: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+          <div>
+            <strong>⚠️ Conflicto de versión detectado:</strong> {workspaceConflict}
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={() => {
+                const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `pizzalog-tools-backup-${new Date().toISOString().slice(0, 10)}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+            >
+              💾 Descargar respaldo local (.json)
+            </button>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={() => window.location.reload()}
+            >
+              🔄 Recargar versión del servidor
+            </button>
+          </div>
+        </div>
+      )}
       <header className="tools-header">
         <div>
           <h1 className="tools-brand">
@@ -703,6 +1222,31 @@ export function App({
             {workspaceSaveError ? 'Error de guardado' : isSavingWorkspace ? 'Guardando…' : 'Guardado automático'}
           </span>
           <button type="button" className="btn" onClick={onLogout}>Cerrar sesión</button>
+          <button
+            type="button"
+            className="btn btn--secondary"
+            style={{ color: 'var(--brand)', borderColor: 'var(--brand)', fontWeight: 700 }}
+            onClick={() => setShowPlansModal(true)}
+            title="Conocé nuestros planes y condiciones de acceso"
+          >
+            ✨ Planes & Suscripción
+          </button>
+          <button
+            type="button"
+            className="btn btn--secondary"
+            onClick={() => setShowReportModal(true)}
+            title="Ver reporte ejecutivo listo para imprimir o guardar como PDF"
+          >
+            📄 Reporte Ejecutivo
+          </button>
+          <button
+            type="button"
+            className="btn btn--secondary"
+            onClick={() => { setHelpTopic('units'); setShowHelpModal(true); }}
+            title="Ayuda sobre unidades, densidades, mermas y fórmulas"
+          >
+            ❓ Ayuda Contextual
+          </button>
           <button
             type="button"
             className="btn btn--ocre"
@@ -768,6 +1312,127 @@ export function App({
       {workspaceSaveError && <div className="alert-banner">⚠️ No se pudieron guardar tus cambios: {workspaceSaveError}</div>}
       {importNotice && <div className="notice-banner">{importNotice}</div>}
       {snapshotNotice && <div className="notice-banner">{snapshotNotice}</div>}
+
+      {/* Banner de Modo Invitado / Demo en vivo */}
+      {account.id === 0 && (
+        <div style={{ background: '#7c2d12', border: '1px solid #ea580c', borderRadius: 10, padding: '12px 18px', margin: '0 0 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, color: '#ffedd5' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: '1.4rem' }}>🚀</span>
+            <div>
+              <strong style={{ color: '#fff', fontSize: '0.96rem' }}>Estás probando la Demo Interactiva en vivo (Modo Invitado)</strong>
+              <div style={{ fontSize: '0.82rem', color: '#fed7aa', marginTop: 2 }}>
+                Podés editar recetas, probar el simulador de rentabilidad y la matriz BCG. Los cambios se guardan localmente en tu navegador.
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button
+              type="button"
+              className="btn btn--primary"
+              style={{ fontSize: '0.84rem', padding: '6px 14px', background: '#ea580c', borderColor: '#ea580c', color: '#fff', fontWeight: 700 }}
+              onClick={() => setShowPlansModal(true)}
+            >
+              ✨ Ver Planes & Suscribirme
+            </button>
+            <button
+              type="button"
+              className="btn btn--secondary"
+              style={{ fontSize: '0.82rem', background: 'rgba(255,255,255,0.15)', color: '#fff', borderColor: 'transparent' }}
+              onClick={onLogout}
+            >
+              Iniciar sesión / Salir
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Banner de datos de demostración y acciones rápidas */}
+      {isDemoWorkspace(state) && (
+        <div style={{ background: '#fef3c7', border: '1px solid #f59e0b', borderRadius: 10, padding: '12px 18px', margin: '0 0 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: '1.4rem' }}>🧪</span>
+            <div>
+              <strong style={{ color: '#92400e', fontSize: '0.94rem' }}>Estás explorando los datos de ejemplo de «Pizzería Demo — Il Forno»</strong>
+              <div style={{ fontSize: '0.82rem', color: '#78350f', marginTop: 2 }}>
+                Podés experimentar libremente con recetas, simulaciones y precios. Cuando quieras empezar con tu restaurante real, limpiá el catálogo con un clic.
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button
+              type="button"
+              className="btn btn--secondary"
+              style={{ fontSize: '0.82rem', background: '#fff', borderColor: '#d97706', color: '#92400e', fontWeight: 600 }}
+              onClick={() => setShowClearDemoConfirm(true)}
+            >
+              🗑️ Limpiar datos para empezar
+            </button>
+            <button
+              type="button"
+              className="btn btn--secondary"
+              style={{ fontSize: '0.82rem', background: '#fff' }}
+              onClick={() => {
+                setImportError(null);
+                setState(createInitialDemoWorkspace());
+              }}
+            >
+              🔄 Restaurar demo
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Experiencia Inicial Guiada (Onboarding Stepper) */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 8, margin: '0 0 16px' }}>
+        <button
+          type="button"
+          className={`btn ${activeTab === 'ingredients' ? 'btn--primary' : 'btn--secondary'}`}
+          style={{ justifyContent: 'center', padding: '8px 10px', fontSize: '0.82rem' }}
+          onClick={() => setActiveTab('ingredients')}
+        >
+          1️⃣ Insumos & Mermas
+        </button>
+        <button
+          type="button"
+          className={`btn ${activeTab === 'subrecipes' ? 'btn--primary' : 'btn--secondary'}`}
+          style={{ justifyContent: 'center', padding: '8px 10px', fontSize: '0.82rem' }}
+          onClick={() => setActiveTab('subrecipes')}
+        >
+          2️⃣ Masas & Subrecetas
+        </button>
+        <button
+          type="button"
+          className={`btn ${activeTab === 'recipes' ? 'btn--primary' : 'btn--secondary'}`}
+          style={{ justifyContent: 'center', padding: '8px 10px', fontSize: '0.82rem' }}
+          onClick={() => setActiveTab('recipes')}
+        >
+          3️⃣ Recetas de Carta
+        </button>
+        <button
+          type="button"
+          className={`btn ${activeTab === 'expenses' ? 'btn--primary' : 'btn--secondary'}`}
+          style={{ justifyContent: 'center', padding: '8px 10px', fontSize: '0.82rem' }}
+          onClick={() => setActiveTab('expenses')}
+        >
+          4️⃣ Gastos Operativos Fijos
+        </button>
+        <button
+          type="button"
+          className={`btn ${activeTab === 'menu-engineering' ? 'btn--primary' : 'btn--secondary'}`}
+          style={{ justifyContent: 'center', padding: '8px 10px', fontSize: '0.82rem' }}
+          onClick={() => setActiveTab('menu-engineering')}
+        >
+          5️⃣ Ingeniería de Menú
+        </button>
+        <button
+          type="button"
+          className={`btn ${activeTab === 'profit-simulator' ? 'btn--primary' : 'btn--secondary'}`}
+          style={{ justifyContent: 'center', padding: '8px 10px', fontSize: '0.82rem' }}
+          onClick={() => setActiveTab('profit-simulator')}
+        >
+          6️⃣ Simulador de Negocio
+        </button>
+      </div>
 
       <section className="tools-toolbar">
         <label className="field">
@@ -920,6 +1585,7 @@ export function App({
         <button type="button" className={`tab-btn ${activeTab === 'menu-engineering' ? 'tab-btn--active' : ''}`} onClick={() => setActiveTab('menu-engineering')}>Ingeniería de menú</button>
         <button type="button" className={`tab-btn ${activeTab === 'production' ? 'tab-btn--active' : ''}`} onClick={() => setActiveTab('production')}>Calculadora de producción</button>
         <button type="button" className={`tab-btn ${activeTab === 'profit-simulator' ? 'tab-btn--active' : ''}`} onClick={() => setActiveTab('profit-simulator')}>Simulador de rentabilidad</button>
+        <button type="button" className={`tab-btn ${activeTab === 'sync' ? 'tab-btn--active' : ''}`} onClick={() => { setActiveTab('sync'); void loadSyncStatus(); }}>🔄 Sync Pizzalog App</button>
       </nav>
 
       {activeTab === 'simulator' && (
@@ -986,72 +1652,205 @@ export function App({
 
       {activeTab === 'cost-history' && (
         <section className="card">
-          <h2>Evolución histórica de costos</h2>
-          <p className="lead">Seguimiento cronológico de snapshots guardados. Solo se muestran costos registrados; no se estiman períodos sin capturas.</p>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+            <div>
+              <h2>Evolución histórica de costos y rentabilidad</h2>
+              <p className="lead">Seguimiento cronológico de costos, precios y márgenes registrados en cada snapshot.</p>
+            </div>
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={() => { setHelpTopic('yield'); setShowHelpModal(true); }}
+            >
+              ❓ Ayuda sobre mermas y costos
+            </button>
+          </div>
+
           {state.snapshots.length === 0 ? (
-            <div className="empty-state">Todavía no hay snapshots. Guardá una captura desde la pestaña Snapshots para comenzar el historial.</div>
+            <div className="empty-state">
+              Todavía no hay snapshots guardados. Tomá una captura desde el botón superior «📸 Guardar Snapshot» o en la pestaña «Snapshots» para comenzar el registro histórico.
+            </div>
           ) : (() => {
             const products = state.catalog.recipes.filter((r) => r.recipe_type === 'product');
             const selectedProduct = products.find((r) => r.id === historyRecipeId) ?? products[0];
             const entries = selectedProduct ? state.snapshots
               .filter((snap) => snap.recipe_id === selectedProduct.id)
               .slice().sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()) : [];
+
+            const currentResult = selectedProduct ? recipeResults.get(selectedProduct.id) : null;
+            const lastEntry = entries.length ? entries[entries.length - 1] : null;
+
+            // Verificación de costo desactualizado (Stale Cost Alert)
+            const isCostStale = Boolean(
+              currentResult &&
+              currentResult.status === 'complete' &&
+              currentResult.raw_unit_cost !== null &&
+              lastEntry &&
+              lastEntry.cost_result.raw_unit_cost !== null &&
+              Math.abs(currentResult.raw_unit_cost - lastEntry.cost_result.raw_unit_cost) > 0.01
+            );
+            const staleDeltaPct = isCostStale && lastEntry?.cost_result.raw_unit_cost
+              ? ((currentResult!.raw_unit_cost! - lastEntry.cost_result.raw_unit_cost) / lastEntry.cost_result.raw_unit_cost) * 100
+              : 0;
+
             const values = entries.map((entry) => entry.cost_result.raw_unit_cost)
               .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
             const minValue = values.length ? Math.min(...values) : 0;
             const maxValue = values.length ? Math.max(...values) : 0;
             const range = maxValue - minValue;
+
+            const firstCost = entries[0]?.cost_result.raw_unit_cost;
+            const lastCost = lastEntry?.cost_result.raw_unit_cost;
+            const totalVariationPct = typeof firstCost === 'number' && typeof lastCost === 'number' && firstCost > 0
+              ? ((lastCost - firstCost) / firstCost) * 100
+              : null;
+
             return <>
-              <label className="field" style={{ maxWidth: 420, marginTop: 16 }}>
-                <span>Producto</span>
-                <select value={selectedProduct?.id ?? ''} onChange={(e) => setHistoryRecipeId(e.target.value)}>
-                  {products.map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.name}</option>)}
-                </select>
-              </label>
-              {!selectedProduct ? <div className="empty-state">No hay productos en el catálogo.</div> :
-                entries.length === 0 ? <div className="empty-state">Este producto todavía no tiene snapshots. Guardá una captura para iniciar su historial.</div> : <>
-                  <div className="kpi-grid" style={{ marginTop: 16 }}>
-                    <div className="kpi-card"><span>Primer costo registrado</span><strong>{entries[0].cost_result.raw_unit_cost == null ? 'Incompleto' : `${state.currency} ${formatDecimal(Number(entries[0].cost_result.raw_unit_cost), 2)}`}</strong><small>{new Date(entries[0].created_at).toLocaleString()}</small></div>
-                    <div className="kpi-card"><span>Último costo registrado</span><strong>{entries[entries.length - 1].cost_result.raw_unit_cost == null ? 'Incompleto' : `${state.currency} ${formatDecimal(Number(entries[entries.length - 1].cost_result.raw_unit_cost), 2)}`}</strong><small>{new Date(entries[entries.length - 1].created_at).toLocaleString()}</small></div>
-                    <div className="kpi-card"><span>Capturas</span><strong>{entries.length}</strong><small>Orden cronológico</small></div>
-                  </div>
-                  <div className="card" style={{ marginTop: 16 }}>
-                    <strong>Evolución del costo unitario</strong>
-                    <div style={{ display: 'grid', gap: 12, marginTop: 14 }}>
-                      {entries.map((entry, index) => {
-                        const value = entry.cost_result.raw_unit_cost;
-                        const previous = index > 0 ? entries[index - 1].cost_result.raw_unit_cost : null;
-                        const delta = typeof value === 'number' && typeof previous === 'number' && previous !== 0 ? ((value - previous) / previous) * 100 : null;
-                        const width = typeof value === 'number' ? (range === 0 ? 100 : Math.max(4, ((value - minValue) / range) * 100)) : 0;
-                        return <div key={entry.snapshot_id} style={{ display: 'grid', gridTemplateColumns: 'minmax(100px, 1fr) minmax(90px, 2fr) minmax(100px, 1fr)', alignItems: 'center', gap: 10 }}>
-                          <small>{new Date(entry.created_at).toLocaleDateString()}</small>
-                          <div style={{ background: 'var(--border-color, #ddd)', borderRadius: 6, height: 12, overflow: 'hidden' }}>
-                            <div style={{ width: `${width}%`, height: '100%', background: 'var(--accent, #b33)', borderRadius: 6 }} />
-                          </div>
-                          <strong style={{ textAlign: 'right' }}>{value == null ? 'Incompleto' : `${state.currency} ${formatDecimal(value, 2)}`}</strong>
-                          <small style={{ gridColumn: '2 / 4', opacity: 0.75 }}>{delta == null ? 'Sin comparación previa' : `${delta > 0 ? '+' : ''}${formatDecimal(delta, 1)}% respecto de la captura anterior`}</small>
-                        </div>;
-                      })}
+              <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end', flexWrap: 'wrap', marginTop: 14 }}>
+                <label className="field" style={{ maxWidth: 420, margin: 0 }}>
+                  <span>Seleccionar Producto</span>
+                  <select value={selectedProduct?.id ?? ''} onChange={(e) => setHistoryRecipeId(e.target.value)}>
+                    {products.map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.name}</option>)}
+                  </select>
+                </label>
+              </div>
+
+              {!selectedProduct ? (
+                <div className="empty-state">No hay productos cargados en el catálogo.</div>
+              ) : entries.length === 0 ? (
+                <div className="empty-state">
+                  Este producto todavía no tiene capturas registradas. Guardá un snapshot para iniciar el seguimiento de su evolución.
+                </div>
+              ) : <>
+                {/* Alerta de Costo Desactualizado */}
+                {isCostStale && (
+                  <div style={{ background: '#fffbeb', border: '1px solid #f59e0b', borderRadius: 8, padding: '12px 16px', margin: '16px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+                    <div>
+                      <strong style={{ color: '#92400e' }}>⚠️ Costo desactualizado en el catálogo</strong>
+                      <div style={{ fontSize: '0.84rem', color: '#78350f', marginTop: 2 }}>
+                        El costo actual en catálogo es de <strong>{state.currency} {formatDecimal(currentResult!.raw_unit_cost!, 2)}</strong> ({staleDeltaPct > 0 ? '+' : ''}{formatDecimal(staleDeltaPct, 1)}% vs. tu última captura guardada de <strong>{state.currency} {formatDecimal(lastEntry!.cost_result.raw_unit_cost!, 2)}</strong>). Hubo modificaciones en los precios de los insumos.
+                      </div>
                     </div>
+                    <button
+                      type="button"
+                      className="btn btn--primary"
+                      style={{ fontSize: '0.82rem' }}
+                      onClick={() => {
+                        const snap = createCostSnapshot(state.catalog, selectedProduct.id, {
+                          selling_price: state.productSalesMap?.[selectedProduct.id]?.sellingPrice ?? undefined,
+                          target_food_cost_pct: selectedProduct.target_food_cost_pct ?? state.defaultTargetFoodCostPct,
+                          rounding_increment: state.defaultRoundingIncrement,
+                          packaging_cost: state.defaultPackagingCost,
+                          channel_fee_pct: state.defaultChannelFeePct,
+                        });
+                        setState((s) => ({ ...s, snapshots: [...s.snapshots, snap] }));
+                        setSnapshotNotice(`Se guardó un nuevo snapshot con costos actualizados para «${selectedProduct.name}».`);
+                      }}
+                    >
+                      📸 Guardar nuevo snapshot con costo vigente
+                    </button>
                   </div>
-                  <div className="table-wrap" style={{ marginTop: 16 }}>
-                    <table className="kit-table">
-                      <thead><tr><th>Fecha</th><th>Costo unitario</th><th>Costo por tanda</th><th>Variación</th><th>Estado</th></tr></thead>
-                      <tbody>{entries.map((entry, index) => {
+                )}
+
+                <div className="kpi-grid" style={{ marginTop: 16 }}>
+                  <div className="kpi-card">
+                    <span>Primer costo registrado</span>
+                    <strong>{firstCost == null ? 'Incompleto' : `${state.currency} ${formatDecimal(firstCost, 2)}`}</strong>
+                    <small>{new Date(entries[0].created_at).toLocaleDateString()}</small>
+                  </div>
+                  <div className="kpi-card">
+                    <span>Último costo registrado</span>
+                    <strong>{lastCost == null ? 'Incompleto' : `${state.currency} ${formatDecimal(lastCost, 2)}`}</strong>
+                    <small>{new Date(entries[entries.length - 1].created_at).toLocaleDateString()}</small>
+                  </div>
+                  <div className="kpi-card">
+                    <span>Variación histórica acumulada</span>
+                    <strong style={{ color: (totalVariationPct ?? 0) > 0 ? '#b91c1c' : '#15803d' }}>
+                      {totalVariationPct == null ? '—' : `${totalVariationPct > 0 ? '+' : ''}${formatDecimal(totalVariationPct, 1)}%`}
+                    </strong>
+                    <small>{entries.length} capturas en el tiempo</small>
+                  </div>
+                  <div className="kpi-card">
+                    <span>Food Cost del último snapshot</span>
+                    <strong>
+                      {lastEntry?.pricing_scenario?.food_cost_pct != null
+                        ? `${formatDecimal(lastEntry.pricing_scenario.food_cost_pct, 1)}%`
+                        : '—'}
+                    </strong>
+                    <small>Margen unitario: {lastEntry?.pricing_scenario?.raw_gross_profit != null ? `${state.currency} ${formatDecimal(lastEntry.pricing_scenario.raw_gross_profit, 2)}` : '—'}</small>
+                  </div>
+                </div>
+
+                <div className="card" style={{ marginTop: 16 }}>
+                  <strong>Evolución cronológica del costo unitario</strong>
+                  <div style={{ display: 'grid', gap: 12, marginTop: 14 }}>
+                    {entries.map((entry, index) => {
+                      const value = entry.cost_result.raw_unit_cost;
+                      const previous = index > 0 ? entries[index - 1].cost_result.raw_unit_cost : null;
+                      const delta = typeof value === 'number' && typeof previous === 'number' && previous !== 0
+                        ? ((value - previous) / previous) * 100
+                        : null;
+                      const width = typeof value === 'number' ? (range === 0 ? 100 : Math.max(8, ((value - minValue) / range) * 100)) : 0;
+                      return (
+                        <div key={entry.snapshot_id} style={{ display: 'grid', gridTemplateColumns: '110px 1fr 140px', alignItems: 'center', gap: 12 }}>
+                          <small>{new Date(entry.created_at).toLocaleDateString()}</small>
+                          <div style={{ background: 'var(--border-color, #e5e7eb)', borderRadius: 6, height: 14, overflow: 'hidden' }}>
+                            <div style={{ width: `${width}%`, height: '100%', background: 'var(--accent, #991b1b)', borderRadius: 6 }} />
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <strong style={{ display: 'block' }}>{value == null ? 'Incompleto' : `${state.currency} ${formatDecimal(value, 2)}`}</strong>
+                            <small style={{ color: (delta ?? 0) > 0 ? '#b91c1c' : '#15803d' }}>
+                              {delta == null ? 'Línea base' : `${delta > 0 ? '+' : ''}${formatDecimal(delta, 1)}%`}
+                            </small>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="table-wrap" style={{ marginTop: 16 }}>
+                  <table className="kit-table">
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Costo unitario</th>
+                        <th>Precio evaluado</th>
+                        <th>Food Cost %</th>
+                        <th>Margen de contribución</th>
+                        <th>Variación vs. anterior</th>
+                        <th>Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {entries.map((entry, index) => {
                         const previous = index > 0 ? entries[index - 1].cost_result.raw_unit_cost : null;
                         const value = entry.cost_result.raw_unit_cost;
-                        const delta = typeof value === 'number' && typeof previous === 'number' && previous !== 0 ? ((value - previous) / previous) * 100 : null;
-                        return <tr key={entry.snapshot_id}>
-                          <td>{new Date(entry.created_at).toLocaleString()}</td>
-                          <td>{value == null ? '—' : `${state.currency} ${formatDecimal(value, 2)}`}</td>
-                          <td>{entry.cost_result.raw_batch_cost == null ? '—' : `${state.currency} ${formatDecimal(entry.cost_result.raw_batch_cost, 2)}`}</td>
-                          <td>{delta == null ? '—' : `${delta > 0 ? '+' : ''}${formatDecimal(delta, 1)}%`}</td>
-                          <td>{entry.cost_result.status === 'complete' ? 'Completo' : 'Incompleto'}</td>
-                        </tr>;
-                      })}</tbody>
-                    </table>
-                  </div>
-                </>}
+                        const delta = typeof value === 'number' && typeof previous === 'number' && previous !== 0
+                          ? ((value - previous) / previous) * 100
+                          : null;
+                        const price = entry.pricing_scenario?.raw_evaluated_price;
+                        const fc = entry.pricing_scenario?.food_cost_pct;
+                        const profit = entry.pricing_scenario?.raw_gross_profit;
+
+                        return (
+                          <tr key={entry.snapshot_id}>
+                            <td>{new Date(entry.created_at).toLocaleString()}</td>
+                            <td><strong>{value == null ? '—' : `${state.currency} ${formatDecimal(value, 2)}`}</strong></td>
+                            <td>{price == null ? '—' : `${state.currency} ${formatDecimal(price, 2)}`}</td>
+                            <td>{fc == null ? '—' : `${formatDecimal(fc, 1)}%`}</td>
+                            <td>{profit == null ? '—' : `${state.currency} ${formatDecimal(profit, 2)}`}</td>
+                            <td style={{ color: delta && delta > 0 ? '#b91c1c' : '#15803d', fontWeight: delta ? 600 : 400 }}>
+                              {delta == null ? '—' : `${delta > 0 ? '+' : ''}${formatDecimal(delta, 1)}%`}
+                            </td>
+                            <td>{entry.cost_result.status === 'complete' ? 'Completo' : 'Incompleto'}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>}
             </>;
           })()}
         </section>
@@ -1059,25 +1858,318 @@ export function App({
 
       {activeTab === 'menu-engineering' && (
         <section className="card">
-          <h2>Ingeniería de menú</h2>
-          <p className="lead">Clasificación por popularidad y contribución unitaria usando ventas cargadas y costos calculables. No se asignan ventas estimadas.</p>
-          {!monthlySummary.hasSalesData ? <div className="empty-state">No hay ventas vinculadas a productos para construir la matriz. Importá ventas o vinculá los registros en «Ventas importadas».</div> : (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+            <div>
+              <h2>Ingeniería de Menú (Matriz Kasavana & Smith / BCG)</h2>
+              <p className="lead">
+                Análisis estratégico cruzando popularidad (volumen de ventas) y contribución marginal ($ de ganancia por plato).
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={() => { setHelpTopic('matrix'); setShowHelpModal(true); }}
+            >
+              ❓ ¿Cómo interpretar los cuadrantes?
+            </button>
+          </div>
+
+          {/* Barra de Filtros por Período y Canal */}
+          <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end', flexWrap: 'wrap', margin: '16px 0', padding: '14px', background: 'var(--surface-alt)', borderRadius: 10 }}>
+            <label className="field" style={{ minWidth: 200, margin: 0 }}>
+              <span>Período de Ventas</span>
+              <select value={menuPeriodFilter} onChange={(e) => setMenuPeriodFilter(e.target.value)}>
+                <option value="all">Todos los períodos acumulados</option>
+                {availablePeriods.map((p) => (
+                  <option key={p} value={p}>{p} (Mensual)</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field" style={{ minWidth: 200, margin: 0 }}>
+              <span>Canal de Venta</span>
+              <select value={menuChannelFilter} onChange={(e) => setMenuChannelFilter(e.target.value)}>
+                <option value="all">Todos los canales combinados</option>
+                {availableChannels.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </label>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, alignSelf: 'flex-end', height: 42 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.86rem', cursor: 'pointer', fontWeight: 600 }}>
+                <input
+                  type="checkbox"
+                  checked={menuCompareMode}
+                  onChange={(e) => {
+                    setMenuCompareMode(e.target.checked);
+                    if (e.target.checked && !menuComparePeriod && availablePeriods.length > 1) {
+                      const other = availablePeriods.find((p) => p !== menuPeriodFilter) ?? availablePeriods[1];
+                      setMenuComparePeriod(other);
+                    }
+                  }}
+                />
+                Comparar con otro período
+              </label>
+            </div>
+
+            {menuCompareMode && (
+              <label className="field" style={{ minWidth: 200, margin: 0 }}>
+                <span>Comparar contra:</span>
+                <select value={menuComparePeriod} onChange={(e) => setMenuComparePeriod(e.target.value)}>
+                  <option value="">Seleccionar período a comparar</option>
+                  {availablePeriods.filter((p) => p !== menuPeriodFilter).map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
+
+          {!monthlySummary.hasSalesData ? (
+            <div className="empty-state">
+              No hay ventas registradas para el período y canal seleccionados. Probá seleccionando «Todos los períodos» o cargá ventas en la pestaña «Ventas importadas».
+            </div>
+          ) : (
             <>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 12, margin: '16px 0' }}>
-                {([
-                  { key: 'puzzle', title: 'Rompecabezas', subtitle: 'Baja popularidad · Alta contribución', rows: monthlySummary.rows.filter((r) => r.matrixClass === 'puzzle') },
-                  { key: 'star', title: 'Estrellas', subtitle: 'Alta popularidad · Alta contribución', rows: monthlySummary.rows.filter((r) => r.matrixClass === 'star') },
-                  { key: 'dog', title: 'Perros', subtitle: 'Baja popularidad · Baja contribución', rows: monthlySummary.rows.filter((r) => r.matrixClass === 'dog') },
-                  { key: 'horse', title: 'Caballos de batalla', subtitle: 'Alta popularidad · Baja contribución', rows: monthlySummary.rows.filter((r) => r.matrixClass === 'horse') },
-                ]).map((quadrant) => <div key={quadrant.key} className="kpi-card" style={{ minHeight: 120, textAlign: 'left' }}>
-                  <strong>{quadrant.title}</strong>
-                  <small style={{ display: 'block', opacity: 0.75, margin: '4px 0 10px' }}>{quadrant.subtitle}</small>
-                  {quadrant.rows.length ? <ul style={{ margin: 0, paddingLeft: 18 }}>{quadrant.rows.map((r) => <li key={r.prod.id}>{r.prod.name} <small>({formatDecimal(r.units ?? 0, 0)} u.)</small></li>)}</ul> : <small>Sin productos en este cuadrante</small>}
-                </div>)}
+              {/* KPIs del período filtrado */}
+              <div className="kpi-grid" style={{ marginBottom: 16 }}>
+                <div className="kpi-card">
+                  <span>Facturación {menuChannelFilter !== 'all' ? `(${menuChannelFilter})` : 'del período'}</span>
+                  <strong>{state.currency} {formatDecimal(monthlySummary.totalRevenue, 2)}</strong>
+                  <small>{formatDecimal(monthlySummary.totalUnits, 0)} unidades vendidas</small>
+                </div>
+                <div className="kpi-card">
+                  <span>Costo de Insumos (CMV)</span>
+                  <strong style={{ color: '#b91c1c' }}>{state.currency} {formatDecimal(monthlySummary.totalCogs, 2)}</strong>
+                  <small>Food Cost: {monthlySummary.totalRevenue > 0 ? formatDecimal((monthlySummary.totalCogs / monthlySummary.totalRevenue) * 100, 1) : 0}%</small>
+                </div>
+                <div className="kpi-card">
+                  <span>Contribución Marginal Total</span>
+                  <strong style={{ color: '#15803d' }}>{state.currency} {formatDecimal(monthlySummary.totalContribution, 2)}</strong>
+                  <small>Margen ponderado: {formatDecimal(monthlySummary.weightedMarginPct, 1)}%</small>
+                </div>
+                <div className="kpi-card">
+                  <span>Punto de Equilibrio</span>
+                  <strong>{breakEvenRevenue > 0 ? `${state.currency} ${formatDecimal(breakEvenRevenue, 2)}` : '—'}</strong>
+                  <small>{(netOperatingProfit ?? 0) >= 0 ? '🟢 Zona de Ganancia Neta' : '🔴 Zona de Déficit'}</small>
+                </div>
               </div>
-              <div className="table-wrap"><table className="kit-table"><thead><tr><th>Producto</th><th>Unidades del período</th><th>Contribución unitaria</th><th>Clasificación</th></tr></thead><tbody>
-              {monthlySummary.rows.filter((r) => r.hasSalesData).sort((a,b) => (b.units ?? 0) - (a.units ?? 0)).map((r) => <tr key={r.prod.id}><td>{r.prod.name}</td><td>{formatDecimal(r.units ?? 0, 0)}</td><td>{r.isComplete ? `${state.currency} ${formatDecimal(r.unitGrossProfit, 2)}` : 'Costo incompleto'}</td><td>{r.matrixLabel}</td></tr>)}
-            </tbody></table></div>
+
+              {/* Comparación entre dos períodos (si está activada) */}
+              {menuCompareMode && compareSummary && (() => {
+                const diffUnits = monthlySummary.totalUnits - compareSummary.totalUnits;
+                const diffUnitsPct = compareSummary.totalUnits > 0 ? (diffUnits / compareSummary.totalUnits) * 100 : 0;
+                const diffRev = monthlySummary.totalRevenue - compareSummary.totalRevenue;
+                const diffRevPct = compareSummary.totalRevenue > 0 ? (diffRev / compareSummary.totalRevenue) * 100 : 0;
+                const diffContrib = monthlySummary.totalContribution - compareSummary.totalContribution;
+                const diffContribPct = compareSummary.totalContribution > 0 ? (diffContrib / compareSummary.totalContribution) * 100 : 0;
+
+                return (
+                  <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10, padding: '14px 18px', marginBottom: 20 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <strong style={{ color: '#1e40af' }}>
+                        📊 Comparativa: {menuPeriodFilter === 'all' ? 'Actual' : menuPeriodFilter} vs. {menuComparePeriod}
+                      </strong>
+                      <span style={{ fontSize: '0.8rem', color: '#3b82f6' }}>Canal: {menuChannelFilter === 'all' ? 'Todos' : menuChannelFilter}</span>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+                      <div>
+                        <span style={{ fontSize: '0.8rem', color: '#1e40af', display: 'block' }}>Variación de Unidades:</span>
+                        <strong style={{ fontSize: '1.1rem', color: diffUnits >= 0 ? '#15803d' : '#b91c1c' }}>
+                          {diffUnits >= 0 ? `+${formatDecimal(diffUnits, 0)} u.` : `${formatDecimal(diffUnits, 0)} u.`}
+                          {' '}({diffUnitsPct >= 0 ? `+${formatDecimal(diffUnitsPct, 1)}%` : `${formatDecimal(diffUnitsPct, 1)}%`})
+                        </strong>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '0.8rem', color: '#1e40af', display: 'block' }}>Variación de Facturación:</span>
+                        <strong style={{ fontSize: '1.1rem', color: diffRev >= 0 ? '#15803d' : '#b91c1c' }}>
+                          {diffRev >= 0 ? `+${state.currency} ${formatDecimal(diffRev, 0)}` : `${state.currency} ${formatDecimal(diffRev, 0)}`}
+                          {' '}({diffRevPct >= 0 ? `+${formatDecimal(diffRevPct, 1)}%` : `${formatDecimal(diffRevPct, 1)}%`})
+                        </strong>
+                      </div>
+                      <div>
+                        <span style={{ fontSize: '0.8rem', color: '#1e40af', display: 'block' }}>Variación de Contribución:</span>
+                        <strong style={{ fontSize: '1.1rem', color: diffContrib >= 0 ? '#15803d' : '#b91c1c' }}>
+                          {diffContrib >= 0 ? `+${state.currency} ${formatDecimal(diffContrib, 0)}` : `${state.currency} ${formatDecimal(diffContrib, 0)}`}
+                          {' '}({diffContribPct >= 0 ? `+${formatDecimal(diffContribPct, 1)}%` : `${formatDecimal(diffContribPct, 1)}%`})
+                        </strong>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Alerta de Productos con Datos Faltantes (Diferenciación estricta de falta de datos vs resultado desfavorable) */}
+              {(() => {
+                const incompleteProducts = monthlySummary.rows.filter((r) => !r.isComplete);
+                if (incompleteProducts.length === 0) return null;
+                return (
+                  <div style={{ background: '#fffbeb', border: '1px solid #f59e0b', borderRadius: 8, padding: '12px 16px', marginBottom: 18 }}>
+                    <strong style={{ color: '#92400e', display: 'block', marginBottom: 4 }}>
+                      ⚠️ {incompleteProducts.length} producto(s) no clasificados por datos incompletos:
+                    </strong>
+                    <div style={{ fontSize: '0.84rem', color: '#78350f', marginBottom: 8 }}>
+                      Estos productos tienen ventas registradas pero les falta el precio de algún insumo o su precio de venta. No son clasificados como «Perros» para no falsear tus decisiones:
+                    </div>
+                    <ul style={{ margin: 0, paddingLeft: 18, fontSize: '0.84rem', color: '#92400e' }}>
+                      {incompleteProducts.map((p) => (
+                        <li key={p.prod.id} style={{ margin: '4px 0' }}>
+                          <strong>{p.prod.name}</strong> ({formatDecimal(p.units ?? 0, 0)} u. vendidas): {p.incompleteReason}
+                          <button
+                            type="button"
+                            className="btn btn--sm"
+                            style={{ marginLeft: 8, fontSize: '0.74rem', padding: '2px 8px' }}
+                            onClick={() => setActiveTab('recipes')}
+                          >
+                            Ir a recetas
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })()}
+
+              {/* Los 4 Cuadrantes Estratégicos con Recomendaciones */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14, margin: '16px 0' }}>
+                {([
+                  {
+                    key: 'puzzle',
+                    title: '🧩 Rompecabezas (Puzzles)',
+                    badge: 'Baja popularidad · Alta contribución',
+                    color: '#6b21a8',
+                    bg: '#f3e8ff',
+                    border: '#d8b4fe',
+                    actionTip: '💡 Oportunidad de margen: Dejan excelente ganancia pero tienen baja rotación. Recomendación: Creá promociones 2x1 en días flojos, sumalos a combos o colocálos en el centro visual de la carta.',
+                    rows: monthlySummary.rows.filter((r) => r.matrixClass === 'puzzle'),
+                  },
+                  {
+                    key: 'star',
+                    title: '⭐ Estrellas (Stars)',
+                    badge: 'Alta popularidad · Alta contribución',
+                    color: '#92400e',
+                    bg: '#fef3c7',
+                    border: '#fde047',
+                    actionTip: '✨ Pilares de rentabilidad: Alta rotación y excelente margen. Recomendación: Proteger la calidad estricta de la receta y mantenerlos en el punto focal del menú.',
+                    rows: monthlySummary.rows.filter((r) => r.matrixClass === 'star'),
+                  },
+                  {
+                    key: 'dog',
+                    title: '🐕 Perros (Dogs)',
+                    badge: 'Baja popularidad · Baja contribución',
+                    color: '#991b1b',
+                    bg: '#fee2e2',
+                    border: '#fca5a5',
+                    actionTip: '⚠️ Bajo rendimiento: Tienen baja rotación y escaso margen. Recomendación: Evaluar si sus insumos inmovilizan stock; reemplazarlos o reformularlos a fondo.',
+                    rows: monthlySummary.rows.filter((r) => r.matrixClass === 'dog'),
+                  },
+                  {
+                    key: 'horse',
+                    title: '🐎 Caballos de Batalla (Plowhorses)',
+                    badge: 'Alta popularidad · Baja contribución',
+                    color: '#1e40af',
+                    bg: '#dbeafe',
+                    border: '#93c5fd',
+                    actionTip: '💡 Oportunidad de volumen: Muy pedidos pero dejan poco margen. Recomendación: Un ajuste de apenas +3% a +5% en el precio, o una optimización de gramaje, tendrá un impacto masivo en tu ganancia neta.',
+                    rows: monthlySummary.rows.filter((r) => r.matrixClass === 'horse'),
+                  },
+                ]).map((quadrant) => (
+                  <div
+                    key={quadrant.key}
+                    className="kpi-card"
+                    style={{
+                      background: quadrant.bg,
+                      border: `1px solid ${quadrant.border}`,
+                      textAlign: 'left',
+                      padding: 16,
+                      borderRadius: 10,
+                    }}
+                  >
+                    <strong style={{ color: quadrant.color, fontSize: '1.05rem', display: 'block' }}>
+                      {quadrant.title}
+                    </strong>
+                    <span style={{ fontSize: '0.78rem', color: quadrant.color, fontWeight: 600, display: 'block', margin: '2px 0 8px' }}>
+                      {quadrant.badge}
+                    </span>
+                    <p style={{ fontSize: '0.8rem', color: '#374151', margin: '0 0 10px', lineHeight: 1.45 }}>
+                      {quadrant.actionTip}
+                    </p>
+                    {quadrant.rows.length ? (
+                      <ul style={{ margin: 0, paddingLeft: 18, fontSize: '0.85rem' }}>
+                        {quadrant.rows.map((r) => (
+                          <li key={r.prod.id} style={{ margin: '3px 0' }}>
+                            <strong>{r.prod.name}</strong>{' '}
+                            <small>({formatDecimal(r.units ?? 0, 0)} u. · Contrib. {state.currency} {formatDecimal(r.unitGrossProfit, 0)})</small>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <small style={{ color: '#6b7280', fontStyle: 'italic' }}>Sin productos en este cuadrante</small>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {/* Tabla Detallada de Productos */}
+              <div className="table-wrap">
+                <table className="kit-table">
+                  <thead>
+                    <tr>
+                      <th>Producto</th>
+                      <th style={{ textAlign: 'right' }}>Unidades vendidas</th>
+                      <th style={{ textAlign: 'right' }}>Precio venta</th>
+                      <th style={{ textAlign: 'right' }}>Costo unitario</th>
+                      <th style={{ textAlign: 'right' }}>Contribución unitaria</th>
+                      <th style={{ textAlign: 'right' }}>Contribución total</th>
+                      <th style={{ textAlign: 'right' }}>Margen %</th>
+                      <th style={{ textAlign: 'center' }}>Clasificación BCG</th>
+                      <th>Estrategia recomendada</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {monthlySummary.rows
+                      .slice()
+                      .sort((a, b) => (b.units ?? 0) - (a.units ?? 0))
+                      .map((r) => {
+                        let strategyTip = '—';
+                        if (r.matrixClass === 'star') strategyTip = 'Proteger calidad y visibilidad';
+                        else if (r.matrixClass === 'horse') strategyTip = 'Subir precio +3% a +5% o ajustar gramaje';
+                        else if (r.matrixClass === 'puzzle') strategyTip = 'Impulsar en combos o promociones';
+                        else if (r.matrixClass === 'dog') strategyTip = 'Evaluar reemplazo o reformulación';
+                        else if (!r.isComplete) strategyTip = 'Completar costo de insumos faltantes';
+
+                        return (
+                          <tr key={r.prod.id}>
+                            <td><strong>{r.prod.name}</strong></td>
+                            <td style={{ textAlign: 'right' }}>{r.units !== null ? formatDecimal(r.units, 0) : '—'}</td>
+                            <td style={{ textAlign: 'right' }}>
+                              {r.isComplete ? `${state.currency} ${formatDecimal(r.evaluatedPrice, 2)}` : '—'}
+                            </td>
+                            <td style={{ textAlign: 'right' }}>
+                              {r.isComplete ? `${state.currency} ${formatDecimal(r.unitCost, 2)}` : 'Incompleto'}
+                            </td>
+                            <td style={{ textAlign: 'right', fontWeight: 600 }}>
+                              {r.isComplete ? `${state.currency} ${formatDecimal(r.unitGrossProfit, 2)}` : '—'}
+                            </td>
+                            <td style={{ textAlign: 'right', fontWeight: 700, color: '#15803d' }}>
+                              {r.monthlyContribution !== null ? `${state.currency} ${formatDecimal(r.monthlyContribution, 2)}` : '—'}
+                            </td>
+                            <td style={{ textAlign: 'right' }}>
+                              {r.evaluatedPrice > 0 ? `${formatDecimal((r.unitGrossProfit / r.evaluatedPrice) * 100, 1)}%` : '—'}
+                            </td>
+                            <td style={{ textAlign: 'center' }}>
+                              {r.matrixLabel}
+                            </td>
+                            <td style={{ fontSize: '0.8rem', color: '#4b5563' }}>
+                              {strategyTip}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
             </>
           )}
         </section>
@@ -1142,26 +2234,598 @@ export function App({
 
       {activeTab === 'profit-simulator' && (
         <section className="card">
-          <h2>Simulador de rentabilidad</h2>
-          <p className="lead">Escenario manual independiente del histórico. Completá los valores con tus supuestos; el resultado es una contribución estimada antes de impuestos y conceptos no incluidos.</p>
-          <div className="builder-grid">
-            <label className="field"><span>Vincular producto del catálogo</span><select value={profitProductId} onChange={(e) => setProfitProductId(e.target.value)}><option value="">Escenario manual</option>{state.catalog.recipes.filter((r) => r.recipe_type === 'product').map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></label>
-            <label className="field"><span>Unidades por mes</span><input type="number" min="0" value={profitScenario.units} onChange={(e) => setProfitScenario((p) => ({ ...p, units: Math.max(0, Number(e.target.value) || 0) }))} /></label>
-            <label className="field"><span>Precio de venta unitario ({state.currency})</span><input type="number" min="0" value={profitScenario.price} onChange={(e) => setProfitScenario((p) => ({ ...p, price: Math.max(0, Number(e.target.value) || 0) }))} /></label>
-            <label className="field"><span>Costo variable unitario ({state.currency})</span><input type="number" min="0" value={profitScenario.variableCost} onChange={(e) => setProfitScenario((p) => ({ ...p, variableCost: Math.max(0, Number(e.target.value) || 0) }))} /></label>
-            <label className="field"><span>Gastos fijos mensuales ({state.currency})</span><input type="number" min="0" value={profitScenario.fixedCosts} onChange={(e) => setProfitScenario((p) => ({ ...p, fixedCosts: Math.max(0, Number(e.target.value) || 0) }))} /></label>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+            <div>
+              <h2>Simulador Estratégico de Rentabilidad y Decisiones</h2>
+              <p className="lead">
+                Herramienta para proyectar el impacto de aumentos de insumos, variaciones de precios y volumen de ventas sobre el punto de equilibrio y la ganancia neta.
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                type="button"
+                className={`btn ${simMode === 'business' ? 'btn--primary' : 'btn--secondary'}`}
+                style={{ fontSize: '0.82rem' }}
+                onClick={() => setSimMode('business')}
+              >
+                🏢 Simulación Global del Negocio
+              </button>
+              <button
+                type="button"
+                className={`btn ${simMode === 'single' ? 'btn--primary' : 'btn--secondary'}`}
+                style={{ fontSize: '0.82rem' }}
+                onClick={() => setSimMode('single')}
+              >
+                🧮 Calculadora Unitaria
+              </button>
+            </div>
           </div>
-          {profitProductId && (() => {
-            const product = state.catalog.recipes.find((r) => r.id === profitProductId);
-            const cost = recipeResults.get(profitProductId);
-            const price = state.productSalesMap?.[profitProductId]?.sellingPrice;
-            const canUse = Boolean(product && cost?.status === 'complete' && cost.raw_unit_cost !== null && Number(price) > 0);
-            return <div style={{ marginTop: 10 }}>
-              <button type="button" className="btn btn--ocre" disabled={!canUse} onClick={() => setProfitScenario((prev) => ({ ...prev, price: Number(price), variableCost: cost!.raw_unit_cost! + state.defaultPackagingCost + Number(price) * state.defaultChannelFeePct / 100 }))}>Cargar precio y costo del catálogo</button>
-              {!canUse && <small style={{ display: 'block', marginTop: 6 }}>Para vincularlo necesitás costo completo y precio de venta cargado en el catálogo. El costo variable incluye packaging y comisión configurados.</small>}
-            </div>;
-          })()}
-          {(() => { const revenue = profitScenario.units * profitScenario.price; const contribution = profitScenario.units * (profitScenario.price - profitScenario.variableCost); const result = contribution - profitScenario.fixedCosts; const margin = revenue > 0 ? contribution / revenue * 100 : null; return <div className="kpi-grid" style={{ marginTop: 16 }}><div className="kpi-card"><span>Facturación escenario</span><strong>{state.currency} {formatDecimal(revenue, 2)}</strong></div><div className="kpi-card"><span>Contribución</span><strong>{state.currency} {formatDecimal(contribution, 2)}</strong></div><div className="kpi-card"><span>Resultado operativo estimado</span><strong>{state.currency} {formatDecimal(result, 2)}</strong></div><div className="kpi-card"><span>Margen de contribución</span><strong>{margin == null ? 'Sin datos' : `${formatDecimal(margin, 1)}%`}</strong></div></div>; })()}
+
+          {simMode === 'business' ? (
+            <div style={{ marginTop: 16 }}>
+              {/* Bloque de Gastos Fijos y Punto de Equilibrio */}
+              <div style={{ background: 'var(--surface-alt)', border: '1px solid var(--line)', borderRadius: 10, padding: '16px', marginBottom: 20 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
+                  <div>
+                    <strong style={{ fontSize: '1.05rem' }}>Estructura de Costos Fijos y Punto de Equilibrio</strong>
+                    <div style={{ fontSize: '0.82rem', color: 'var(--muted)' }}>
+                      Alimentado automáticamente desde tus gastos operativos mensuales (Alquiler, Sueldos, Suministros, Software).
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn--sm btn--secondary"
+                    onClick={() => setActiveTab('expenses')}
+                  >
+                    ✏️ Editar gastos fijos ({state.currency} {formatDecimal(totalMonthlyExpenses, 0)}/mes)
+                  </button>
+                </div>
+
+                <div className="kpi-grid">
+                  <div className="kpi-card">
+                    <span>Gastos Fijos Mensuales</span>
+                    <strong>{state.currency} {formatDecimal(totalMonthlyExpenses, 2)}</strong>
+                    <small>{state.operatingExpenses.length} conceptos cargados</small>
+                  </div>
+                  <div className="kpi-card">
+                    <span>Facturación de Equilibrio (Break-Even)</span>
+                    <strong style={{ color: '#d97706' }}>
+                      {simulatedBusinessResult.custom.breakEven > 0
+                        ? `${state.currency} ${formatDecimal(simulatedBusinessResult.custom.breakEven, 2)}`
+                        : '—'}
+                    </strong>
+                    <small>Mínimo mensual para no perder dinero</small>
+                  </div>
+                  <div className="kpi-card">
+                    <span>Unidades de Equilibrio</span>
+                    <strong>
+                      {simulatedBusinessResult.custom.breakEvenUnits > 0
+                        ? `${formatDecimal(simulatedBusinessResult.custom.breakEvenUnits, 0)} u.`
+                        : '—'}
+                    </strong>
+                    <small>Venta mensual promedio necesaria</small>
+                  </div>
+                  <div className="kpi-card">
+                    <span>Margen de Seguridad</span>
+                    <strong style={{ color: simulatedBusinessResult.custom.safetyMarginPct >= 0 ? '#15803d' : '#b91c1c' }}>
+                      {simulatedBusinessResult.custom.safetyMarginPct >= 0 ? '+' : ''}
+                      {formatDecimal(simulatedBusinessResult.custom.safetyMarginPct, 1)}%
+                    </strong>
+                    <small>
+                      {simulatedBusinessResult.custom.safetyMarginPct >= 0 ? '🟢 Operando en Zona de Ganancia' : '🔴 Operando por debajo del punto de equilibrio'}
+                    </small>
+                  </div>
+                </div>
+              </div>
+
+              {/* Controles de Sensibilidad Interactivos */}
+              <div style={{ background: '#fff', border: '1px solid var(--line)', borderRadius: 10, padding: 18, marginBottom: 20 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                  <h3 style={{ margin: 0, fontSize: '1rem' }}>🎛️ Controles de Simulación en Vivo</h3>
+                  <button
+                    type="button"
+                    className="btn btn--sm btn--secondary"
+                    onClick={() => { setSimPriceDelta(0); setSimCostDelta(0); setSimVolumeDelta(0); setSimCategoryFilter('all'); }}
+                  >
+                    Restablecer simulación a 0%
+                  </button>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 18 }}>
+                  {/* Slider Variación de Precios de Venta */}
+                  <div style={{ background: 'var(--surface-alt)', padding: 14, borderRadius: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <span style={{ fontSize: '0.86rem', fontWeight: 600 }}>Variación de Precios de Venta</span>
+                      <strong style={{ color: simPriceDelta >= 0 ? '#15803d' : '#b91c1c' }}>
+                        {simPriceDelta >= 0 ? `+${simPriceDelta}%` : `${simPriceDelta}%`}
+                      </strong>
+                    </div>
+                    <input
+                      type="range"
+                      min={-30}
+                      max={30}
+                      step={1}
+                      value={simPriceDelta}
+                      onChange={(e) => setSimPriceDelta(Number(e.target.value))}
+                      style={{ width: '100%', cursor: 'pointer' }}
+                    />
+                    <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
+                      {[-5, 0, 3, 5, 10, 15].map((val) => (
+                        <button
+                          key={val}
+                          type="button"
+                          className="btn btn--sm"
+                          style={{ padding: '2px 6px', fontSize: '0.72rem' }}
+                          onClick={() => setSimPriceDelta(val)}
+                        >
+                          {val > 0 ? `+${val}%` : `${val}%`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Slider Inflación / Aumento de Insumos */}
+                  <div style={{ background: 'var(--surface-alt)', padding: 14, borderRadius: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <span style={{ fontSize: '0.86rem', fontWeight: 600 }}>Aumento de Costo de Insumos</span>
+                      <strong style={{ color: simCostDelta > 0 ? '#b91c1c' : '#15803d' }}>
+                        {simCostDelta > 0 ? `+${simCostDelta}%` : `${simCostDelta}%`}
+                      </strong>
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={50}
+                      step={1}
+                      value={simCostDelta}
+                      onChange={(e) => setSimCostDelta(Number(e.target.value))}
+                      style={{ width: '100%', cursor: 'pointer' }}
+                    />
+                    <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
+                      {[0, 5, 10, 15, 20, 25].map((val) => (
+                        <button
+                          key={val}
+                          type="button"
+                          className="btn btn--sm"
+                          style={{ padding: '2px 6px', fontSize: '0.72rem' }}
+                          onClick={() => setSimCostDelta(val)}
+                        >
+                          {val > 0 ? `+${val}%` : `${val}%`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Filtro de Categoría de Insumos para Aumento Focalizado */}
+                  <div style={{ background: 'var(--surface-alt)', padding: 14, borderRadius: 8 }}>
+                    <label className="field" style={{ margin: 0 }}>
+                      <span style={{ fontSize: '0.86rem', fontWeight: 600 }}>Insumos Afectados por el Aumento</span>
+                      <select value={simCategoryFilter} onChange={(e) => setSimCategoryFilter(e.target.value as any)}>
+                        <option value="all">Todos los insumos del restaurante</option>
+                        <option value="flour">Solo Harinas y Masas</option>
+                        <option value="dairy">Solo Lácteos / Mozzarella</option>
+                        <option value="meat">Solo Carnes / Proteínas</option>
+                      </select>
+                    </label>
+                    <small style={{ display: 'block', marginTop: 8, color: 'var(--muted)', fontSize: '0.76rem' }}>
+                      Permite simular una suba específica del queso o de la harina sin alterar el resto de las compras.
+                    </small>
+                  </div>
+
+                  {/* Slider Variación de Volumen de Ventas */}
+                  <div style={{ background: 'var(--surface-alt)', padding: 14, borderRadius: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <span style={{ fontSize: '0.86rem', fontWeight: 600 }}>Variación de Volumen de Ventas</span>
+                      <strong style={{ color: simVolumeDelta >= 0 ? '#15803d' : '#b91c1c' }}>
+                        {simVolumeDelta >= 0 ? `+${simVolumeDelta}%` : `${simVolumeDelta}%`}
+                      </strong>
+                    </div>
+                    <input
+                      type="range"
+                      min={-30}
+                      max={30}
+                      step={1}
+                      value={simVolumeDelta}
+                      onChange={(e) => setSimVolumeDelta(Number(e.target.value))}
+                      style={{ width: '100%', cursor: 'pointer' }}
+                    />
+                    <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
+                      {[-15, -10, 0, 10, 15, 20].map((val) => (
+                        <button
+                          key={val}
+                          type="button"
+                          className="btn btn--sm"
+                          style={{ padding: '2px 6px', fontSize: '0.72rem' }}
+                          onClick={() => setSimVolumeDelta(val)}
+                        >
+                          {val > 0 ? `+${val}%` : `${val}%`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Comparación de los 3 Escenarios Lado a Lado */}
+              <h3 style={{ margin: '0 0 12px', fontSize: '1.05rem' }}>
+                ⚖️ Comparativa Estratégica de Escenarios (Pesimista · Base · Optimista)
+              </h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14, marginBottom: 24 }}>
+                {/* Escenario Pesimista */}
+                <div style={{ border: '2px solid #f87171', borderRadius: 10, padding: 16, background: '#fef2f2' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <strong style={{ color: '#991b1b', fontSize: '1.05rem' }}>🔴 Escenario Pesimista</strong>
+                    <span style={{ fontSize: '0.72rem', background: '#fee2e2', color: '#991b1b', padding: '2px 6px', borderRadius: 4, fontWeight: 700 }}>
+                      -15% ventas · +12% insumos
+                    </span>
+                  </div>
+                  <p style={{ fontSize: '0.8rem', color: '#6b7280', margin: '0 0 12px' }}>
+                    Caída de demanda e inflación de costos sin ajuste de precios.
+                  </p>
+                  <div style={{ display: 'grid', gap: 6, fontSize: '0.84rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>Facturación mensual:</span>
+                      <strong>{state.currency} {formatDecimal(simulatedBusinessResult.pessimistic.totRev, 0)}</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>Costo insumos (CMV):</span>
+                      <span style={{ color: '#b91c1c' }}>{state.currency} {formatDecimal(simulatedBusinessResult.pessimistic.totCogs, 0)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>Gastos variables:</span>
+                      <span>{state.currency} {formatDecimal(simulatedBusinessResult.pessimistic.totVarCosts, 0)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>Contribución marginal:</span>
+                      <strong style={{ color: '#15803d' }}>{state.currency} {formatDecimal(simulatedBusinessResult.pessimistic.totContribution, 0)} ({formatDecimal(simulatedBusinessResult.pessimistic.marginPct, 1)}%)</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #fecaca', paddingTop: 6, marginTop: 4 }}>
+                      <span>Gastos fijos:</span>
+                      <span>{state.currency} {formatDecimal(totalMonthlyExpenses, 0)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.94rem', fontWeight: 800 }}>
+                      <span>Ganancia neta:</span>
+                      <span style={{ color: simulatedBusinessResult.pessimistic.netProfit >= 0 ? '#15803d' : '#b91c1c' }}>
+                        {state.currency} {formatDecimal(simulatedBusinessResult.pessimistic.netProfit, 0)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Escenario Base (Actual) */}
+                <div style={{ border: '2px solid var(--line)', borderRadius: 10, padding: 16, background: 'var(--surface)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <strong style={{ fontSize: '1.05rem' }}>⚪ Escenario Base</strong>
+                    <span style={{ fontSize: '0.72rem', background: 'var(--surface-alt)', color: 'var(--ink)', padding: '2px 6px', borderRadius: 4, fontWeight: 700 }}>
+                      Actual vigente
+                    </span>
+                  </div>
+                  <p style={{ fontSize: '0.8rem', color: '#6b7280', margin: '0 0 12px' }}>
+                    Tu volumen de ventas y precios actuales según tu catálogo.
+                  </p>
+                  <div style={{ display: 'grid', gap: 6, fontSize: '0.84rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>Facturación mensual:</span>
+                      <strong>{state.currency} {formatDecimal(simulatedBusinessResult.base.totRev, 0)}</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>Costo insumos (CMV):</span>
+                      <span style={{ color: '#b91c1c' }}>{state.currency} {formatDecimal(simulatedBusinessResult.base.totCogs, 0)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>Gastos variables:</span>
+                      <span>{state.currency} {formatDecimal(simulatedBusinessResult.base.totVarCosts, 0)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>Contribución marginal:</span>
+                      <strong style={{ color: '#15803d' }}>{state.currency} {formatDecimal(simulatedBusinessResult.base.totContribution, 0)} ({formatDecimal(simulatedBusinessResult.base.marginPct, 1)}%)</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--line)', paddingTop: 6, marginTop: 4 }}>
+                      <span>Gastos fijos:</span>
+                      <span>{state.currency} {formatDecimal(totalMonthlyExpenses, 0)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.94rem', fontWeight: 800 }}>
+                      <span>Ganancia neta:</span>
+                      <span style={{ color: simulatedBusinessResult.base.netProfit >= 0 ? '#15803d' : '#b91c1c' }}>
+                        {state.currency} {formatDecimal(simulatedBusinessResult.base.netProfit, 0)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Escenario Optimista */}
+                <div style={{ border: '2px solid #86efac', borderRadius: 10, padding: 16, background: '#f0fdf4' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                    <strong style={{ color: '#15803d', fontSize: '1.05rem' }}>🟢 Escenario Optimista</strong>
+                    <span style={{ fontSize: '0.72rem', background: '#dcfce7', color: '#15803d', padding: '2px 6px', borderRadius: 4, fontWeight: 700 }}>
+                      +15% ventas · +5% precio
+                    </span>
+                  </div>
+                  <p style={{ fontSize: '0.8rem', color: '#6b7280', margin: '0 0 12px' }}>
+                    Aumento moderado de precios y expansión del volumen de ventas.
+                  </p>
+                  <div style={{ display: 'grid', gap: 6, fontSize: '0.84rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>Facturación mensual:</span>
+                      <strong>{state.currency} {formatDecimal(simulatedBusinessResult.optimistic.totRev, 0)}</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>Costo insumos (CMV):</span>
+                      <span style={{ color: '#b91c1c' }}>{state.currency} {formatDecimal(simulatedBusinessResult.optimistic.totCogs, 0)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>Gastos variables:</span>
+                      <span>{state.currency} {formatDecimal(simulatedBusinessResult.optimistic.totVarCosts, 0)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>Contribución marginal:</span>
+                      <strong style={{ color: '#15803d' }}>{state.currency} {formatDecimal(simulatedBusinessResult.optimistic.totContribution, 0)} ({formatDecimal(simulatedBusinessResult.optimistic.marginPct, 1)}%)</strong>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #bbf7d0', paddingTop: 6, marginTop: 4 }}>
+                      <span>Gastos fijos:</span>
+                      <span>{state.currency} {formatDecimal(totalMonthlyExpenses, 0)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.94rem', fontWeight: 800 }}>
+                      <span>Ganancia neta:</span>
+                      <span style={{ color: '#15803d' }}>
+                        {state.currency} {formatDecimal(simulatedBusinessResult.optimistic.netProfit, 0)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Desglose de Impacto por Producto con los Controles Actuales */}
+              <h3 style={{ margin: '0 0 12px', fontSize: '1.05rem' }}>
+                📋 Impacto Proyectado por Producto en el Escenario Simulado ({simPriceDelta >= 0 ? `+${simPriceDelta}%` : `${simPriceDelta}%`} precio · {simCostDelta > 0 ? `+${simCostDelta}%` : `${simCostDelta}%`} insumo · {simVolumeDelta >= 0 ? `+${simVolumeDelta}%` : `${simVolumeDelta}%`} ventas)
+              </h3>
+              <div className="table-wrap">
+                <table className="kit-table">
+                  <thead>
+                    <tr>
+                      <th>Producto</th>
+                      <th style={{ textAlign: 'right' }}>Unidades proyectadas</th>
+                      <th style={{ textAlign: 'right' }}>Precio actual $\to$ simulado</th>
+                      <th style={{ textAlign: 'right' }}>Costo actual $\to$ simulado</th>
+                      <th style={{ textAlign: 'right' }}>Margen unitario proyectado</th>
+                      <th style={{ textAlign: 'right' }}>Contribución total simulada</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {simulatedBusinessResult.custom.rows.map((row) => (
+                      <tr key={row.prod.id}>
+                        <td><strong>{row.prod.name}</strong></td>
+                        <td style={{ textAlign: 'right' }}>
+                          {formatDecimal(row.simUnits, 0)} u.
+                          {row.simUnits !== row.baseUnits && (
+                            <small style={{ display: 'block', color: row.simUnits > row.baseUnits ? '#15803d' : '#b91c1c' }}>
+                              (Base: {formatDecimal(row.baseUnits, 0)} u.)
+                            </small>
+                          )}
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          {state.currency} {formatDecimal(row.simPrice, 0)}
+                          {row.simPrice !== row.basePrice && (
+                            <small style={{ display: 'block', color: 'var(--muted)' }}>
+                              (Base: {state.currency} {formatDecimal(row.basePrice, 0)})
+                            </small>
+                          )}
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          {state.currency} {formatDecimal(row.simCost, 2)}
+                          {row.simCost !== row.baseCost && (
+                            <small style={{ display: 'block', color: '#b91c1c' }}>
+                              (Base: {state.currency} {formatDecimal(row.baseCost, 2)})
+                            </small>
+                          )}
+                        </td>
+                        <td style={{ textAlign: 'right', fontWeight: 600 }}>
+                          {state.currency} {formatDecimal(row.simProfit, 2)}
+                          <small style={{ display: 'block', color: 'var(--muted)' }}>
+                            {row.simPrice > 0 ? `${formatDecimal((row.simProfit / row.simPrice) * 100, 1)}%` : '—'}
+                          </small>
+                        </td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: '#15803d' }}>
+                          {state.currency} {formatDecimal(row.simContribution, 0)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            /* Modo Calculadora Unitaria Manual */
+            <div style={{ marginTop: 16 }}>
+              <div className="builder-grid">
+                <label className="field">
+                  <span>Vincular producto del catálogo</span>
+                  <select value={profitProductId} onChange={(e) => setProfitProductId(e.target.value)}>
+                    <option value="">Escenario manual</option>
+                    {state.catalog.recipes.filter((r) => r.recipe_type === 'product').map((r) => (
+                      <option key={r.id} value={r.id}>{r.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Unidades por mes</span>
+                  <input type="number" min="0" value={profitScenario.units} onChange={(e) => setProfitScenario((p) => ({ ...p, units: Math.max(0, Number(e.target.value) || 0) }))} />
+                </label>
+                <label className="field">
+                  <span>Precio de venta unitario ({state.currency})</span>
+                  <input type="number" min="0" value={profitScenario.price} onChange={(e) => setProfitScenario((p) => ({ ...p, price: Math.max(0, Number(e.target.value) || 0) }))} />
+                </label>
+                <label className="field">
+                  <span>Costo variable unitario ({state.currency})</span>
+                  <input type="number" min="0" value={profitScenario.variableCost} onChange={(e) => setProfitScenario((p) => ({ ...p, variableCost: Math.max(0, Number(e.target.value) || 0) }))} />
+                </label>
+                <label className="field">
+                  <span>Gastos fijos mensuales ({state.currency})</span>
+                  <input type="number" min="0" value={profitScenario.fixedCosts || totalMonthlyExpenses} onChange={(e) => setProfitScenario((p) => ({ ...p, fixedCosts: Math.max(0, Number(e.target.value) || 0) }))} />
+                </label>
+              </div>
+
+              {profitProductId && (() => {
+                const product = state.catalog.recipes.find((r) => r.id === profitProductId);
+                const cost = recipeResults.get(profitProductId);
+                const price = state.productSalesMap?.[profitProductId]?.sellingPrice;
+                const canUse = Boolean(product && cost?.status === 'complete' && cost.raw_unit_cost !== null && Number(price) > 0);
+                return (
+                  <div style={{ marginTop: 10 }}>
+                    <button
+                      type="button"
+                      className="btn btn--ocre"
+                      disabled={!canUse}
+                      onClick={() => setProfitScenario((prev) => ({
+                        ...prev,
+                        price: Number(price),
+                        variableCost: cost!.raw_unit_cost! + state.defaultPackagingCost + Number(price) * state.defaultChannelFeePct / 100,
+                        fixedCosts: totalMonthlyExpenses,
+                      }))}
+                    >
+                      Cargar precio, costo y gastos fijos del catálogo
+                    </button>
+                    {!canUse && <small style={{ display: 'block', marginTop: 6 }}>Para vincularlo necesitás costo completo y precio de venta cargado en el catálogo. El costo variable incluye packaging y comisión configurados.</small>}
+                  </div>
+                );
+              })()}
+
+              {(() => {
+                const effectiveFixed = profitScenario.fixedCosts || totalMonthlyExpenses;
+                const revenue = profitScenario.units * profitScenario.price;
+                const contribution = profitScenario.units * (profitScenario.price - profitScenario.variableCost);
+                const result = contribution - effectiveFixed;
+                const margin = revenue > 0 ? (contribution / revenue) * 100 : null;
+                const breakEven = margin && margin > 0 ? effectiveFixed / (margin / 100) : 0;
+                return (
+                  <div className="kpi-grid" style={{ marginTop: 16 }}>
+                    <div className="kpi-card"><span>Facturación escenario</span><strong>{state.currency} {formatDecimal(revenue, 2)}</strong></div>
+                    <div className="kpi-card"><span>Contribución marginal</span><strong>{state.currency} {formatDecimal(contribution, 2)}</strong></div>
+                    <div className="kpi-card"><span>Resultado operativo</span><strong style={{ color: result >= 0 ? '#15803d' : '#b91c1c' }}>{state.currency} {formatDecimal(result, 2)}</strong></div>
+                    <div className="kpi-card"><span>Punto de equilibrio</span><strong>{breakEven > 0 ? `${state.currency} ${formatDecimal(breakEven, 2)}` : '—'}</strong><small>Margen: {margin == null ? 'Sin datos' : `${formatDecimal(margin, 1)}%`}</small></div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+        </section>
+      )}
+
+      {activeTab === 'sync' && (
+        <section className="card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <div>
+              <h2>Sincronización 1-Click con Pizzalog App</h2>
+              <p className="lead">
+                Conectá tu espacio de trabajo de Tools con tu restaurante en Pizzalog App para exportar o importar insumos, precios y recetas con un solo clic.
+              </p>
+            </div>
+            {syncStatus?.linked && (
+              <span className="badge" style={{ background: '#e8f5e9', color: '#2e7d32', padding: '6px 12px', borderRadius: 16, fontWeight: 600 }}>
+                🟢 Vinculado: {syncStatus.business_name}
+              </span>
+            )}
+          </div>
+
+          {syncNotice && (
+            <div className="alert-banner" style={{ background: '#e8f5e9', color: '#2e7d32', marginBottom: 16 }}>
+              {syncNotice}
+            </div>
+          )}
+          {syncError && (
+            <div className="alert-banner" style={{ background: '#ffebee', color: '#c62828', marginBottom: 16 }}>
+              {syncError}
+            </div>
+          )}
+
+          {!syncStatus?.linked ? (
+            <div style={{ maxWidth: 520, padding: 20, border: '1px solid #e0e0e0', borderRadius: 8, background: '#fafafa' }}>
+              <h3 style={{ marginTop: 0 }}>Vincular con tu cuenta de Pizzalog App</h3>
+              <p style={{ fontSize: '0.88rem', color: '#666' }}>
+                Ingresá las credenciales de tu usuario administrador en Pizzalog App para habilitar la sincronización directa.
+              </p>
+              <form onSubmit={handleLinkApp} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <label className="field">
+                  <span>Email en Pizzalog App</span>
+                  <input
+                    type="email"
+                    required
+                    value={syncLinkEmail}
+                    onChange={(e) => setSyncLinkEmail(e.target.value)}
+                    placeholder="admin@mitienda.com"
+                  />
+                </label>
+                <label className="field">
+                  <span>Contraseña en Pizzalog App</span>
+                  <input
+                    type="password"
+                    required
+                    value={syncLinkPassword}
+                    onChange={(e) => setSyncLinkPassword(e.target.value)}
+                  />
+                </label>
+                <button type="submit" className="btn btn--primary" disabled={syncLoading} style={{ alignSelf: 'flex-start' }}>
+                  {syncLoading ? 'Verificando...' : 'Vincular Restaurante'}
+                </button>
+              </form>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 20 }}>
+              <div style={{ padding: 20, border: '1px solid #e2e8f0', borderRadius: 8, background: '#fff' }}>
+                <h3 style={{ marginTop: 0 }}>📤 Exportar a Pizzalog App (Tools → App)</h3>
+                <p style={{ fontSize: '0.88rem', color: '#555', lineHeight: 1.5 }}>
+                  Envía los insumos creados en Tools y sus precios calculados directamente a tu catálogo de insumos de Pizzalog App. Si cambian costos, conservadoramente se invalidan los costos calculados de tus pizzas para que el sistema los recalcule.
+                </p>
+                <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    disabled={syncLoading}
+                    onClick={() => handleSyncPreview('to_app')}
+                  >
+                    Previsualizar
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--primary"
+                    disabled={syncLoading}
+                    onClick={() => handleSyncApply('to_app')}
+                  >
+                    {syncLoading ? 'Sincronizando...' : 'Exportar a App ahora'}
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ padding: 20, border: '1px solid #e2e8f0', borderRadius: 8, background: '#fff' }}>
+                <h3 style={{ marginTop: 0 }}>📥 Importar desde Pizzalog App (App → Tools)</h3>
+                <p style={{ fontSize: '0.88rem', color: '#555', lineHeight: 1.5 }}>
+                  Trae todos tus insumos activos y precios vigentes cargados en tu Pizzalog App a este espacio de trabajo para simular variaciones de menú, costos de masa y proyecciones de rentabilidad sin afectar el sistema en vivo.
+                </p>
+                <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+                  <button
+                    type="button"
+                    className="btn btn--ocre"
+                    disabled={syncLoading}
+                    onClick={() => handleSyncApply('from_app')}
+                  >
+                    {syncLoading ? 'Importando...' : 'Traer catálogo desde App'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {syncPreviewData && (
+            <div style={{ marginTop: 20, padding: 16, background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: 8 }}>
+              <h4 style={{ margin: '0 0 10px 0' }}>Resumen de cambios detectados ({syncPreviewData.direction === 'to_app' ? 'Tools → App' : 'App → Tools'})</h4>
+              <ul style={{ margin: 0, paddingLeft: 20, fontSize: '0.88rem' }}>
+                <li>Insumos nuevos para dar de alta en App: <strong>{syncPreviewData.summary?.supplies_to_create ?? 0}</strong></li>
+                <li>Precios de insumos existentes a actualizar: <strong>{syncPreviewData.summary?.supplies_to_update_cost ?? 0}</strong></li>
+                <li>Insumos sin cambios: <strong>{syncPreviewData.summary?.supplies_unchanged ?? 0}</strong></li>
+                <li>Recetas en catálogo de Tools: <strong>{syncPreviewData.summary?.recipes_count ?? 0}</strong></li>
+              </ul>
+            </div>
+          )}
         </section>
       )}
 
@@ -1174,21 +2838,32 @@ export function App({
                 La merma se aplica una única vez como rendimiento utilizable. Si falta el precio de compra, el insumo se marca INCOMPLETO (nunca $0 silencioso).
               </p>
             </div>
-            <button type="button" className="btn btn--primary" onClick={addIngredient}>
-              + Nuevo Insumo
-            </button>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <label className="btn btn--secondary" style={{ cursor: 'pointer', margin: 0 }}>
+                📋 Actualizar por lista de proveedor
+                <input
+                  type="file"
+                  accept=".xlsx,.csv"
+                  style={{ display: 'none' }}
+                  onChange={handlePriceListUpload}
+                />
+              </label>
+              <button type="button" className="btn btn--primary" onClick={addIngredient}>
+                + Nuevo Insumo
+              </button>
+            </div>
           </div>
           <div className="table-wrap">
             <table className="kit-table">
               <thead>
                 <tr>
                   <th>Ingrediente</th>
-                  <th>Dimensión / Base</th>
-                  <th>Densidad (g/ml)</th>
+                  <th>Dimensión / Base <button type="button" className="btn btn--sm" style={{ padding: '0 4px', fontSize: '0.72rem', border: 'none', background: 'transparent', cursor: 'pointer' }} onClick={() => { setHelpTopic('units'); setShowHelpModal(true); }} title="Ver guía de unidades">❓</button></th>
+                  <th>Densidad (g/ml) <button type="button" className="btn btn--sm" style={{ padding: '0 4px', fontSize: '0.72rem', border: 'none', background: 'transparent', cursor: 'pointer' }} onClick={() => { setHelpTopic('density'); setShowHelpModal(true); }} title="Ver densidades comunes">❓</button></th>
                   <th>Precio Compra ({state.currency})</th>
                   <th>Cant. Envase</th>
                   <th>Unidad Envase</th>
-                  <th>Rendimiento (%)</th>
+                  <th>Rendimiento (%) <button type="button" className="btn btn--sm" style={{ padding: '0 4px', fontSize: '0.72rem', border: 'none', background: 'transparent', cursor: 'pointer' }} onClick={() => { setHelpTopic('yield'); setShowHelpModal(true); }} title="Ver cómo impacta la merma">❓</button></th>
                   <th>Costo Utilizable / Base</th>
                   <th>Costo por kg / L</th>
                   <th>Estado</th>
@@ -1833,10 +3508,10 @@ export function App({
             <div className="kpi-box">
               <div className="kpi-box__label">Contribución Marginal (Ventas Mes)</div>
               <div className="kpi-box__value">
-                {state.currency} {formatDecimal(monthlySummary.totalContribution, 0)}
+                {monthlySummary.hasSalesData ? `${state.currency} ${formatDecimal(monthlySummary.totalContribution, 0)}` : 'Sin datos'}
               </div>
               <div className="kpi-box__sub">
-                Por {monthlySummary.totalUnits} unidades vendidas/mes
+                {monthlySummary.hasSalesData ? `Por ${monthlySummary.totalUnits} unidades vendidas/mes` : 'Sin ventas registradas'}
               </div>
             </div>
             <div className="kpi-box">
@@ -2069,6 +3744,234 @@ export function App({
         </>
       )}
 
+      {/* Modal de Actualizador Rápido de Precios por Lista de Proveedor */}
+      {showPriceListModal && (
+        <div className="modal-backdrop">
+          <div className="modal-panel" style={{ maxWidth: '960px', width: '95%' }}>
+            <div className="modal-header">
+              <div>
+                <h3>Actualizar Precios por Lista de Proveedor</h3>
+                <small>{priceListFileName} · {priceListMatches.length} productos detectados en la lista</small>
+              </div>
+              <button type="button" className="btn" onClick={() => setShowPriceListModal(false)}>Cerrar</button>
+            </div>
+
+            {(() => {
+              const summary = summarizeMatches(priceListMatches);
+              const selectedCount = Object.values(priceListSelectedRows).filter(Boolean).length;
+              const filtered = priceListMatches
+                .map((m, idx) => ({ match: m, originalIndex: idx }))
+                .filter(({ match }) => {
+                  if (priceListFilter === 'matched') return Boolean(match.target_id);
+                  if (priceListFilter === 'unmatched') return !match.target_id;
+                  if (priceListFilter === 'warnings') return match.warnings.length > 0;
+                  return true;
+                });
+
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 12 }}>
+                  <div style={{
+                    display: 'flex',
+                    gap: 16,
+                    flexWrap: 'wrap',
+                    padding: '10px 14px',
+                    background: 'var(--color-bg-surface-2, #f5f5f5)',
+                    borderRadius: 6,
+                    fontSize: '0.85rem',
+                    alignItems: 'center',
+                  }}>
+                    <span>Total en lista: <strong>{summary.total}</strong></span>
+                    <span>Vinculados: <strong style={{ color: '#2e7d32' }}>{summary.matched}</strong></span>
+                    <span>Sin vincular: <strong style={{ color: summary.unmatched ? '#d32f2f' : '#666' }}>{summary.unmatched}</strong></span>
+                    <span>Subas: <strong style={{ color: '#c62828' }}>+{summary.increases}</strong></span>
+                    <span>Bajas: <strong style={{ color: '#2e7d32' }}>-{summary.decreases}</strong></span>
+                    {summary.average_variation_pct != null && (
+                      <span>Var. promedio: <strong>{summary.average_variation_pct > 0 ? `+${summary.average_variation_pct}%` : `${summary.average_variation_pct}%`}</strong></span>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 8, fontSize: '0.8rem' }}>
+                    <button
+                      type="button"
+                      className={`btn btn--sm ${priceListFilter === 'all' ? 'btn--primary' : 'btn--secondary'}`}
+                      onClick={() => setPriceListFilter('all')}
+                    >
+                      Todos ({priceListMatches.length})
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn btn--sm ${priceListFilter === 'matched' ? 'btn--primary' : 'btn--secondary'}`}
+                      onClick={() => setPriceListFilter('matched')}
+                    >
+                      Vinculados ({summary.matched})
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn btn--sm ${priceListFilter === 'unmatched' ? 'btn--primary' : 'btn--secondary'}`}
+                      onClick={() => setPriceListFilter('unmatched')}
+                    >
+                      Sin vincular ({summary.unmatched})
+                    </button>
+                    {summary.with_warnings > 0 && (
+                      <button
+                        type="button"
+                        className={`btn btn--sm ${priceListFilter === 'warnings' ? 'btn--primary' : 'btn--secondary'}`}
+                        style={{ color: '#e65100', borderColor: '#ffb74d' }}
+                        onClick={() => setPriceListFilter('warnings')}
+                      >
+                        ⚠️ Con advertencias ({summary.with_warnings})
+                      </button>
+                    )}
+                  </div>
+
+                  <div style={{ maxHeight: '420px', overflowY: 'auto', border: '1px solid #e0e0e0', borderRadius: 6 }}>
+                    <table className="kit-table" style={{ fontSize: '0.83rem', width: '100%' }}>
+                      <thead>
+                        <tr>
+                          <th style={{ width: 32 }}>
+                            <input
+                              type="checkbox"
+                              checked={selectedCount > 0 && selectedCount === priceListMatches.filter((m) => m.target_id && m.new_price_per_unit != null).length}
+                              onChange={(e) => {
+                                const checked = e.target.checked;
+                                const next: Record<number, boolean> = {};
+                                priceListMatches.forEach((m, idx) => {
+                                  if (m.target_id && m.new_price_per_unit != null) next[idx] = checked;
+                                });
+                                setPriceListSelectedRows(next);
+                              }}
+                            />
+                          </th>
+                          <th>Ítem en lista de proveedor</th>
+                          <th>Insumo en Tools</th>
+                          <th style={{ textAlign: 'right' }}>Precio lista</th>
+                          <th style={{ textAlign: 'right' }}>Precio actual</th>
+                          <th style={{ textAlign: 'right' }}>Nuevo unitario</th>
+                          <th style={{ textAlign: 'center' }}>Variación</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filtered.map(({ match, originalIndex }) => {
+                          const isSel = Boolean(priceListSelectedRows[originalIndex]);
+                          const ing = state.catalog.ingredients.find((i) => i.id === match.target_id);
+                          const isInc = match.variation_pct != null && match.variation_pct > 0.05;
+                          const isDec = match.variation_pct != null && match.variation_pct < -0.05;
+
+                          return (
+                            <tr key={originalIndex} style={{ background: !match.target_id ? '#fffdf7' : isSel ? '#fff' : '#fafafa' }}>
+                              <td style={{ textAlign: 'center' }}>
+                                <input
+                                  type="checkbox"
+                                  disabled={!match.target_id || match.new_price_per_unit == null}
+                                  checked={isSel}
+                                  onChange={(e) => {
+                                    setPriceListSelectedRows((prev) => ({
+                                      ...prev,
+                                      [originalIndex]: e.target.checked,
+                                    }));
+                                  }}
+                                />
+                              </td>
+                              <td>
+                                <div style={{ fontWeight: 600 }}>{match.item.raw_name}</div>
+                                {match.presentation && (
+                                  <div style={{ fontSize: '0.74rem', color: '#666' }}>
+                                    Envase: {match.presentation.quantity} {match.presentation.unit}
+                                  </div>
+                                )}
+                                {match.warnings.map((w, i) => (
+                                  <div key={i} style={{ fontSize: '0.72rem', color: '#e65100' }}>
+                                    ⚠️ {w}
+                                  </div>
+                                ))}
+                              </td>
+                              <td>
+                                <select
+                                  value={match.target_id ?? ''}
+                                  onChange={(e) => handlePriceListTargetChange(originalIndex, e.target.value)}
+                                  style={{
+                                    padding: '4px 6px',
+                                    fontSize: '0.8rem',
+                                    borderRadius: 4,
+                                    border: match.target_id ? '1px solid #ccc' : '1px solid #ffa726',
+                                    background: match.target_id ? '#fff' : '#fff8e1',
+                                    maxWidth: '220px',
+                                  }}
+                                >
+                                  <option value="">— Sin vincular —</option>
+                                  {state.catalog.ingredients.map((i) => (
+                                    <option key={i.id} value={i.id}>
+                                      {i.name} ({i.base_unit})
+                                    </option>
+                                  ))}
+                                </select>
+                                {match.target_id && (
+                                  <div style={{ fontSize: '0.7rem', color: '#777', marginTop: 2 }}>
+                                    Match: {match.source === 'exact' ? 'Exacto' : `Similar (${Math.round(match.confidence * 100)}%)`}
+                                  </div>
+                                )}
+                              </td>
+                              <td style={{ textAlign: 'right' }}>
+                                {state.currency} {formatDecimal(match.item.price, 2)}
+                              </td>
+                              <td style={{ textAlign: 'right', color: '#666' }}>
+                                {match.old_price_per_unit != null ? `${state.currency} ${formatDecimal(match.old_price_per_unit, 2)}` : '—'}
+                              </td>
+                              <td style={{ textAlign: 'right', fontWeight: 600 }}>
+                                {match.new_price_per_unit != null && ing
+                                  ? `${state.currency} ${formatDecimal(match.new_price_per_unit, 2)} / ${ing.base_unit}`
+                                  : '—'}
+                              </td>
+                              <td style={{ textAlign: 'center' }}>
+                                {match.variation_pct != null ? (
+                                  <span
+                                    style={{
+                                      padding: '2px 6px',
+                                      borderRadius: 4,
+                                      fontSize: '0.75rem',
+                                      fontWeight: 600,
+                                      background: isInc ? '#ffebee' : isDec ? '#e8f5e9' : '#f5f5f5',
+                                      color: isInc ? '#c62828' : isDec ? '#2e7d32' : '#616161',
+                                    }}
+                                  >
+                                    {match.variation_pct > 0 ? `+${match.variation_pct}%` : `${match.variation_pct}%`}
+                                  </span>
+                                ) : (
+                                  '—'
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
+                    <small style={{ color: '#666' }}>
+                      Se agregarán nuevos registros de compra con fecha de hoy. Tus snapshots y cálculos históricos permanecen inalterados.
+                    </small>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button type="button" className="btn btn--secondary" onClick={() => setShowPriceListModal(false)}>
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--primary"
+                        disabled={selectedCount === 0}
+                        onClick={confirmPriceListApply}
+                      >
+                        Aplicar {selectedCount} {selectedCount === 1 ? 'precio' : 'precios'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
       {/* Modal del Constructor Visual Interactivo de Recetas, Subrecetas y Masas */}
       {smartImportPreview && (
         <div className="modal-backdrop">
@@ -2188,17 +4091,110 @@ export function App({
                 </section>
               );
             })}
-            <label className="field" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 16 }}>
-              <input
-                type="checkbox"
-                checked={replaceWorkspaceOnImport}
-                onChange={(e) => setReplaceWorkspaceOnImport(e.target.checked)}
-              />
-              <span>Reemplazar mis datos actuales en lugar de combinar (se descargará una copia de seguridad)</span>
-            </label>
+            {(() => {
+              const unmatched = findUnmatchedComponents(state, smartImportPreview.sheets, smartImportPreview.mappings, importEquivalences);
+              if (unmatched.length === 0) return null;
+              return (
+                <div style={{ background: '#fffbeb', border: '1px solid #f59e0b', borderRadius: 8, padding: 14, margin: '14px 0' }}>
+                  <strong style={{ color: '#92400e', display: 'block', marginBottom: 6 }}>
+                    🔍 Insumos en recetas sin coincidencia exacta en el catálogo ({unmatched.length})
+                  </strong>
+                  <p style={{ fontSize: '0.84rem', color: '#78350f', margin: '0 0 10px' }}>
+                    Las recetas importadas mencionan los siguientes ingredientes que no existen con el mismo nombre en tu lista de insumos. Podés asociarlos a un insumo existente para costearlos automáticamente o dejarlos como nuevos insumos.
+                  </p>
+                  <div style={{ display: 'grid', gap: 8, maxHeight: 180, overflowY: 'auto' }}>
+                    {unmatched.map((name) => (
+                      <div key={name} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, background: '#fff', padding: '6px 10px', borderRadius: 6, border: '1px solid #fed7aa' }}>
+                        <span style={{ fontSize: '0.86rem', fontWeight: 600 }}>{name}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ fontSize: '0.78rem', color: '#9a3412' }}>Vincular a:</span>
+                          <select
+                            style={{ fontSize: '0.82rem', padding: '3px 6px' }}
+                            value={importEquivalences[name.toLowerCase()] ?? ''}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setImportEquivalences((prev) => {
+                                const next = { ...prev };
+                                if (val) next[name.toLowerCase()] = val;
+                                else delete next[name.toLowerCase()];
+                                return next;
+                              });
+                            }}
+                          >
+                            <option value="">Crear como nuevo insumo</option>
+                            {state.catalog.ingredients.map((ing) => (
+                              <option key={ing.id} value={ing.name}>
+                                {ing.name} ({ing.base_unit})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
+            <div style={{ background: 'var(--surface-alt)', border: '1px solid var(--line)', borderRadius: 10, padding: 16, marginTop: 16 }}>
+              <div style={{ fontWeight: 600, marginBottom: 8, fontSize: '0.94rem' }}>Modalidad de Importación</div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12 }}>
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: 10, borderRadius: 8, border: !replaceWorkspaceOnImport ? '2px solid var(--brand)' : '1px solid var(--line)', background: !replaceWorkspaceOnImport ? '#fff' : 'transparent', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="importMode"
+                    checked={!replaceWorkspaceOnImport}
+                    onChange={() => { setReplaceWorkspaceOnImport(false); setReplaceConfirmed(false); }}
+                    style={{ marginTop: 3 }}
+                  />
+                  <div>
+                    <strong style={{ display: 'block', fontSize: '0.88rem' }}>🔗 Combinar con datos existentes</strong>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--muted)', display: 'block', marginTop: 2 }}>
+                      Conserva recetas, insumos y precios actuales. Detecta duplicados para evitar registros repetidos.
+                    </span>
+                  </div>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: 10, borderRadius: 8, border: replaceWorkspaceOnImport ? '2px solid #ea580c' : '1px solid var(--line)', background: replaceWorkspaceOnImport ? '#fff7ed' : 'transparent', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="importMode"
+                    checked={replaceWorkspaceOnImport}
+                    onChange={() => setReplaceWorkspaceOnImport(true)}
+                    style={{ marginTop: 3 }}
+                  />
+                  <div>
+                    <strong style={{ display: 'block', fontSize: '0.88rem', color: '#9a3412' }}>🔄 Reemplazar espacio de trabajo</strong>
+                    <span style={{ fontSize: '0.8rem', color: '#7c2d12', display: 'block', marginTop: 2 }}>
+                      Sustituye recetas, insumos y gastos por los datos de la planilla. Se descargará una copia de seguridad JSON.
+                    </span>
+                  </div>
+                </label>
+              </div>
+
+              {replaceWorkspaceOnImport && (
+                <div style={{ marginTop: 12, padding: 10, background: '#fef2f2', border: '1px solid #f87171', borderRadius: 6, fontSize: '0.84rem', color: '#991b1b' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={replaceConfirmed}
+                      onChange={(e) => setReplaceConfirmed(e.target.checked)}
+                    />
+                    <span>Confirmo que deseo reemplazar mi catálogo actual por los datos importados (se descargará respaldo JSON).</span>
+                  </label>
+                </div>
+              )}
+            </div>
+
             <div className="smart-import-footer">
-              <button type="button" className="btn" onClick={() => setSmartImportPreview(null)}>Cancelar</button>
-              <button type="button" className="btn btn--primary" onClick={confirmSmartImport}>Confirmar e incorporar datos</button>
+              <button type="button" className="btn" onClick={() => { setSmartImportPreview(null); setImportEquivalences({}); setReplaceConfirmed(false); }}>Cancelar</button>
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={replaceWorkspaceOnImport && !replaceConfirmed}
+                onClick={confirmSmartImport}
+              >
+                Confirmar e incorporar datos
+              </button>
             </div>
           </div>
         </div>
@@ -2287,6 +4283,15 @@ export function App({
 
             {isDoughMode && editingRecipe.bakers_dough ? (
               <>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+                <button
+                  type="button"
+                  className="btn btn--sm btn--secondary"
+                  onClick={() => { setHelpTopic('bakers'); setShowHelpModal(true); }}
+                >
+                  🍞 ¿Cómo funcionan los porcentajes de panadero?
+                </button>
+              </div>
               <div className="builder-grid">
                 <label className="field">
                   <span>Harina Total del Batch (g)</span>
@@ -2715,6 +4720,72 @@ export function App({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Modal de Confirmación para Limpiar Datos Demo */}
+      {showClearDemoConfirm && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="clear-demo-title">
+          <div className="modal-panel" style={{ maxWidth: 520 }}>
+            <div className="modal-header">
+              <h3 id="clear-demo-title" style={{ color: '#b91c1c' }}>⚠️ ¿Limpiar datos de demostración?</h3>
+              <button type="button" className="btn btn--secondary" onClick={() => setShowClearDemoConfirm(false)}>✕</button>
+            </div>
+            <p style={{ margin: '14px 0', fontSize: '0.92rem', lineHeight: 1.5 }}>
+              Esta acción vaciará las recetas, insumos, gastos y ventas de ejemplo de <strong>«Pizzería Demo — Il Forno»</strong>, dejándote un espacio de trabajo en blanco listo para cargar los datos reales de tu negocio.
+            </p>
+            <p style={{ fontSize: '0.84rem', color: 'var(--muted)', margin: '0 0 18px' }}>
+              Se conservarán tu moneda ({state.currency}), idioma y decimales. Siempre podrás volver a restaurar los datos de demo desde la barra superior.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button
+                type="button"
+                className="btn btn--secondary"
+                onClick={() => setShowClearDemoConfirm(false)}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary"
+                style={{ background: '#b91c1c', borderColor: '#991b1b' }}
+                onClick={() => {
+                  setState(createEmptyWorkspace(state.locale, state.currency));
+                  setShowClearDemoConfirm(false);
+                }}
+              >
+                Sí, vaciar y empezar de cero
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Comercial de Planes y Suscripción */}
+      {showPlansModal && (
+        <CommercialPlansModal
+          onClose={() => setShowPlansModal(false)}
+          userEmail={account.email}
+        />
+      )}
+
+      {/* Modal de Reporte Ejecutivo Imprimible */}
+      {showReportModal && (
+        <ExecutiveReportModal
+          state={state}
+          monthlySummary={monthlySummary}
+          totalMonthlyExpenses={totalMonthlyExpenses}
+          netOperatingProfit={netOperatingProfit}
+          breakEvenRevenue={breakEvenRevenue}
+          onClose={() => setShowReportModal(false)}
+        />
+      )}
+
+      {/* Modal de Ayuda Contextual Culinaria */}
+      {showHelpModal && (
+        <ContextualHelpModal
+          initialTopic={helpTopic}
+          onClose={() => setShowHelpModal(false)}
+        />
       )}
     </div>
   );
