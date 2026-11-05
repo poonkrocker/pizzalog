@@ -262,68 +262,74 @@ export function createInitialDemoWorkspace(): ToolsWorkspaceState {
     ],
   };
 
-  const snapSep = createCostSnapshot(
-    {
-      ...demoCatalog,
-      purchase_prices: demoCatalog.purchase_prices.map((p) =>
-        p.ingredient_id === 'ing_mozzarella'
-          ? { ...p, purchase_price: 1500 }
-          : p.ingredient_id === 'ing_harina'
-          ? { ...p, purchase_price: 20000 }
-          : p
-      ),
-    },
-    'prod_margherita',
-    {
-      selling_price: 3200,
-      target_food_cost_pct: 30,
-      rounding_increment: 500,
-      rounding_mode: 'ceil',
-      packaging_cost: 350,
-      channel_fee_pct: 25,
-    }
-  );
-  snapSep.snapshot_id = 'snap_margh_sep';
-  snapSep.created_at = '2026-09-10T15:00:00.000Z';
+  const snapSep: CostSnapshot = {
+    ...createCostSnapshot(
+      {
+        ...demoCatalog,
+        purchase_prices: demoCatalog.purchase_prices.map((p) =>
+          p.ingredient_id === 'ing_mozzarella'
+            ? { ...p, purchase_price: 1500 }
+            : p.ingredient_id === 'ing_harina'
+            ? { ...p, purchase_price: 20000 }
+            : p
+        ),
+      },
+      'prod_margherita',
+      {
+        selling_price: 3200,
+        target_food_cost_pct: 30,
+        rounding_increment: 500,
+        rounding_mode: 'ceil',
+        packaging_cost: 350,
+        channel_fee_pct: 25,
+      }
+    ),
+    snapshot_id: 'snap_margh_sep',
+    created_at: '2026-09-10T15:00:00.000Z',
+  };
 
-  const snapOct = createCostSnapshot(
-    {
-      ...demoCatalog,
-      purchase_prices: demoCatalog.purchase_prices.map((p) =>
-        p.ingredient_id === 'ing_mozzarella'
-          ? { ...p, purchase_price: 1800 }
-          : p.ingredient_id === 'ing_harina'
-          ? { ...p, purchase_price: 22500 }
-          : p
-      ),
-    },
-    'prod_margherita',
-    {
-      selling_price: 3800,
-      target_food_cost_pct: 30,
-      rounding_increment: 500,
-      rounding_mode: 'ceil',
-      packaging_cost: 350,
-      channel_fee_pct: 25,
-    }
-  );
-  snapOct.snapshot_id = 'snap_margh_oct';
-  snapOct.created_at = '2026-10-12T15:00:00.000Z';
+  const snapOct: CostSnapshot = {
+    ...createCostSnapshot(
+      {
+        ...demoCatalog,
+        purchase_prices: demoCatalog.purchase_prices.map((p) =>
+          p.ingredient_id === 'ing_mozzarella'
+            ? { ...p, purchase_price: 1800 }
+            : p.ingredient_id === 'ing_harina'
+            ? { ...p, purchase_price: 22500 }
+            : p
+        ),
+      },
+      'prod_margherita',
+      {
+        selling_price: 3800,
+        target_food_cost_pct: 30,
+        rounding_increment: 500,
+        rounding_mode: 'ceil',
+        packaging_cost: 350,
+        channel_fee_pct: 25,
+      }
+    ),
+    snapshot_id: 'snap_margh_oct',
+    created_at: '2026-10-12T15:00:00.000Z',
+  };
 
-  const snapNov = createCostSnapshot(
-    demoCatalog,
-    'prod_margherita',
-    {
-      selling_price: 4200,
-      target_food_cost_pct: 30,
-      rounding_increment: 500,
-      rounding_mode: 'ceil',
-      packaging_cost: 350,
-      channel_fee_pct: 25,
-    }
-  );
-  snapNov.snapshot_id = 'snap_margh_nov';
-  snapNov.created_at = '2026-11-01T15:00:00.000Z';
+  const snapNov: CostSnapshot = {
+    ...createCostSnapshot(
+      demoCatalog,
+      'prod_margherita',
+      {
+        selling_price: 4200,
+        target_food_cost_pct: 30,
+        rounding_increment: 500,
+        rounding_mode: 'ceil',
+        packaging_cost: 350,
+        channel_fee_pct: 25,
+      }
+    ),
+    snapshot_id: 'snap_margh_nov',
+    created_at: '2026-11-01T15:00:00.000Z',
+  };
 
   return {
     businessName: 'Pizzería Demo — Il Forno',
