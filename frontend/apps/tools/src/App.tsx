@@ -147,6 +147,7 @@ export function App({
   const [showHelpModal, setShowHelpModal] = useState(false);
   const [helpTopic, setHelpTopic] = useState<HelpTopic>('units');
   const [showClearDemoConfirm, setShowClearDemoConfirm] = useState(false);
+  const [showMoreActions, setShowMoreActions] = useState(false);
 
   // Filtros y Comparación de Ingeniería de Menú
   const [menuPeriodFilter, setMenuPeriodFilter] = useState<string>('all');
@@ -867,7 +868,9 @@ export function App({
         if (wsData.ok && wsData.data?.workspace) {
           setState(wsData.data.workspace);
         }
-        setSyncNotice(`Sincronización completada desde Pizzalog App: se cargaron ${data.data.imported_ingredients} insumos y ${data.data.imported_prices} precios en tu espacio de trabajo.`);
+        const importedProds = data.data.imported_products ?? data.data.imported_recipes ?? 0;
+        const importedSales = data.data.imported_sales ?? 0;
+        setSyncNotice(`Sincronización completada desde Pizzalog App: se cargaron ${data.data.imported_ingredients} insumos, ${importedProds} productos y ${importedSales} registros de ventas.`);
       }
       setSyncPreviewData(null);
     } catch (err: any) {
@@ -1222,30 +1225,8 @@ export function App({
             {workspaceSaveError ? 'Error de guardado' : isSavingWorkspace ? 'Guardando…' : 'Guardado automático'}
           </span>
           <button type="button" className="btn" onClick={onLogout}>Cerrar sesión</button>
-          <button
-            type="button"
-            className="btn btn--secondary"
-            style={{ color: 'var(--brand)', borderColor: 'var(--brand)', fontWeight: 700 }}
-            onClick={() => setShowPlansModal(true)}
-            title="Conocé nuestros planes y condiciones de acceso"
-          >
-            ✨ Planes & Suscripción
-          </button>
-          <button
-            type="button"
-            className="btn btn--secondary"
-            onClick={() => setShowReportModal(true)}
-            title="Ver reporte ejecutivo listo para imprimir o guardar como PDF"
-          >
-            📄 Reporte Ejecutivo
-          </button>
-          <button
-            type="button"
-            className="btn btn--secondary"
-            onClick={() => { setHelpTopic('units'); setShowHelpModal(true); }}
-            title="Ayuda sobre unidades, densidades, mermas y fórmulas"
-          >
-            ❓ Ayuda Contextual
+          <button type="button" className="btn btn--primary" onClick={captureAllSnapshots}>
+            📸 {t.saveSnapshot}
           </button>
           <button
             type="button"
@@ -1255,32 +1236,6 @@ export function App({
           >
             {t.exportCustomExcel}
           </button>
-          <a
-            className="btn"
-            href="/Restaurant_Profit_Kit_v1.xlsx"
-            download="Restaurant_Profit_Kit_v1.xlsx"
-          >
-            {t.downloadTemplateExcel}
-          </a>
-          <button type="button" className="btn btn--primary" onClick={captureAllSnapshots}>
-            📸 {t.saveSnapshot}
-          </button>
-          <button type="button" className="btn" onClick={exportWorkspaceJson}>
-            {t.exportJson}
-          </button>
-          <label className="btn" style={{ margin: 0 }}>
-            {t.importJson}
-            <input
-              type="file"
-              accept=".json"
-              style={{ display: 'none' }}
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) handleImportJson(f);
-                e.target.value = '';
-              }}
-            />
-          </label>
           <label className="btn btn--ocre" style={{ margin: 0, opacity: isSmartImporting ? 0.65 : 1 }}>
             {isSmartImporting ? 'Analizando planilla…' : 'Importar XLSX / CSV'}
             <input
@@ -1295,15 +1250,79 @@ export function App({
               }}
             />
           </label>
+
+          {showMoreActions && (
+            <>
+              <button
+                type="button"
+                className="btn btn--secondary"
+                style={{ color: 'var(--brand)', borderColor: 'var(--brand)', fontWeight: 700 }}
+                onClick={() => setShowPlansModal(true)}
+                title="Conocé nuestros planes y condiciones de acceso"
+              >
+                ✨ Planes & Suscripción
+              </button>
+              <button
+                type="button"
+                className="btn btn--secondary"
+                onClick={() => setShowReportModal(true)}
+                title="Ver reporte ejecutivo listo para imprimir o guardar como PDF"
+              >
+                📄 Reporte Ejecutivo
+              </button>
+              <button
+                type="button"
+                className="btn btn--secondary"
+                onClick={() => { setHelpTopic('units'); setShowHelpModal(true); }}
+                title="Ayuda sobre unidades, densidades, mermas y fórmulas"
+              >
+                ❓ Ayuda Contextual
+              </button>
+              <a
+                className="btn"
+                href="/Restaurant_Profit_Kit_v1.xlsx"
+                download="Restaurant_Profit_Kit_v1.xlsx"
+                title="Descargar planilla Excel base modelo"
+              >
+                {t.downloadTemplateExcel}
+              </a>
+              <button type="button" className="btn" onClick={exportWorkspaceJson}>
+                {t.exportJson}
+              </button>
+              <label className="btn" style={{ margin: 0 }}>
+                {t.importJson}
+                <input
+                  type="file"
+                  accept=".json"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) handleImportJson(f);
+                    e.target.value = '';
+                  }}
+                />
+              </label>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  setImportError(null);
+                  setState(createInitialDemoWorkspace());
+                }}
+              >
+                {t.resetDemo}
+              </button>
+            </>
+          )}
+
           <button
             type="button"
-            className="btn"
-            onClick={() => {
-              setImportError(null);
-              setState(createInitialDemoWorkspace());
-            }}
+            className={`btn ${showMoreActions ? 'btn--secondary' : ''}`}
+            onClick={() => setShowMoreActions((prev) => !prev)}
+            title={showMoreActions ? 'Ocultar opciones secundarias' : 'Mostrar más opciones (Planes, Reporte, Exportar/Importar JSON, Demo)'}
+            style={{ fontWeight: 600 }}
           >
-            {t.resetDemo}
+            {showMoreActions ? '✕ Menos' : '➕ Más opciones'}
           </button>
         </div>
       </header>
@@ -2799,9 +2818,17 @@ export function App({
               <div style={{ padding: 20, border: '1px solid #e2e8f0', borderRadius: 8, background: '#fff' }}>
                 <h3 style={{ marginTop: 0 }}>📥 Importar desde Pizzalog App (App → Tools)</h3>
                 <p style={{ fontSize: '0.88rem', color: '#555', lineHeight: 1.5 }}>
-                  Trae todos tus insumos activos y precios vigentes cargados en tu Pizzalog App a este espacio de trabajo para simular variaciones de menú, costos de masa y proyecciones de rentabilidad sin afectar el sistema en vivo.
+                  Trae todos tus insumos, recetas, productos activos, precios de venta y el historial mensual de ventas por canal desde Pizzalog App para analizar la rentabilidad real, simular escenarios y proyectar márgenes sin afectar el sistema en vivo.
                 </p>
                 <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    disabled={syncLoading}
+                    onClick={() => handleSyncPreview('from_app')}
+                  >
+                    Previsualizar
+                  </button>
                   <button
                     type="button"
                     className="btn btn--ocre"
@@ -2818,12 +2845,21 @@ export function App({
           {syncPreviewData && (
             <div style={{ marginTop: 20, padding: 16, background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: 8 }}>
               <h4 style={{ margin: '0 0 10px 0' }}>Resumen de cambios detectados ({syncPreviewData.direction === 'to_app' ? 'Tools → App' : 'App → Tools'})</h4>
-              <ul style={{ margin: 0, paddingLeft: 20, fontSize: '0.88rem' }}>
-                <li>Insumos nuevos para dar de alta en App: <strong>{syncPreviewData.summary?.supplies_to_create ?? 0}</strong></li>
-                <li>Precios de insumos existentes a actualizar: <strong>{syncPreviewData.summary?.supplies_to_update_cost ?? 0}</strong></li>
-                <li>Insumos sin cambios: <strong>{syncPreviewData.summary?.supplies_unchanged ?? 0}</strong></li>
-                <li>Recetas en catálogo de Tools: <strong>{syncPreviewData.summary?.recipes_count ?? 0}</strong></li>
-              </ul>
+              {syncPreviewData.direction === 'from_app' ? (
+                <ul style={{ margin: 0, paddingLeft: 20, fontSize: '0.88rem' }}>
+                  <li>Insumos activos en App: <strong>{syncPreviewData.summary?.app_supplies_count ?? 0}</strong></li>
+                  <li>Productos activos y precios en App: <strong>{syncPreviewData.summary?.app_products_count ?? 0}</strong></li>
+                  <li>Tickets de venta completados en App: <strong>{syncPreviewData.summary?.app_sales_tickets ?? 0}</strong></li>
+                  <li>Registros mensuales de ventas por canal: <strong>{syncPreviewData.summary?.app_sales_history_rows ?? 0}</strong></li>
+                </ul>
+              ) : (
+                <ul style={{ margin: 0, paddingLeft: 20, fontSize: '0.88rem' }}>
+                  <li>Insumos nuevos para dar de alta en App: <strong>{syncPreviewData.summary?.supplies_to_create ?? 0}</strong></li>
+                  <li>Precios de insumos existentes a actualizar: <strong>{syncPreviewData.summary?.supplies_to_update_cost ?? 0}</strong></li>
+                  <li>Insumos sin cambios: <strong>{syncPreviewData.summary?.supplies_unchanged ?? 0}</strong></li>
+                  <li>Recetas en catálogo de Tools: <strong>{syncPreviewData.summary?.recipes_count ?? 0}</strong></li>
+                </ul>
+              )}
             </div>
           )}
         </section>
