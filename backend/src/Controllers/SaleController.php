@@ -6,6 +6,7 @@ use Pizzalog\Core\Request;
 use Pizzalog\Core\Response;
 use Pizzalog\Repositories\StockRepository;
 use Pizzalog\Services\SaleService;
+use Pizzalog\Services\LoyverseProductMatcher;
 
 class SaleController
 {
@@ -340,14 +341,11 @@ class SaleController
             }
         }
 
-        // Cargar catálogo actual del negocio para vincular productos por nombre
+        // Resolver artículos contra el catálogo con umbrales de confianza.
+        // Requiere migration_034_loyverse_product_links antes de importar.
         $pdo = Database::pdo();
-        $prodStmt = $pdo->prepare('SELECT id, name, price FROM products WHERE business_id = ?');
-        $prodStmt->execute([$bid]);
-        $catalog = [];
-        foreach ($prodStmt->fetchAll() as $p) {
-            $catalog[mb_strtolower(trim((string) $p['name']))] = $p;
-        }
+        $productMatcher = new LoyverseProductMatcher();
+        $reviewItems = [];
 
         // Agrupar filas por recibo (o por fila individual si es un resumen por recibo)
         $receipts = [];
@@ -355,7 +353,8 @@ class SaleController
             $get = static fn(?int $col): string => ($col !== null && isset($row[$col])) ? trim((string) $row[$col]) : '';
 
             $typeTxt = mb_strtolower($get($map['type']));
-            if ($typeTxt !== '' && (str_contains($typeTxt, 'reembolso') || str_contains($typeTxt, 'refund') || str_contains($typeTxt, 'anulad') || str_contains($typeTxt, 'cancel'))) {
+            $isRefund = $typeTxt !== '' && (str_contains($typeTxt, 'reembolso') || str_contains($typeTxt, 'refund'));
+            if ($typeTxt !== '' && (str_contains($typeTxt, 'anulad') || str_contains($typeTxt, 'cancel'))) {
                 continue;
             }
 
@@ -369,15 +368,18 @@ class SaleController
 
             $itemName  = $get($map['item']);
             $variant   = $get($map['variant']);
+            $category  = $get($map['category'] ?? null);
+            $externalRef = $get($map['ref'] ?? null);
             $qtyRaw    = $get($map['qty']);
             $priceRaw  = $get($map['price']);
             $discRaw   = $get($map['discount']);
             $payRaw    = $get($map['payment']);
             $chanRaw   = $get($map['channel']);
 
-            $qty       = $qtyRaw !== '' ? max(0.01, $this->parseNumber($qtyRaw)) : 1.0;
-            $lineAmount= $priceRaw !== '' ? max(0.0, $this->parseNumber($priceRaw)) : 0.0;
-            $discAmount= $discRaw !== '' ? abs($this->parseNumber($discRaw)) : 0.0;
+            $qty = $qtyRaw !== '' ? $this->parseNumber($qtyRaw) : 1.0;
+            if ($qty == 0.0) $qty = 1.0;
+            $lineAmount = $priceRaw !== '' ? $this->parseNumber($priceRaw) : 0.0;
+            $discAmount = $isRefund ? 0.0 : ($discRaw !== '' ? abs($this->parseNumber($discRaw)) : 0.0);
 
             if ($itemName === '') {
                 $itemName = 'Venta importada #' . $receiptNo;
@@ -386,15 +388,19 @@ class SaleController
                 ? ($itemName . ' — ' . $variant)
                 : $itemName;
 
-            $matchedProd = $catalog[mb_strtolower($itemName)] ?? $catalog[mb_strtolower($fullName)] ?? null;
-            $pid         = $matchedProd ? (int) $matchedProd['id'] : null;
-
-            // En Loyverse "Ventas brutas" es el total de la línea (precio * cantidad)
-            $unitPrice = $qty > 0 ? round($lineAmount / $qty, 2) : $lineAmount;
-            if ($unitPrice <= 0 && $matchedProd) {
-                $unitPrice  = (float) $matchedProd['price'];
-                $lineAmount = round($unitPrice * $qty, 2);
+            $resolution = $productMatcher->resolve($bid, $itemName, $category, $variant, $externalRef !== '' ? $externalRef : null);
+            $pid = $resolution['product_id'];
+            if ($resolution['action'] === 'review') {
+                $reviewItems[$itemName . ($variant !== '' ? ' / ' . $variant : '')] = [
+                    'item' => $itemName,
+                    'variant' => $variant,
+                    'candidate' => $resolution['candidate']['name'] ?? null,
+                    'confidence' => $resolution['confidence'],
+                ];
             }
+
+            // Loyverse exporta importes de línea; los reembolsos pueden ser negativos.
+            $unitPrice = $qty != 0.0 ? round(abs($lineAmount / $qty), 2) : abs($lineAmount);
 
             if (!isset($receipts[$receiptNo])) {
                 $receipts[$receiptNo] = [
@@ -457,8 +463,8 @@ class SaleController
                     $subtotal += $l['line_total'];
                 }
                 $subtotal = round($subtotal, 2);
-                $discount = min($subtotal, round($r['discount'], 2));
-                $total    = max(0.0, round($subtotal - $discount, 2));
+                $discount = $subtotal < 0 ? 0.0 : min($subtotal, round($r['discount'], 2));
+                $total    = $subtotal < 0 ? $subtotal : max(0.0, round($subtotal - $discount, 2));
 
                 if ($subtotal <= 0 && count($r['lines']) === 0) {
                     $skippedCount++;
@@ -509,6 +515,8 @@ class SaleController
             'skipped_duplicates' => $skippedCount,
             'total_amount'   => round($totalImportedAmount, 2),
             'ai_harmonized'  => $aiUsed,
+            'items_pending_review' => array_values($reviewItems),
+            'items_pending_review_count' => count($reviewItems),
         ]);
     }
 
@@ -589,6 +597,8 @@ class SaleController
             'type'     => null,
             'item'     => null,
             'variant'  => null,
+            'category' => null,
+            'ref'      => null,
             'qty'      => null,
             'price'    => null,
             'discount' => null,
@@ -616,6 +626,12 @@ class SaleController
             }
             if ($map['variant'] === null && (str_contains($k, 'variante') || str_contains($k, 'variant') || str_contains($k, 'opcion'))) {
                 $map['variant'] = $i;
+            }
+            if ($map['category'] === null && (str_contains($k, 'categoria') || str_contains($k, 'category'))) {
+                $map['category'] = $i;
+            }
+            if ($map['ref'] === null && ($k === 'ref' || str_contains($k, 'referencia') || str_contains($k, 'reference'))) {
+                $map['ref'] = $i;
             }
             if ($map['qty'] === null && (str_contains($k, 'cantidad') || str_contains($k, 'quantity') || $k === 'cant' || $k === 'qty' || str_contains($k, 'unidades'))) {
                 $map['qty'] = $i;
