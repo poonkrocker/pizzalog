@@ -39,7 +39,7 @@ class SeasonalPizzaController
              ) sa ON sa.variant_id=pv.id
            LEFT JOIN (
                  SELECT business_id,variant_id,
-                        SUM(DATEDIFF(COALESCE(end_date,CURRENT_DATE()),start_date)+1) AS verified_days
+                        SUM(DATEDIFF(LEAST(COALESCE(end_date,CURRENT_DATE()),?),GREATEST(start_date,?))+1) AS verified_days
                    FROM seasonal_pizza_variant_periods
                   WHERE business_id=? AND verified=1 AND start_date<=?
                     AND (end_date IS NULL OR end_date>=?)
@@ -51,7 +51,7 @@ class SeasonalPizzaController
                   ON rs.id=svr.recipe_id AND rs.business_id=svr.business_id AND rs.is_active=1
                WHERE pv.business_id=? AND pv.product_id=?
                ORDER BY units DESC,revenue DESC,pv.label";
-        $q=$pdo->prepare($sql);$q->execute([$bid,$from,$to,$bid,$to,$from,$bid,$parentId]);
+        $q=$pdo->prepare($sql);$q->execute([$bid,$from,$to,$bid,$to,$from,$to,$from,$bid,$parentId]);
         $variants=array_map(static fn(array $r):array=>[
             'variant_id'=>(int)$r['variant_id'],'label'=>(string)$r['label'],
             'price'=>(float)$r['price'],'is_active'=>(int)$r['is_active'],
