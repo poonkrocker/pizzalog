@@ -1,7 +1,7 @@
 <?php
-namespace Pizzalog\\Services;
+namespace Pizzalog\Services;
 
-use Pizzalog\\Core\\Database;
+use Pizzalog\Core\Database;
 
 /**
  * Resuelve artículos de Loyverse contra el catálogo del negocio.
@@ -20,7 +20,7 @@ class LoyverseProductMatcher
     {
         $name = trim($name);
         if ($name === '') {
-            throw new \\InvalidArgumentException('El artículo de Loyverse no tiene nombre.');
+            throw new \InvalidArgumentException('El artículo de Loyverse no tiene nombre.');
         }
 
         $pdo = Database::pdo();
@@ -40,7 +40,7 @@ class LoyverseProductMatcher
               WHERE business_id = ? AND external_key = ? LIMIT 1'
         );
         $existingLink->execute([$businessId, $externalKey]);
-        $link = $existingLink->fetch(\\PDO::FETCH_ASSOC);
+        $link = $existingLink->fetch(\PDO::FETCH_ASSOC);
         if ($link) {
             return [
                 'action' => 'existing_link',
@@ -61,7 +61,7 @@ class LoyverseProductMatcher
 
         $best = null;
         $second = null;
-        foreach ($stmt->fetchAll(\\PDO::FETCH_ASSOC) as $product) {
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $product) {
             $score = $this->similarity($name, (string) $product['name']);
             if ($categoryId !== null && (int) ($product['category_id'] ?? 0) === $categoryId) {
                 $score = min(1.0, $score + 0.04);
@@ -142,7 +142,7 @@ class LoyverseProductMatcher
         $stmt = Database::pdo()->prepare('SELECT id, name FROM categories WHERE business_id = ? AND is_active = 1');
         $stmt->execute([$businessId]);
         $target = $this->normalize($category);
-        foreach ($stmt->fetchAll(\\PDO::FETCH_ASSOC) as $row) {
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
             if ($this->normalize((string) $row['name']) === $target) return (int) $row['id'];
         }
         return null;
@@ -165,6 +165,6 @@ class LoyverseProductMatcher
         $value = mb_strtolower(trim($value));
         $value = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $value) ?: $value;
         $value = preg_replace('/[^a-z0-9]+/', ' ', $value) ?? $value;
-        return trim(preg_replace('/\\s+/', ' ', $value) ?? $value);
+        return trim(preg_replace('/\s+/', ' ', $value) ?? $value);
     }
 }
