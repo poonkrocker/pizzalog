@@ -102,7 +102,7 @@ class SeasonalPizzaController
         $variantId=(int)$req->param('variant_id');
         $start=trim((string)$req->input('start_date',''));
         $end=trim((string)$req->input('end_date',''));
-        if(!preg_match('/^\\d{4}-\\d{2}-\\d{2}$/',$start)||!preg_match('/^\\d{4}-\\d{2}-\\d{2}$/',$end)||$start>$end){
+        if(!preg_match('/^\d{4}-\d{2}-\d{2}$/',$start)||!preg_match('/^\d{4}-\d{2}-\d{2}$/',$end)||$start>$end){
             Response::error('Indicá un período válido, con inicio y fin.',422);return;
         }
         $pdo=Database::pdo();
