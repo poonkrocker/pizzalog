@@ -63,7 +63,7 @@ class SeasonalPizzaController
         ],$q->fetchAll(\PDO::FETCH_ASSOC));
 
         $rq=$pdo->prepare("SELECT id,name,recipe_type,linked_product_id,yield_quantity,yield_unit,price
-            FROM recipe_studio_recipes WHERE business_id=? AND is_active=1 AND recipe_type='product' ORDER BY name");
+            FROM recipe_studio_recipes WHERE business_id=? AND is_active=1 AND recipe_type='product' AND linked_product_id IS NULL ORDER BY name");
         $rq->execute([$bid]);
         $recipes=array_map(static fn(array $r):array=>[
             'id'=>(int)$r['id'],'name'=>(string)$r['name'],
@@ -86,7 +86,7 @@ class SeasonalPizzaController
         $v->execute([$variantId,$bid]);
         if(!$v->fetchColumn()){Response::error('La variante no pertenece a Pizza de la semana.',404);return;}
         $r=$pdo->prepare("SELECT id FROM recipe_studio_recipes
-            WHERE id=? AND business_id=? AND is_active=1 AND recipe_type='product' LIMIT 1");
+            WHERE id=? AND business_id=? AND is_active=1 AND recipe_type='product' AND linked_product_id IS NULL LIMIT 1");
         $r->execute([$recipeId,$bid]);
         if(!$r->fetchColumn()){Response::error('La receta no existe o no está activa.',404);return;}
         $save=$pdo->prepare("INSERT INTO seasonal_pizza_variant_recipes (business_id,variant_id,recipe_id)
