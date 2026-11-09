@@ -145,6 +145,9 @@ $router->get('/analytics/sales-over-time', [AnalyticsController::class, 'salesOv
 $router->get('/analytics/weekly-pizzas', [AnalyticsController::class, 'weeklyPizzas'], [$auth, $manage]);
 $router->get('/analytics/product-trends', [AnalyticsController::class, 'productTrends'], [$auth, $manage]);
 $router->get('/analytics/products-list', [AnalyticsController::class, 'productsList'], [$auth, $manage]);
+$router->get('/analytics/seasonal-pizzas', [SeasonalPizzaController::class, 'index'], [$auth, $manage]);
+$router->put('/analytics/seasonal-pizzas/{variant_id}/recipe', [SeasonalPizzaController::class, 'linkRecipe'], [$auth, $manage]);
+$router->delete('/analytics/seasonal-pizzas/{variant_id}/recipe', [SeasonalPizzaController::class, 'unlinkRecipe'], [$auth, $manage]);
 
 // --- Producción / Masas / Escandallos (Calculadora) -------------------
 $router->get('/production/dough-profiles', [ProductionController::class, 'doughProfiles'], [$auth]);
