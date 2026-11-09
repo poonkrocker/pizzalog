@@ -95,6 +95,34 @@ class SeasonalPizzaController
         Response::ok(['success'=>true,'variant_id'=>$variantId,'recipe_id'=>$recipeId]);
     }
 
+
+    public function addAvailabilityPeriod(Request $req): void
+    {
+        $bid=(int)$req->auth['business_id'];
+        $variantId=(int)$req->param('variant_id');
+        $start=trim((string)$req->input('start_date',''));
+        $end=trim((string)$req->input('end_date',''));
+        if(!preg_match('/^\\d{4}-\\d{2}-\\d{2}$/',$start)||!preg_match('/^\\d{4}-\\d{2}-\\d{2}$/',$end)||$start>$end){
+            Response::error('Indicá un período válido, con inicio y fin.',422);return;
+        }
+        $pdo=Database::pdo();
+        $v=$pdo->prepare("SELECT pv.id FROM product_variants pv JOIN products p
+            ON p.id=pv.product_id AND p.business_id=pv.business_id
+            WHERE pv.id=? AND pv.business_id=? AND p.name='Pizza de la semana' LIMIT 1");
+        $v->execute([$variantId,$bid]);
+        if(!$v->fetchColumn()){Response::error('La variante no pertenece a Pizza de la semana.',404);return;}
+        $overlap=$pdo->prepare("SELECT COUNT(*) FROM seasonal_pizza_variant_periods
+            WHERE business_id=? AND variant_id=? AND start_date<=?
+              AND COALESCE(end_date,'9999-12-31')>=?");
+        $overlap->execute([$bid,$variantId,$end,$start]);
+        if((int)$overlap->fetchColumn()>0){Response::error('El período se superpone con otro período ya registrado.',409);return;}
+        $save=$pdo->prepare("INSERT INTO seasonal_pizza_variant_periods
+            (business_id,variant_id,start_date,end_date,source,verified,notes)
+            VALUES (?,?,?,?,'manual',1,'Período confirmado desde Laboratorio de pizzas.')");
+        $save->execute([$bid,$variantId,$start,$end]);
+        Response::ok(['success'=>true,'variant_id'=>$variantId,'start_date'=>$start,'end_date'=>$end]);
+    }
+
     public function unlinkRecipe(Request $req): void
     {
         $bid=(int)$req->auth['business_id'];$variantId=(int)$req->param('variant_id');
