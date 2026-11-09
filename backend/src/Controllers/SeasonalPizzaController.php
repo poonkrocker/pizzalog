@@ -112,7 +112,7 @@ class SeasonalPizzaController
         $v->execute([$variantId,$bid]);
         if(!$v->fetchColumn()){Response::error('La variante no pertenece a Pizza de la semana.',404);return;}
         $overlap=$pdo->prepare("SELECT COUNT(*) FROM seasonal_pizza_variant_periods
-            WHERE business_id=? AND variant_id=? AND start_date<=?
+            WHERE business_id=? AND variant_id=? AND source='manual' AND start_date<=?
               AND COALESCE(end_date,'9999-12-31')>=?");
         $overlap->execute([$bid,$variantId,$end,$start]);
         if((int)$overlap->fetchColumn()>0){Response::error('El período se superpone con otro período ya registrado.',409);return;}
