@@ -24,13 +24,15 @@ class LoyverseProductMatcher
         }
 
         $pdo = Database::pdo();
-        $externalKey = hash('sha256', implode('|', [
-            $businessId,
-            trim((string) $externalRef),
-            $this->normalize($name),
-            $this->normalize($category),
-            $this->normalize($variant),
-        ]));
+        // REF es la identidad estable de Loyverse; si no existe, usar clave compuesta.
+        $identity = trim((string) $externalRef) !== ''
+            ? 'ref:' . trim((string) $externalRef)
+            : 'fallback:' . implode('|', [
+                $this->normalize($name),
+                $this->normalize($category),
+                $this->normalize($variant),
+            ]);
+        $externalKey = hash('sha256', $businessId . '|' . $identity);
 
         $existingLink = $pdo->prepare(
             'SELECT id, product_id, variant_id, match_status, match_confidence
