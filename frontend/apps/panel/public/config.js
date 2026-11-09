@@ -1,12 +1,10 @@
-/* ====================================================================
-   Configuración del Panel Pizzalog
-   --------------------------------------------------------------------
-   Cambiá la dirección de abajo por la de TU backend y guardá el archivo.
-   No hace falta recompilar nada: con recargar la página alcanza.
-   Ejemplos válidos:
-     "https://api.pizzalog.net"
-     "https://tudominio.com/api"
-   ==================================================================== */
+/* Configuración pública del Panel Pizzalog.
+ * El backend se selecciona por hostname para mantener staging aislado.
+ * Este archivo no contiene secretos.
+ */
+const isStagingHost = window.location.hostname === 'app-staging.pizzalog.net';
 window.__PIZZALOG_CONFIG__ = {
-  apiUrl: "https://api.pizzalog.net"
+  apiUrl: isStagingHost
+    ? 'https://api-staging.pizzalog.net'
+    : 'https://api.pizzalog.net',
 };
