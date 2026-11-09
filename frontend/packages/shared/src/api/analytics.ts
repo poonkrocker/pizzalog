@@ -111,6 +111,8 @@ export function analyticsApi(client: ApiClient) {
       client.put<{ success: boolean }>(`/analytics/seasonal-pizzas/${variantId}/recipe`, { recipe_id: recipeId }),
     unlinkSeasonalPizzaRecipe: (variantId: number) =>
       client.delete<{ success: boolean }>(`/analytics/seasonal-pizzas/${variantId}/recipe`),
+    addSeasonalPizzaAvailability: (variantId: number, startDate: string, endDate: string) =>
+      client.post<{ success: boolean }>(`/analytics/seasonal-pizzas/${variantId}/availability`, { start_date: startDate, end_date: endDate }),
     productMargins: (params?: AnalyticsQuery) =>
       client.get<{ products: any[] }>(`/analytics/product-margins${queryStr(params)}`),
     ingredients: (params?: AnalyticsQuery) =>
