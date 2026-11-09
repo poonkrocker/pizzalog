@@ -9,6 +9,7 @@ use Pizzalog\Core\Auth;
 use Pizzalog\Core\Request;
 use Pizzalog\Core\Router;
 use Pizzalog\Controllers\AnalyticsController;
+use Pizzalog\Controllers\SeasonalPizzaController;
 use Pizzalog\Controllers\AttendanceController;
 use Pizzalog\Controllers\CashController;
 use Pizzalog\Controllers\ComboController;
