@@ -51,7 +51,7 @@ class SeasonalPizzaController
                   ON rs.id=svr.recipe_id AND rs.business_id=svr.business_id AND rs.is_active=1
                WHERE pv.business_id=? AND pv.product_id=?
                ORDER BY units DESC,revenue DESC,pv.label";
-        $q=$pdo->prepare($sql);$q->execute([$bid,$from,$to,$bid,$to,$from,$to,$from,$bid,$parentId]);
+        $q=$pdo->prepare($sql);$q->execute([$bid,$from,$to,$to,$from,$bid,$to,$from,$bid,$parentId]);
         $variants=array_map(static fn(array $r):array=>[
             'variant_id'=>(int)$r['variant_id'],'label'=>(string)$r['label'],
             'price'=>(float)$r['price'],'is_active'=>(int)$r['is_active'],
