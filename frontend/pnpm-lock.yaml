@@ -152,6 +152,9 @@ importers:
       '@pizzalog/cost-engine':
         specifier: workspace:*
         version: link:../../packages/cost-engine
+      '@pizzalog/price-list':
+        specifier: workspace:*
+        version: link:../../packages/price-list
       '@pizzalog/cost-engine-fixtures':
         specifier: workspace:*
         version: link:../../packages/cost-engine-fixtures
