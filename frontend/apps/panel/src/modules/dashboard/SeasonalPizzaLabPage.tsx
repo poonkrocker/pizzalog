@@ -24,6 +24,7 @@ export function SeasonalPizzaLabPage() {
   const api=useApi(); const qc=useQueryClient();
   const [from,setFrom]=useState(yearsAgo(4)); const [to,setTo]=useState(today());
   const [recipeChoice,setRecipeChoice]=useState<Record<number,string>>({});
+  const [periodChoice,setPeriodChoice]=useState<Record<number,{start:string;end:string}>>({});
   const report=useQuery({queryKey:['analytics','seasonal-pizzas',from,to],queryFn:()=>api.analytics.seasonalPizzas({from,to})});
   const studio=useQuery({queryKey:['production','recipe-studio'],queryFn:()=>api.production.recipeStudio()});
   const link=useMutation({
@@ -31,6 +32,7 @@ export function SeasonalPizzaLabPage() {
     onSuccess:()=>{qc.invalidateQueries({queryKey:['analytics','seasonal-pizzas']});}
   });
   const unlink=useMutation({mutationFn:(variantId:number)=>api.analytics.unlinkSeasonalPizzaRecipe(variantId),onSuccess:()=>qc.invalidateQueries({queryKey:['analytics','seasonal-pizzas']})});
+  const availability=useMutation({mutationFn:({variantId,start,end}:{variantId:number;start:string;end:string})=>api.analytics.addSeasonalPizzaAvailability(variantId,start,end),onSuccess:()=>qc.invalidateQueries({queryKey:['analytics','seasonal-pizzas']})});
 
   const costing=useMemo(()=>{
     const supplies=studio.data?.supplies??[]; const raw=studio.data?.recipes??[];
@@ -91,6 +93,7 @@ export function SeasonalPizzaLabPage() {
             <thead><tr>{['Pizza','Unidades','Facturación','Tickets','Primera venta','Última venta','Unid./día disponible','Costo unitario actual','Ganancia estimada','Receta'].map(x=><th key={x} style={{textAlign:'left',padding:'.6rem',borderBottom:'1px solid var(--c-border,#ddd)'}}>{x}</th>)}</tr></thead>
             <tbody>{variants.map(v=>{
               const c=v.recipe_id!==null?costing.get(v.recipe_id):undefined;
+              const period=periodChoice[v.variant_id]??{start:v.first_sale??'',end:v.last_sale??''};
               const profit=c?.unitCost!==null&&c?.unitCost!==undefined?v.revenue-v.units*c.unitCost:null;
               return <tr key={v.variant_id}>
                 <td style={{padding:'.6rem',borderBottom:'1px solid var(--c-border,#eee)',fontWeight:650}}>{v.label}</td>
@@ -99,7 +102,7 @@ export function SeasonalPizzaLabPage() {
                 <td style={{padding:'.6rem',borderBottom:'1px solid var(--c-border,#eee)'}}>{v.tickets}</td>
                 <td style={{padding:'.6rem',borderBottom:'1px solid var(--c-border,#eee)'}}>{v.first_sale??'—'}</td>
                 <td style={{padding:'.6rem',borderBottom:'1px solid var(--c-border,#eee)'}}>{v.last_sale??'—'}</td>
-                <td style={{padding:'.6rem',borderBottom:'1px solid var(--c-border,#eee)'}}>{v.units_per_available_day===null?'Período sin verificar':v.units_per_available_day.toFixed(2)}</td>
+                <td style={{padding:'.6rem',borderBottom:'1px solid var(--c-border,#eee)',minWidth:210}}><div>{v.units_per_available_day===null?'Período sin verificar':v.units_per_available_day.toFixed(2)}</div><div style={{display:'flex',gap:'.25rem',marginTop:'.3rem'}}><input aria-label={'Inicio de disponibilidad '+v.label} style={{...control,width:125}} type='date' value={period.start} onChange={e=>setPeriodChoice(s=>({...s,[v.variant_id]:{...period,start:e.target.value}}))}/><input aria-label={'Fin de disponibilidad '+v.label} style={{...control,width:125}} type='date' value={period.end} onChange={e=>setPeriodChoice(s=>({...s,[v.variant_id]:{...period,end:e.target.value}}))}/></div><button style={{...control,marginTop:'.3rem'}} disabled={!period.start||!period.end||period.start>period.end||availability.isPending} onClick={()=>availability.mutate({variantId:v.variant_id,start:period.start,end:period.end})}>Confirmar período</button></td>
                 <td style={{padding:'.6rem',borderBottom:'1px solid var(--c-border,#eee)'}}>{c?.unitCost!==null&&c?.unitCost!==undefined?formatARS(c.unitCost):'Sin costeo'}</td>
                 <td style={{padding:'.6rem',borderBottom:'1px solid var(--c-border,#eee)'}}>{profit===null?'—':formatARS(profit)}</td>
                 <td style={{padding:'.6rem',borderBottom:'1px solid var(--c-border,#eee)',minWidth:220}}>
@@ -120,8 +123,8 @@ export function SeasonalPizzaLabPage() {
         </div>
       </div>
       <div style={panel}>
-        <strong>Cómo cargar recetas</strong>
-        <p style={muted}>Creá cada receta en Calculadora & Costos con el nombre de la pizza, dejándola sin producto vinculado. Después seleccionála en la columna Receta. El motor de costos calcula el costo unitario a partir de sus insumos y subrecetas.</p>
+        <strong>Cómo cargar recetas y disponibilidad</strong>
+        <p style={muted}>Creá cada receta en Calculadora & Costos con el nombre de la pizza, dejándola sin producto vinculado. Después seleccionála en la columna Receta. El motor de costos calcula el costo unitario a partir de sus insumos y subrecetas. Para comparar ventas por día real de carta, corregí el rango de disponibilidad de cada variante y confirmalo: solo se usan períodos verificados.</p>
       </div>
     </>}
   </section>;
