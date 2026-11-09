@@ -90,11 +90,12 @@ export function SeasonalPizzaLabPage() {
         <p style={muted}>La rentabilidad se estima aplicando el costo vigente de la receta a las unidades históricas. No representa el costo histórico de cada fecha. Las ventas por día disponible solo aparecen cuando se verifican los períodos de carta.</p>
         <div style={{overflowX:'auto'}}>
           <table style={{width:'100%',borderCollapse:'collapse',fontSize:'.88rem'}}>
-            <thead><tr>{['Pizza','Unidades','Facturación','Tickets','Primera venta','Última venta','Unid./día disponible','Costo unitario actual','Ganancia estimada','Receta'].map(x=><th key={x} style={{textAlign:'left',padding:'.6rem',borderBottom:'1px solid var(--c-border,#ddd)'}}>{x}</th>)}</tr></thead>
+            <thead><tr>{['Pizza','Unidades','Facturación','Tickets','Primera venta','Última venta','Unid./día disponible','Costo unitario actual','Ganancia estimada','Margen estimado','Receta'].map(x=><th key={x} style={{textAlign:'left',padding:'.6rem',borderBottom:'1px solid var(--c-border,#ddd)'}}>{x}</th>)}</tr></thead>
             <tbody>{variants.map(v=>{
               const c=v.recipe_id!==null?costing.get(v.recipe_id):undefined;
               const period=periodChoice[v.variant_id]??{start:v.first_sale??'',end:v.last_sale??''};
               const profit=c?.unitCost!==null&&c?.unitCost!==undefined?v.revenue-v.units*c.unitCost:null;
+              const marginPct=profit!==null&&v.revenue>0?profit/v.revenue*100:null;
               return <tr key={v.variant_id}>
                 <td style={{padding:'.6rem',borderBottom:'1px solid var(--c-border,#eee)',fontWeight:650}}>{v.label}</td>
                 <td style={{padding:'.6rem',borderBottom:'1px solid var(--c-border,#eee)'}}>{v.units.toLocaleString('es-AR',{maximumFractionDigits:1})}</td>
@@ -105,6 +106,7 @@ export function SeasonalPizzaLabPage() {
                 <td style={{padding:'.6rem',borderBottom:'1px solid var(--c-border,#eee)',minWidth:210}}><div>{v.units_per_available_day===null?'Período sin verificar':v.units_per_available_day.toFixed(2)}</div><div style={{display:'flex',gap:'.25rem',marginTop:'.3rem'}}><input aria-label={'Inicio de disponibilidad '+v.label} style={{...control,width:125}} type='date' value={period.start} onChange={e=>setPeriodChoice(s=>({...s,[v.variant_id]:{...period,start:e.target.value}}))}/><input aria-label={'Fin de disponibilidad '+v.label} style={{...control,width:125}} type='date' value={period.end} onChange={e=>setPeriodChoice(s=>({...s,[v.variant_id]:{...period,end:e.target.value}}))}/></div><button style={{...control,marginTop:'.3rem'}} disabled={!period.start||!period.end||period.start>period.end||availability.isPending} onClick={()=>availability.mutate({variantId:v.variant_id,start:period.start,end:period.end})}>Confirmar período</button></td>
                 <td style={{padding:'.6rem',borderBottom:'1px solid var(--c-border,#eee)'}}>{c?.unitCost!==null&&c?.unitCost!==undefined?formatARS(c.unitCost):'Sin costeo'}</td>
                 <td style={{padding:'.6rem',borderBottom:'1px solid var(--c-border,#eee)'}}>{profit===null?'—':formatARS(profit)}</td>
+                <td style={{padding:'.6rem',borderBottom:'1px solid var(--c-border,#eee)'}}>{marginPct===null?'—':marginPct.toFixed(1)+'%'}</td>
                 <td style={{padding:'.6rem',borderBottom:'1px solid var(--c-border,#eee)',minWidth:220}}>
                   <div style={{display:'grid',gap:'.35rem'}}>
                     <span>{v.recipe_name??'Sin receta asignada'}</span>
