@@ -93,6 +93,43 @@ export function analyticsApi(client: ApiClient) {
       client.get<ProductTrendsResponse>(`/analytics/product-trends${queryStr(params)}`),
     productsList: () =>
       client.get<{ products: ProductListItem[] }>('/analytics/products-list'),
+    seasonalPizzas: (params?: { from?: string; to?: string }) =>
+      client.get<{
+        parent_product_id: number | null;
+        from: string;
+        to: string;
+        variants: Array<{
+          variant_id: number; label: string; price: number; is_active: number;
+          units: number; revenue: number; tickets: number;
+          sale_days?: number; span_days?: number; units_per_sale_day?: number | null;
+          midday_units?: number; night_units?: number;
+          local_units?: number; delivery_units?: number;
+          first_sale: string | null; last_sale: string | null;
+          verified_days: number; units_per_available_day: number | null;
+          recipe_id: number | null; recipe_name: string | null;
+        }>;
+        recipes: Array<{ id: number; name: string; linked_product_id: number | null; yield_quantity: number; yield_unit: string; price: number }>;
+      }>(`/analytics/seasonal-pizzas${queryStr(params)}`),
+    linkSeasonalPizzaRecipe: (
+      variantId: number,
+      recipeOrPayload: number | {
+        recipe_id?: number;
+        name?: string;
+        yield_quantity?: number;
+        yield_unit?: string;
+        price?: number;
+        target_food_cost_pct?: number;
+        components: Array<{ component_type: 'supply' | 'recipe'; component_id: number; quantity: number; unit: string }>;
+      },
+    ) =>
+      client.put<{ success: boolean; variant_id: number; recipe_id: number }>(
+        `/analytics/seasonal-pizzas/${variantId}/recipe`,
+        typeof recipeOrPayload === 'number' ? { recipe_id: recipeOrPayload } : recipeOrPayload,
+      ),
+    unlinkSeasonalPizzaRecipe: (variantId: number) =>
+      client.delete<{ success: boolean }>(`/analytics/seasonal-pizzas/${variantId}/recipe`),
+    addSeasonalPizzaAvailability: (variantId: number, startDate: string, endDate: string) =>
+      client.post<{ success: boolean }>(`/analytics/seasonal-pizzas/${variantId}/availability`, { start_date: startDate, end_date: endDate }),
     productMargins: (params?: AnalyticsQuery) =>
       client.get<{ products: any[] }>(`/analytics/product-margins${queryStr(params)}`),
     ingredients: (params?: AnalyticsQuery) =>

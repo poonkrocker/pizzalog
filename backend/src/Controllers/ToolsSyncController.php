@@ -8,54 +8,120 @@ use Pizzalog\Core\Response;
 class ToolsSyncController
 {
     /**
+     * Normaliza unidades de App al estándar UnitCode de @pizzalog/cost-engine.
+     */
+    private static function normalizeCostEngineUnit(?string $rawUnit, string $default = 'kg'): string
+    {
+        $u = strtolower(trim((string) $rawUnit));
+        return match ($u) {
+            'kg', 'kilo', 'kilos', 'kilogramo', 'kilogramos' => 'kg',
+            'g', 'gr', 'grs', 'gramo', 'gramos' => 'g',
+            'mg', 'miligramo', 'miligramos' => 'mg',
+            'lb', 'libra', 'libras' => 'lb',
+            'oz', 'onza', 'onzas' => 'oz',
+            'l', 'lt', 'lts', 'litro', 'litros' => 'L',
+            'ml', 'mililitro', 'mililitros' => 'ml',
+            'cc', 'cm3' => 'cc',
+            'u', 'un', 'und', 'unit', 'unidad', 'unidades', 'porcion', 'porciones' => 'unit',
+            'dozen', 'docena', 'docenas' => 'dozen',
+            default => $default,
+        };
+    }
+
+    /**
+     * Normaliza unidades de Tools al esquema de supplies en App ('kg', 'g', 'l', 'ml', 'u').
+     */
+    private static function normalizeAppSupplyUnit(?string $rawUnit): string
+    {
+        $u = strtolower(trim((string) $rawUnit));
+        return match ($u) {
+            'kg', 'kilo', 'kilos' => 'kg',
+            'g', 'gr', 'mg', 'lb', 'oz' => 'g',
+            'l', 'lt', 'litro', 'litros' => 'l',
+            'ml', 'cc', 'fl_oz_us', 'gal_us' => 'ml',
+            'u', 'un', 'unit', 'unidad', 'unidades', 'dozen', 'docena' => 'u',
+            default => 'kg',
+        };
+    }
+
+    private function resolveBusinessId(Request $req, \PDO $pdo): ?int
+    {
+        if (!empty($req->auth['business_id'])) {
+            return (int) $req->auth['business_id'];
+        }
+        $accountId = (int) ($req->auth['tools_account_id'] ?? 0);
+        if ($accountId <= 0) {
+            return null;
+        }
+        $stmt = $pdo->prepare(
+            'SELECT COALESCE(ta.business_id, u.business_id) AS bid
+               FROM tools_accounts ta
+          LEFT JOIN users u ON u.id = ta.app_user_id
+              WHERE ta.id = ?
+              LIMIT 1'
+        );
+        $stmt->execute([$accountId]);
+        $bid = $stmt->fetchColumn();
+        return $bid ? (int) $bid : null;
+    }
+
+    /**
      * GET /tools/sync/status
      */
     public function status(Request $req): void
     {
         $accountId = (int) $req->auth['tools_account_id'];
         $pdo = Database::pdo();
+        ToolsAuthController::ensureTables($pdo);
         $stmt = $pdo->prepare(
-            'SELECT ta.id, ta.app_user_id, ta.business_id, b.name AS business_name, u.email AS app_user_email
+            'SELECT ta.id,
+                    ta.app_user_id,
+                    COALESCE(ta.business_id, u.business_id) AS business_id,
+                    b.name AS business_name,
+                    COALESCE(u.email, u.username) AS app_user_email
                FROM tools_accounts ta
-          LEFT JOIN businesses b ON b.id = ta.business_id
           LEFT JOIN users u ON u.id = ta.app_user_id
+          LEFT JOIN businesses b ON b.id = COALESCE(ta.business_id, u.business_id)
               WHERE ta.id = ?
               LIMIT 1'
         );
         $stmt->execute([$accountId]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
 
-        $isLinked = !empty($row['business_id']) && !empty($row['app_user_id']);
+        $isLinked = !empty($row['business_id']);
         Response::ok([
             'linked' => $isLinked,
             'business_id' => $isLinked ? (int) $row['business_id'] : null,
-            'business_name' => $isLinked ? (string) $row['business_name'] : null,
-            'app_user_email' => $isLinked ? (string) $row['app_user_email'] : null,
+            'business_name' => $isLinked ? (string) ($row['business_name'] ?? 'Negocio vinculado') : null,
+            'app_user_email' => $isLinked ? (string) ($row['app_user_email'] ?? $req->auth['tools_email'] ?? '') : null,
         ]);
     }
 
     /**
      * POST /tools/sync/link-app
-     * Vincula la cuenta de Tools con un usuario administrador de Pizzalog App.
+     * Vincula la cuenta de Tools con un usuario administrador de Pizzalog App (por email o username).
      */
     public function linkApp(Request $req): void
     {
         $accountId = (int) $req->auth['tools_account_id'];
-        $email = strtolower(trim((string) $req->input('email', '')));
+        $environment = (string) ($req->auth['tools_environment'] ?? 'production');
+        $identifier = strtolower(trim((string) ($req->input('email', '') ?: $req->input('username', ''))));
         $password = (string) $req->input('password', '');
 
-        if ($email === '' || $password === '') {
-            Response::error('Ingresá email y contraseña de tu cuenta de Pizzalog App', 422);
+        if ($identifier === '' || $password === '') {
+            Response::error('Ingresá tu usuario/email y contraseña de Pizzalog App', 422);
         }
 
         $pdo = Database::pdo();
+        ToolsAuthController::ensureTables($pdo);
         $stmt = $pdo->prepare(
-            "SELECT id, business_id, name, email, password_hash, role, is_active
+            "SELECT id, business_id, name, email, username, password_hash, role, is_active
                FROM users
-              WHERE LOWER(email) = ? AND role = 'admin' AND is_active = 1
+              WHERE (LOWER(email) = ? OR LOWER(username) = ?) AND role = 'admin' AND is_active = 1
+              ORDER BY id ASC
               LIMIT 1"
         );
-        $stmt->execute([$email]);
+        $stmt->execute([$identifier, $identifier]);
         $appUser = $stmt->fetch(\PDO::FETCH_ASSOC);
 
         if (!$appUser || empty($appUser['password_hash']) || !password_verify($password, (string) $appUser['password_hash'])) {
@@ -63,16 +129,24 @@ class ToolsSyncController
         }
 
         $bid = (int) $appUser['business_id'];
-        $pdo->prepare('UPDATE tools_accounts SET app_user_id = ?, business_id = ? WHERE id = ?')
-            ->execute([(int) $appUser['id'], $bid, $accountId]);
+        $appUserId = (int) $appUser['id'];
 
-        $bName = $pdo->query("SELECT name FROM businesses WHERE id = {$bid}")->fetchColumn();
+        // Evitar colisión en el índice único uq_tools_accounts_app_user_env (app_user_id, environment)
+        $pdo->prepare('UPDATE tools_accounts SET app_user_id = NULL WHERE app_user_id = ? AND environment = ? AND id <> ?')
+            ->execute([$appUserId, $environment, $accountId]);
+
+        $pdo->prepare('UPDATE tools_accounts SET app_user_id = ?, business_id = ? WHERE id = ?')
+            ->execute([$appUserId, $bid, $accountId]);
+
+        $bStmt = $pdo->prepare('SELECT name FROM businesses WHERE id = ? LIMIT 1');
+        $bStmt->execute([$bid]);
+        $bName = $bStmt->fetchColumn();
 
         Response::ok([
             'linked' => true,
             'business_id' => $bid,
-            'business_name' => (string) $bName,
-            'app_user_email' => (string) $appUser['email'],
+            'business_name' => (string) ($bName ?: 'Negocio vinculado'),
+            'app_user_email' => (string) ($appUser['email'] ?: $appUser['username'] ?: $identifier),
         ]);
     }
 
@@ -82,13 +156,14 @@ class ToolsSyncController
      */
     public function preview(Request $req): void
     {
-        $bid = !empty($req->auth['business_id']) ? (int) $req->auth['business_id'] : null;
+        $pdo = Database::pdo();
+        ToolsAuthController::ensureTables($pdo);
+        $bid = $this->resolveBusinessId($req, $pdo);
         if (!$bid) {
             Response::error('Esta cuenta de Tools no está vinculada a ningún negocio de Pizzalog App', 403);
         }
 
         $direction = (string) $req->input('direction', 'to_app');
-        $pdo = Database::pdo();
 
         if ($direction === 'from_app') {
             $suppliesStmt = $pdo->prepare('SELECT COUNT(*) FROM supplies WHERE business_id = ? AND is_active = 1');
@@ -99,21 +174,27 @@ class ToolsSyncController
             $productsStmt->execute([$bid]);
             $productsCount = (int) $productsStmt->fetchColumn();
 
-            $salesStmt = $pdo->prepare("SELECT COUNT(DISTINCT s.id) FROM sales s WHERE s.business_id = ? AND s.status = 'completed'");
-            $salesStmt->execute([$bid]);
-            $salesTicketsCount = (int) $salesStmt->fetchColumn();
+            $salesTicketsCount = 0;
+            $salesAggCount = 0;
+            try {
+                $salesStmt = $pdo->prepare("SELECT COUNT(DISTINCT s.id) FROM sales s WHERE s.business_id = ? AND s.status = 'completed'");
+                $salesStmt->execute([$bid]);
+                $salesTicketsCount = (int) $salesStmt->fetchColumn();
 
-            $aggStmt = $pdo->prepare("
-                SELECT COUNT(*) FROM (
-                    SELECT 1 
-                      FROM sale_items si 
-                      JOIN sales s ON s.id = si.sale_id 
-                     WHERE s.business_id = ? AND s.status = 'completed' AND si.product_id IS NOT NULL 
-                     GROUP BY si.product_id, DATE_FORMAT(s.created_at, '%Y-%m-01'), COALESCE(s.channel, 'counter')
-                ) agg
-            ");
-            $aggStmt->execute([$bid]);
-            $salesAggCount = (int) $aggStmt->fetchColumn();
+                $aggStmt = $pdo->prepare("
+                    SELECT COUNT(*) FROM (
+                        SELECT 1 
+                          FROM sale_items si 
+                          JOIN sales s ON s.id = si.sale_id 
+                         WHERE s.business_id = ? AND s.status = 'completed' AND si.product_id IS NOT NULL 
+                         GROUP BY si.product_id, DATE_FORMAT(s.created_at, '%Y-%m-01'), COALESCE(s.channel, 'counter')
+                    ) agg
+                ");
+                $aggStmt->execute([$bid]);
+                $salesAggCount = (int) $aggStmt->fetchColumn();
+            } catch (\Throwable $e) {
+                // Ignorar si no existen tablas de ventas aún
+            }
 
             Response::ok([
                 'direction' => 'from_app',
@@ -193,15 +274,16 @@ class ToolsSyncController
      */
     public function apply(Request $req): void
     {
-        $bid = !empty($req->auth['business_id']) ? (int) $req->auth['business_id'] : null;
+        $pdo = Database::pdo();
+        ToolsAuthController::ensureTables($pdo);
+        $bid = $this->resolveBusinessId($req, $pdo);
         if (!$bid) {
             Response::error('Esta cuenta de Tools no está vinculada a ningún negocio de Pizzalog App', 403);
         }
 
         $direction = (string) $req->input('direction', 'to_app');
-        $pdo = Database::pdo();
         PriceListController::ensureTables();
-        RecipeCostingController::ensureTables();
+        RecipeCostingController::ensureTables($pdo);
 
         if ($direction === 'to_app') {
             $wsRow = $pdo->prepare('SELECT workspace_json FROM tools_workspaces WHERE account_id = ? LIMIT 1');
@@ -228,7 +310,7 @@ class ToolsSyncController
                 foreach ($toolsIngredients as $ing) {
                     $name = trim((string) ($ing['name'] ?? ''));
                     if ($name === '') continue;
-                    $unit = in_array($ing['base_unit'] ?? null, ['kg', 'g', 'l', 'ml', 'u'], true) ? $ing['base_unit'] : 'kg';
+                    $unit = self::normalizeAppSupplyUnit((string) ($ing['base_unit'] ?? 'kg'));
 
                     $priceRec = null;
                     foreach ($toolsPrices as $p) {
@@ -278,9 +360,11 @@ class ToolsSyncController
                     'batch_id' => $batchId,
                 ]);
             } catch (\Throwable $e) {
-                $pdo->rollBack();
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
                 error_log('[pizzalog-sync] to_app failed: ' . $e->getMessage());
-                Response::error('Error al sincronizar datos hacia Pizzalog App', 500);
+                Response::error('Error al sincronizar datos hacia Pizzalog App: ' . $e->getMessage(), 500);
             }
         } else {
             // from_app: Sincronizar catálogo, productos, recetas, precios de venta e historial desde App hacia Tools
@@ -294,12 +378,19 @@ class ToolsSyncController
             $ingredients = [];
             $purchasePrices = [];
             $supplyIdToIngredientId = [];
+            $supplyNameToIngredientId = [];
 
             foreach ($appSupplies as $s) {
                 $ingId = 'ing_app_' . $s['id'];
                 $supplyIdToIngredientId[(int) $s['id']] = $ingId;
-                $unit = in_array($s['unit'], ['kg', 'g', 'l', 'ml', 'u'], true) ? $s['unit'] : 'kg';
-                $dim = ($unit === 'kg' || $unit === 'g') ? 'mass' : (($unit === 'l' || $unit === 'ml') ? 'volume' : 'count');
+                $normName = mb_strtolower(trim((string) $s['name']));
+                if ($normName !== '') {
+                    $supplyNameToIngredientId[$normName] = $ingId;
+                }
+                $unit = self::normalizeCostEngineUnit((string) ($s['unit'] ?? 'kg'), 'kg');
+                $dim = in_array($unit, ['kg', 'g', 'mg', 'lb', 'oz'], true)
+                    ? 'mass'
+                    : (in_array($unit, ['L', 'l', 'ml', 'cc', 'fl_oz_us', 'gal_us'], true) ? 'volume' : 'count');
                 $ingredients[] = [
                     'id' => $ingId,
                     'name' => (string) $s['name'],
@@ -348,19 +439,20 @@ class ToolsSyncController
                     $comps = $compStmt->fetchAll(\PDO::FETCH_ASSOC);
                     $components = [];
                     foreach ($comps as $c) {
+                        $compUnit = self::normalizeCostEngineUnit((string) ($c['unit'] ?? 'kg'), 'kg');
                         if ($c['component_type'] === 'supply' && !empty($c['supply_id'])) {
                             $components[] = [
                                 'component_type' => 'ingredient',
                                 'ingredient_id' => $supplyIdToIngredientId[(int) $c['supply_id']] ?? ('ing_app_' . $c['supply_id']),
                                 'quantity' => (float) $c['quantity'],
-                                'unit' => $c['unit'] ?: 'kg',
+                                'unit' => $compUnit,
                             ];
                         } elseif ($c['component_type'] === 'recipe' && !empty($c['component_recipe_id'])) {
                             $components[] = [
                                 'component_type' => 'subrecipe',
                                 'recipe_id' => 'sub_app_' . $c['component_recipe_id'],
                                 'quantity' => (float) $c['quantity'],
-                                'unit' => $c['unit'] ?: 'kg',
+                                'unit' => $compUnit,
                             ];
                         }
                     }
@@ -370,7 +462,7 @@ class ToolsSyncController
                         'name' => (string) $sub['name'],
                         'recipe_type' => 'subrecipe',
                         'yield_quantity' => (float) ($sub['yield_quantity'] > 0 ? $sub['yield_quantity'] : 1),
-                        'yield_unit' => $sub['yield_unit'] ?: 'kg',
+                        'yield_unit' => self::normalizeCostEngineUnit((string) ($sub['yield_unit'] ?? 'kg'), 'kg'),
                         'currency' => 'ARS',
                         'components' => $components,
                     ];
@@ -428,6 +520,19 @@ class ToolsSyncController
                  ORDER BY sort_order ASC
             ");
 
+            $legacyCompStmt = null;
+            try {
+                $legacyCompStmt = $pdo->prepare("
+                    SELECT pi.ingredient_id, pi.quantity, pi.unit, i.name AS ingredient_name
+                      FROM product_ingredients pi
+                      JOIN ingredients i ON i.id = pi.ingredient_id AND i.business_id = ?
+                     WHERE pi.product_id = ?
+                     ORDER BY i.name ASC
+                ");
+            } catch (\Throwable $e) {
+                $legacyCompStmt = null;
+            }
+
             foreach ($appProducts as $p) {
                 $pid = (int) $p['id'];
                 $toolsProdId = 'prod_app_' . $pid;
@@ -435,36 +540,79 @@ class ToolsSyncController
 
                 $components = [];
                 $yieldQty = 1.0;
-                $yieldUnit = 'u';
+                $yieldUnit = 'unit';
                 $targetFoodCost = 30.0;
 
                 if (isset($appRecipeByProdId[$pid])) {
                     $ar = $appRecipeByProdId[$pid];
                     $yieldQty = (float) ($ar['yield_quantity'] > 0 ? $ar['yield_quantity'] : 1);
-                    $yieldUnit = $ar['yield_unit'] ?: 'u';
-                    $targetFoodCost = (float) ($ar['target_food_cost_pct'] > 0 ? $ar['target_food_cost_pct'] : 30);
+                    $yieldUnit = self::normalizeCostEngineUnit((string) ($ar['yield_unit'] ?? 'unit'), 'unit');
+                    $rawFc = (float) ($ar['target_food_cost_pct'] ?? 30);
+                    $targetFoodCost = ($rawFc > 0 && $rawFc < 100) ? $rawFc : 30.0;
 
                     try {
                         $compStmt->execute([$bid, $ar['id']]);
                         foreach ($compStmt->fetchAll(\PDO::FETCH_ASSOC) as $c) {
+                            $compUnit = self::normalizeCostEngineUnit((string) ($c['unit'] ?? 'kg'), 'kg');
                             if ($c['component_type'] === 'supply' && !empty($c['supply_id'])) {
                                 $components[] = [
                                     'component_type' => 'ingredient',
                                     'ingredient_id' => $supplyIdToIngredientId[(int) $c['supply_id']] ?? ('ing_app_' . $c['supply_id']),
                                     'quantity' => (float) $c['quantity'],
-                                    'unit' => $c['unit'] ?: 'kg',
+                                    'unit' => $compUnit,
                                 ];
                             } elseif ($c['component_type'] === 'recipe' && !empty($c['component_recipe_id'])) {
                                 $components[] = [
                                     'component_type' => 'subrecipe',
                                     'recipe_id' => $subrecipeIdMap[(int) $c['component_recipe_id']] ?? ('sub_app_' . $c['component_recipe_id']),
                                     'quantity' => (float) $c['quantity'],
-                                    'unit' => $c['unit'] ?: 'kg',
+                                    'unit' => $compUnit,
                                 ];
                             }
                         }
                     } catch (\Throwable $e) {
                         // Ignorar componentes si falla
+                    }
+                }
+
+                // Fallback a product_ingredients si no tenía receta en Recipe Studio
+                if (empty($components) && $legacyCompStmt !== null) {
+                    try {
+                        $legacyCompStmt->execute([$bid, $pid]);
+                        foreach ($legacyCompStmt->fetchAll(\PDO::FETCH_ASSOC) as $lc) {
+                            $ingName = trim((string) ($lc['ingredient_name'] ?? ''));
+                            if ($ingName === '') continue;
+                            $normIngName = mb_strtolower($ingName);
+                            $compUnit = self::normalizeCostEngineUnit((string) ($lc['unit'] ?? 'g'), 'g');
+                            $qty = $lc['quantity'] !== null && (float) $lc['quantity'] > 0 ? (float) $lc['quantity'] : 1.0;
+
+                            if (isset($supplyNameToIngredientId[$normIngName])) {
+                                $targetIngId = $supplyNameToIngredientId[$normIngName];
+                            } else {
+                                $targetIngId = 'ing_legacy_' . (int) $lc['ingredient_id'];
+                                $supplyNameToIngredientId[$normIngName] = $targetIngId;
+                                $dim = in_array($compUnit, ['kg', 'g', 'mg', 'lb', 'oz'], true)
+                                    ? 'mass'
+                                    : (in_array($compUnit, ['L', 'l', 'ml', 'cc', 'fl_oz_us', 'gal_us'], true) ? 'volume' : 'count');
+                                $baseUnit = $dim === 'mass' ? 'kg' : ($dim === 'volume' ? 'L' : 'unit');
+                                $ingredients[] = [
+                                    'id' => $targetIngId,
+                                    'name' => $ingName,
+                                    'base_dimension' => $dim,
+                                    'base_unit' => $baseUnit,
+                                    'is_active' => true,
+                                ];
+                            }
+
+                            $components[] = [
+                                'component_type' => 'ingredient',
+                                'ingredient_id' => $targetIngId,
+                                'quantity' => $qty,
+                                'unit' => $compUnit,
+                            ];
+                        }
+                    } catch (\Throwable $e) {
+                        // Ignorar si falla lectura de product_ingredients
                     }
                 }
 
@@ -544,12 +692,17 @@ class ToolsSyncController
             // Conjunto de IDs demo a eliminar para evitar duplicados y datos ficticios
             $demoIds = [
                 'prod_margherita', 'prod_focaccia_a', 'prod_pollo_merma', 'prod_trufa_incompleta',
+                'sub_masa_poolish', 'sub_salsa',
                 'sub_masa_napolitana', 'sub_salsa_san_marzano', 'sub_aceite_ajo_romero',
-                'ing_harina_00', 'ing_agua', 'ing_levadura_fresca', 'ing_sal_fina', 'ing_aceite_oliva',
+                'ing_harina', 'ing_levadura', 'ing_sal', 'ing_agua', 'ing_tomate',
+                'ing_aceite', 'ing_mozzarella', 'ing_pollo', 'ing_garbanzo', 'ing_trufa',
+                'ing_harina_00', 'ing_levadura_fresca', 'ing_sal_fina', 'ing_aceite_oliva',
                 'ing_tomate_pelado', 'ing_mozzarella_fior', 'ing_albahaca_fresca', 'ing_pechuga_pollo',
                 'ing_trufa_negra', 'ing_caja_pizza_33', 'ing_bolsa_delivery',
             ];
             $demoSet = array_flip($demoIds);
+            $demoExpenseSet = array_flip(['exp_1', 'exp_2', 'exp_3', 'exp_4']);
+            $demoSnapshotSet = array_flip(['snap_margh_sep', 'snap_margh_oct', 'snap_margh_nov']);
 
             // Preservar recetas personalizadas existentes que no sean demo ni colisionen con las de App
             $combinedRecipes = array_merge($subrecipes, $productRecipes);
@@ -578,10 +731,11 @@ class ToolsSyncController
             }
 
             // Preservar ventas personalizadas existentes que no sean demo
+            $importedSaleIds = array_flip(array_column($salesHistory, 'id'));
             foreach ((array) ($existingWs['salesHistory'] ?? []) as $exSale) {
                 $pid = $exSale['product_id'] ?? '';
                 $sid = $exSale['id'] ?? '';
-                if (!isset($demoSet[$pid]) && !str_starts_with($sid, 'sale_10_') && !str_starts_with($sid, 'sale_11_')) {
+                if (!isset($demoSet[$pid]) && !isset($importedSaleIds[$sid]) && !str_starts_with($sid, 'sale_10_') && !str_starts_with($sid, 'sale_11_')) {
                     $salesHistory[] = $exSale;
                 }
             }
@@ -593,7 +747,33 @@ class ToolsSyncController
                 }
             }
 
+            $bizNameStmt = $pdo->prepare('SELECT name FROM businesses WHERE id = ? LIMIT 1');
+            $bizNameStmt->execute([$bid]);
+            $appBusinessName = trim((string) ($bizNameStmt->fetchColumn() ?: ''));
+            $resolvedBusinessName = $appBusinessName !== ''
+                ? $appBusinessName
+                : (trim((string) ($existingWs['businessName'] ?? '')) ?: 'Mi Pizzería');
+
+            $cleanExpenses = [];
+            foreach ((array) ($existingWs['operatingExpenses'] ?? []) as $exExp) {
+                $eid = (string) ($exExp['id'] ?? '');
+                $ename = (string) ($exExp['name'] ?? '');
+                if (!isset($demoExpenseSet[$eid]) && !str_contains($ename, '(Demo)')) {
+                    $cleanExpenses[] = $exExp;
+                }
+            }
+
+            $cleanSnapshots = [];
+            foreach ((array) ($existingWs['snapshots'] ?? []) as $exSnap) {
+                $sid = (string) ($exSnap['snapshot_id'] ?? '');
+                $rid = (string) ($exSnap['recipe_id'] ?? '');
+                if (!isset($demoSnapshotSet[$sid]) && !isset($demoSet[$rid])) {
+                    $cleanSnapshots[] = $exSnap;
+                }
+            }
+
             $newWs = [
+                'businessName' => $resolvedBusinessName,
                 'currency' => $existingWs['currency'] ?? 'ARS',
                 'locale' => $existingWs['locale'] ?? 'es-AR',
                 'unitSystem' => $existingWs['unitSystem'] ?? 'metric',
@@ -604,27 +784,32 @@ class ToolsSyncController
                 'salesPeriod' => date('Y-m'),
                 'catalog' => [
                     'as_of_date' => $today,
-                    'ingredients' => $ingredients,
-                    'purchase_prices' => $purchasePrices,
-                    'recipes' => $combinedRecipes,
+                    'ingredients' => array_values($ingredients),
+                    'purchase_prices' => array_values($purchasePrices),
+                    'recipes' => array_values($combinedRecipes),
                 ],
-                'operatingExpenses' => $existingWs['operatingExpenses'] ?? [],
-                'productSalesMap' => $productSalesMap,
-                'salesHistory' => $salesHistory,
-                'snapshots' => $existingWs['snapshots'] ?? [],
-                'equivalences' => $existingWs['equivalences'] ?? [],
+                'operatingExpenses' => array_values($cleanExpenses),
+                'productSalesMap' => (object) $productSalesMap,
+                'salesHistory' => array_values($salesHistory),
+                'snapshots' => array_values($cleanSnapshots),
+                'equivalences' => (object) ($existingWs['equivalences'] ?? []),
                 'pricingScenario' => $existingWs['pricingScenario'] ?? [
                     'target_margin_pct' => 70,
                     'rounding_step' => 100,
                 ],
             ];
 
+            $accountId = (int) $req->auth['tools_account_id'];
             $savedJson = json_encode($newWs, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
             $pdo->prepare(
                 'INSERT INTO tools_workspaces (account_id, workspace_json, schema_version)
                  VALUES (?, ?, 1)
                  ON DUPLICATE KEY UPDATE workspace_json = VALUES(workspace_json), schema_version = 1, updated_at = NOW()'
-            )->execute([(int) $req->auth['tools_account_id'], $savedJson]);
+            )->execute([$accountId, $savedJson]);
+
+            $tsStmt = $pdo->prepare('SELECT updated_at FROM tools_workspaces WHERE account_id = ? LIMIT 1');
+            $tsStmt->execute([$accountId]);
+            $updatedAt = $tsStmt->fetchColumn();
 
             Response::ok([
                 'direction' => 'from_app',
@@ -633,6 +818,8 @@ class ToolsSyncController
                 'imported_recipes' => count($combinedRecipes),
                 'imported_products' => count($appProducts),
                 'imported_sales' => count($salesHistory),
+                'updated_at' => $updatedAt ?: null,
+                'workspace' => $newWs,
             ]);
         }
     }

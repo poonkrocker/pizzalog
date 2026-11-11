@@ -14,8 +14,9 @@ class RecipeCostingController
     /**
      * Respaldo defensivo de esquema por si la migración 027 aún no corrió en el entorno.
      */
-    private function ensureTables(\PDO $pdo): void
+    public static function ensureTables(?\PDO $pdo = null): void
     {
+        $pdo ??= Database::pdo();
         ProductController::ensureColumns();
         $pdo->exec("CREATE TABLE IF NOT EXISTS recipe_studio_recipes (
           id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, business_id BIGINT UNSIGNED NOT NULL,
@@ -140,7 +141,7 @@ class RecipeCostingController
     {
         $bid = (int)$req->auth['business_id'];
         $pdo = Database::pdo();
-        $this->ensureTables($pdo);
+        self::ensureTables($pdo);
         $pdo->beginTransaction();
         try {
             $imported = $this->importExistingProductRecipes($pdo, $bid);
@@ -156,7 +157,7 @@ class RecipeCostingController
     {
         $bid = (int)$req->auth['business_id'];
         $pdo = Database::pdo();
-        $this->ensureTables($pdo);
+        self::ensureTables($pdo);
         $legacyUnimportedCount = $this->countUnimportedLegacyRecipes($pdo, $bid);
 
         $stmt = $pdo->prepare("SELECT id, name, recipe_type, linked_product_id, yield_quantity, yield_unit, price, target_food_cost_pct
@@ -236,7 +237,7 @@ class RecipeCostingController
 
     public function recipesSave(Request $req): void
     {
-        $bid=(int)$req->auth['business_id']; $b=$req->body; $pdo=Database::pdo(); $this->ensureTables($pdo);
+        $bid=(int)$req->auth['business_id']; $b=$req->body; $pdo=Database::pdo(); self::ensureTables($pdo);
         $id=!empty($b['id'])?(int)$b['id']:null; $name=trim((string)($b['name']??''));
         $type=($b['recipe_type']??'product')==='subrecipe'?'subrecipe':'product';
         $yield=max(0.0001,(float)($b['yield_quantity']??1)); $yieldUnit=trim((string)($b['yield_unit']??'u')) ?: 'u';
@@ -498,7 +499,7 @@ class RecipeCostingController
 
     public function businessCostsGet(Request $req): void
     {
-        $bid=(int)$req->auth['business_id'];$pdo=Database::pdo();$this->ensureTables($pdo);
+        $bid=(int)$req->auth['business_id'];$pdo=Database::pdo();self::ensureTables($pdo);
         $q=$pdo->prepare("SELECT id,name,category,quantity,amount,period,notes FROM business_cost_items WHERE business_id=? AND is_active=1 ORDER BY category,name");
         $q->execute([$bid]);$items=[];
         $factor=['monthly'=>1,'weekly'=>52/12,'daily'=>365/12,'yearly'=>1/12];$total=0.0;
@@ -512,7 +513,7 @@ class RecipeCostingController
 
     public function businessCostsSave(Request $req): void
     {
-        $bid=(int)$req->auth['business_id'];$b=$req->body;$pdo=Database::pdo();$this->ensureTables($pdo);
+        $bid=(int)$req->auth['business_id'];$b=$req->body;$pdo=Database::pdo();self::ensureTables($pdo);
         $items=is_array($b['items']??null)?$b['items']:[];
         $allowed=['employees','rent','utilities','services','taxes','maintenance','software','other'];
         $periods=['monthly','weekly','daily','yearly'];

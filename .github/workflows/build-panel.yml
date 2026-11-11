@@ -5,11 +5,13 @@ on:
     branches:
       - main
       - feat/tools-cost-engine-importer-v1
+      - feat/seasonal-pizza-lab
     paths:
       - "frontend/apps/panel/**"
       - "frontend/packages/shared/**"
       - "frontend/packages/cost-engine/**"
       - "frontend/packages/cost-engine-fixtures/**"
+      - "frontend/packages/price-list/**"
       - "frontend/pnpm-lock.yaml"
       - "frontend/package.json"
       - "frontend/pnpm-workspace.yaml"

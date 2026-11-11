@@ -11,8 +11,12 @@ class Cors
     public const DEFAULT_ALLOWED_ORIGINS = [
         'https://tools.pizzalog.net',
         'https://staging.pizzalog.net',
+        'https://app-staging.pizzalog.net',
         'https://app.pizzalog.net',
+        'https://pos.pizzalog.net',
+        'https://carta.pizzalog.net',
         'https://pizzalog.net',
+        'https://www.pizzalog.net',
         'http://localhost:5173',
         'http://localhost:5174',
         'http://localhost:5175',
@@ -37,7 +41,7 @@ class Cors
             header("Access-Control-Allow-Origin: {$origin}");
             header('Vary: Origin');
             header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-            header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
+            header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Pizzalog-Authorization');
             header('Access-Control-Max-Age: 86400');
         }
 

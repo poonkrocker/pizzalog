@@ -16,6 +16,31 @@ use Pizzalog\Core\Database;
  */
 class LoyverseProductMatcher
 {
+    public static function ensureTable(?\PDO $pdo = null): void
+    {
+        $pdo ??= Database::pdo();
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS loyverse_product_links (
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                business_id BIGINT UNSIGNED NOT NULL,
+                external_key CHAR(64) NOT NULL,
+                external_ref VARCHAR(64) NULL,
+                external_name VARCHAR(180) NOT NULL,
+                external_category VARCHAR(120) NULL,
+                external_variant VARCHAR(180) NULL,
+                product_id BIGINT UNSIGNED NULL,
+                variant_id BIGINT UNSIGNED NULL,
+                match_status ENUM('matched','created','review') NOT NULL DEFAULT 'review',
+                match_confidence DECIMAL(5,4) NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (id),
+                UNIQUE KEY uq_loyverse_link_business_key (business_id, external_key),
+                KEY idx_loyverse_link_product (business_id, product_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ");
+    }
+
     public function resolve(int $businessId, string $name, string $category, string $variant, ?string $externalRef = null): array
     {
         $name = trim($name);
@@ -24,6 +49,7 @@ class LoyverseProductMatcher
         }
 
         $pdo = Database::pdo();
+        self::ensureTable($pdo);
         // REF es la identidad estable de Loyverse; si no existe, usar clave compuesta.
         $identity = trim((string) $externalRef) !== ''
             ? 'ref:' . trim((string) $externalRef)

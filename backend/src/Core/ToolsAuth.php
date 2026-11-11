@@ -58,7 +58,6 @@ class ToolsAuth
                     $account['app_user_active'] === null
                     || (int)$account['app_user_active'] !== 1
                     || $account['app_user_role'] !== 'admin'
-                    || strtolower((string)$account['app_user_email']) !== strtolower((string)$account['email'])
                 ) {
                     Response::error('El usuario vinculado de Pizzalog App ya no tiene permisos para acceder a Tools', 403);
                 }

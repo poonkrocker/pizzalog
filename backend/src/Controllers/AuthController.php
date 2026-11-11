@@ -77,16 +77,16 @@ class AuthController
             Response::error('Tu usuario no tiene habilitado el acceso a la aplicación TPV', 403);
         }
 
-        $jwt = Config::get('jwt');
+        $jwt = Config::get('jwt', []);
         $token = Jwt::encode(
             [
                 'sub'         => (int) $user['id'],
                 'business_id' => (int) $user['business_id'],
                 'role'        => $user['role'],
             ],
-            $jwt['secret'],
-            (int) $jwt['ttl'],
-            $jwt['issuer']
+            (string) ($jwt['secret'] ?? ''),
+            (int) ($jwt['ttl'] ?? 28800),
+            (string) ($jwt['issuer'] ?? 'pizzalog')
         );
 
         Response::ok([

@@ -820,6 +820,15 @@ export class CostEngine {
       }
     }
 
+    if (effectiveComponents.length === 0 || rawPartialBatchCost <= 0) {
+      isComplete = false;
+      if (effectiveComponents.length === 0) {
+        warnings.push(`La receta "${recipe.name}" todavía no tiene ingredientes cargados.`);
+      } else {
+        warnings.push(`La receta "${recipe.name}" no tiene componentes con costo mayor a cero.`);
+      }
+    }
+
     const rawBatchCost = isComplete ? rawPartialBatchCost : null;
     const rawUnitCost = isComplete && rawBatchCost !== null ? rawBatchCost / effectiveYieldQty : null;
 

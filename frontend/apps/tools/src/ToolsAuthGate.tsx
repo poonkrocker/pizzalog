@@ -1,13 +1,134 @@
-import { useEffect, useState, type FormEvent } from 'react';
-import { createInitialDemoWorkspace, type ToolsWorkspaceState } from './demoData';
+import { Component, useEffect, useState, type ErrorInfo, type FormEvent, type ReactNode } from 'react';
+import { createInitialDemoWorkspace, normalizeWorkspace, type ToolsWorkspaceState } from './demoData';
 import { App } from './App';
 import { CommercialPlansModal } from './CommercialPlansModal';
 
+class ToolsErrorBoundary extends Component<
+  { children: ReactNode; workspace: ToolsWorkspaceState; onResetDemo: () => void; onLogout: () => void },
+  { error: Error | null }
+> {
+  override state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  override componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('ToolsErrorBoundary caught error:', error, info);
+  }
+
+  override render() {
+    if (this.state.error) {
+      return (
+        <main className="tools-auth">
+          <section className="tools-auth-card" style={{ maxWidth: 580 }}>
+            <div className="tools-auth-kicker">PIZZALOG / TOOLS — RECUPERACIÓN</div>
+            <h1>Se detectó un problema al mostrar el espacio de trabajo</h1>
+            <p>Tus datos siguen guardados. Podés descargar un respaldo JSON, reintentar o cerrar sesión.</p>
+            <div className="alert-banner" style={{ wordBreak: 'break-word' }}>
+              {this.state.error.message || 'Error inesperado de renderizado'}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+              <button
+                className="btn btn--primary tools-auth-submit"
+                type="button"
+                onClick={() => {
+                  this.setState({ error: null });
+                  window.location.reload();
+                }}
+              >
+                🔄 Reintentar carga
+              </button>
+              <button
+                className="btn btn--secondary tools-auth-submit"
+                type="button"
+                onClick={() => {
+                  const blob = new Blob([JSON.stringify(this.props.workspace, null, 2)], { type: 'application/json' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `pizzalog-tools-recovery-${new Date().toISOString().slice(0, 10)}.json`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+              >
+                💾 Descargar respaldo JSON
+              </button>
+              <button
+                className="btn btn--secondary tools-auth-submit"
+                type="button"
+                onClick={() => {
+                  this.setState({ error: null });
+                  this.props.onResetDemo();
+                }}
+              >
+                🧪 Restaurar espacio de trabajo base
+              </button>
+              <button className="btn tools-auth-submit" type="button" onClick={this.props.onLogout}>
+                Cerrar sesión
+              </button>
+            </div>
+          </section>
+        </main>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const API_URL = ((import.meta.env.VITE_API_URL as string | undefined) ?? 'https://api.pizzalog.net').replace(/\/+$/, '');
 const TOKEN_KEY = 'pizzalog_tools_session';
-const TOOLS_ENVIRONMENT = ((import.meta.env.VITE_TOOLS_ENV as string | undefined) ?? 'production') === 'staging' ? 'staging' : 'production';
+const isStagingHost = typeof window !== 'undefined' && window.location.hostname.toLowerCase().includes('staging');
+const TOOLS_ENVIRONMENT = (isStagingHost || ((import.meta.env.VITE_TOOLS_ENV as string | undefined) === 'staging')) ? 'staging' : 'production';
 
 const LEGACY_WORKSPACE_KEY = 'pizzalog_tools_workspace_v2';
+
+let preferSameOriginToolsProxy = false;
+
+function canUseSameOriginToolsProxy(): boolean {
+  if (typeof window === 'undefined') return false;
+  const proto = window.location.protocol;
+  const host = window.location.hostname.toLowerCase();
+  return (proto === 'https:' || proto === 'http:') && host.endsWith('pizzalog.net');
+}
+
+export async function toolsFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers);
+  const auth = headers.get('Authorization');
+  if (auth) {
+    headers.set('X-Pizzalog-Authorization', auth);
+  }
+
+  if (preferSameOriginToolsProxy && canUseSameOriginToolsProxy()) {
+    try {
+      return await fetch(`/api-proxy.php?endpoint=${encodeURIComponent(path)}`, {
+        ...init,
+        headers,
+      });
+    } catch {
+      // Si fallara el proxy local, reintentar vía URL directa
+    }
+  }
+
+  try {
+    return await fetch(`${API_URL}${path}`, init);
+  } catch {
+    try {
+      await fetch(`${API_URL}/`, { method: 'GET', cache: 'no-store', mode: 'cors' });
+      return await fetch(`${API_URL}${path}`, init);
+    } catch {
+      if (canUseSameOriginToolsProxy()) {
+        const proxyRes = await fetch(`/api-proxy.php?endpoint=${encodeURIComponent(path)}`, {
+          ...init,
+          headers,
+        });
+        preferSameOriginToolsProxy = true;
+        return proxyRes;
+      }
+      throw new Error('No se pudo conectar con el servidor');
+    }
+  }
+}
 
 function readLegacyWorkspace(): ToolsWorkspaceState | null {
   try {
@@ -31,19 +152,20 @@ function removeLegacyWorkspace(): void {
   try { localStorage.removeItem(LEGACY_WORKSPACE_KEY); } catch { /* Retain the local recovery copy if storage is unavailable. */ }
 }
 
-async function restoreOrMigrateWorkspace(token: string): Promise<ToolsWorkspaceState> {
-  const server = await api<{ workspace: ToolsWorkspaceState | null }>('/tools/workspace', token);
-  if (server.workspace) return server.workspace;
+async function restoreOrMigrateWorkspace(token: string): Promise<{ workspace: ToolsWorkspaceState; updatedAt: string | null }> {
+  const server = await api<{ workspace: ToolsWorkspaceState | null; updated_at?: string | null }>('/tools/workspace', token);
+  if (server.workspace) return { workspace: normalizeWorkspace(server.workspace), updatedAt: server.updated_at ?? null };
 
   const legacy = readLegacyWorkspace();
-  if (!legacy) return createInitialDemoWorkspace();
+  if (!legacy) return { workspace: createInitialDemoWorkspace(), updatedAt: null };
 
-  await api<{ saved: boolean }>('/tools/workspace', token, {
+  const normalizedLegacy = normalizeWorkspace(legacy);
+  const saved = await api<{ saved: boolean; updated_at?: string | null }>('/tools/workspace', token, {
     method: 'PUT',
-    body: JSON.stringify({ workspace: legacy }),
+    body: JSON.stringify({ workspace: normalizedLegacy }),
   });
   removeLegacyWorkspace();
-  return legacy;
+  return { workspace: normalizedLegacy, updatedAt: saved.updated_at ?? null };
 }
 
 function readSessionToken(): string | null {
@@ -72,7 +194,7 @@ async function api<T>(path: string, token?: string, init: RequestInit = {}): Pro
   if (token) headers.set('Authorization', `Bearer ${token}`);
   let response: Response;
   try {
-    response = await fetch(`${API_URL}${path}`, { ...init, headers });
+    response = await toolsFetch(path, { ...init, headers });
   } catch {
     throw new ToolsApiError('No se pudo conectar con el servidor', 0);
   }
@@ -158,8 +280,9 @@ export function ToolsAuthGate() {
         setToken(savedToken);
         setAccount(me.account);
         try {
-          const restoredWorkspace = await restoreOrMigrateWorkspace(savedToken);
-          setWorkspace(restoredWorkspace);
+          const restored = await restoreOrMigrateWorkspace(savedToken);
+          setWorkspace(restored.workspace);
+          setWorkspaceUpdatedAt(restored.updatedAt);
           setWorkspaceError('');
         } catch (err) {
           setWorkspaceError(err instanceof Error ? err.message : 'No se pudo recuperar el espacio de trabajo');
@@ -194,8 +317,9 @@ export function ToolsAuthGate() {
       setToken(result.token);
       setAccount(result.account);
       try {
-        const restoredWorkspace = await restoreOrMigrateWorkspace(result.token);
-        setWorkspace(restoredWorkspace);
+        const restored = await restoreOrMigrateWorkspace(result.token);
+        setWorkspace(restored.workspace);
+        setWorkspaceUpdatedAt(restored.updatedAt);
       } catch (err) {
         setWorkspaceError(err instanceof Error ? err.message : 'No se pudo recuperar el espacio de trabajo');
       }
@@ -233,8 +357,9 @@ export function ToolsAuthGate() {
       setToken(result.token);
       setAccount(result.account);
       try {
-        const restoredWorkspace = await restoreOrMigrateWorkspace(result.token);
-        setWorkspace(restoredWorkspace);
+        const restored = await restoreOrMigrateWorkspace(result.token);
+        setWorkspace(restored.workspace);
+        setWorkspaceUpdatedAt(restored.updatedAt);
       } catch (err) {
         setWorkspaceError(err instanceof Error ? err.message : 'No se pudo recuperar el espacio de trabajo');
       }
@@ -268,8 +393,9 @@ export function ToolsAuthGate() {
     setLoading(true);
     setWorkspaceError('');
     try {
-      const restoredWorkspace = await restoreOrMigrateWorkspace(token);
-      setWorkspace(restoredWorkspace);
+      const restored = await restoreOrMigrateWorkspace(token);
+      setWorkspace(restored.workspace);
+      setWorkspaceUpdatedAt(restored.updatedAt);
     } catch (err) {
       setWorkspaceError(err instanceof Error ? err.message : 'No se pudo recuperar el espacio de trabajo');
     } finally {
@@ -282,6 +408,7 @@ export function ToolsAuthGate() {
     setToken(null);
     setAccount(null);
     setWorkspace(null);
+    setWorkspaceUpdatedAt(null);
     setEmail('');
     setPassword('');
     setConfirmPassword('');
@@ -308,6 +435,7 @@ export function ToolsAuthGate() {
     setToken('guest-demo-token');
     setAccount(guestAccount);
     setWorkspace(demoWs);
+    setWorkspaceUpdatedAt(null);
   }
 
   if (loading) {
@@ -332,7 +460,15 @@ export function ToolsAuthGate() {
   }
 
   if (token && account && workspace) {
-    return <App token={token} account={account} initialWorkspace={workspace} initialUpdatedAt={workspaceUpdatedAt} onLogout={logout} />;
+    return (
+      <ToolsErrorBoundary
+        workspace={workspace}
+        onResetDemo={() => setWorkspace(createInitialDemoWorkspace())}
+        onLogout={logout}
+      >
+        <App token={token} account={account} initialWorkspace={workspace} initialUpdatedAt={workspaceUpdatedAt} onLogout={logout} />
+      </ToolsErrorBoundary>
+    );
   }
 
   if (mode === 'activate' || mode === 'reset') {
@@ -436,8 +572,8 @@ export function ToolsAuthGate() {
         <h1>Restaurant Profit Kit</h1>
         <p>Ingresá con la cuenta que recibiste al adquirir el producto o vinculá tu usuario de Pizzalog App.</p>
         <label className="field">
-          <span>Email</span>
-          <input type="email" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} />
+          <span>Email o Usuario</span>
+          <input type="text" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} />
         </label>
         <label className="field">
           <span>Contraseña</span>

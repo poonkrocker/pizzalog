@@ -9,6 +9,7 @@ on:
       - "frontend/apps/tools/**"
       - "frontend/packages/cost-engine/**"
       - "frontend/packages/cost-engine-fixtures/**"
+      - "frontend/packages/price-list/**"
       - "frontend/pnpm-lock.yaml"
       - "frontend/package.json"
       - "frontend/pnpm-workspace.yaml"

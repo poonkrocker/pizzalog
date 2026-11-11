@@ -2,6 +2,7 @@ import type { Role, User } from '@pizzalog/shared';
 import type { ModuleDef } from './types';
 import { DashboardPage } from './dashboard/DashboardPage';
 import { AnalyticsDetailsPage } from './dashboard/AnalyticsDetailsPage';
+import { SeasonalPizzaLabPage } from './dashboard/SeasonalPizzaLabPage';
 import { OrdersPage } from './orders/OrdersPage';
 import { DriversPage } from './drivers/DriversPage';
 import { ProductsPage } from './products/ProductsPage';
@@ -40,6 +41,14 @@ export const modules: ModuleDef[] = [
     roles: ['admin', 'manager'],
     element: <AnalyticsDetailsPage />,
     icon: '📊',
+  },
+  {
+    id: 'seasonal-pizzas',
+    title: 'Laboratorio de pizzas',
+    path: 'laboratorio-pizzas',
+    roles: ['admin', 'manager'],
+    element: <SeasonalPizzaLabPage />,
+    icon: '🍕',
   },
   {
     id: 'orders',

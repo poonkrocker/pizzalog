@@ -118,8 +118,127 @@ export const I18N: Record<
 };
 
 export function isDemoWorkspace(state: ToolsWorkspaceState): boolean {
-  return state.businessName.includes('Il Forno') ||
-    state.catalog.recipes.some((r) => r.id === 'prod_margherita' && r.name.includes('Demo'));
+  const name = typeof state?.businessName === 'string' ? state.businessName : '';
+  const recipes = Array.isArray(state?.catalog?.recipes) ? state.catalog.recipes : [];
+  return name.includes('Il Forno') ||
+    recipes.some((r) => r?.id === 'prod_margherita' && typeof r?.name === 'string' && r.name.includes('Demo'));
+}
+
+export function normalizeWorkspace(raw: Partial<ToolsWorkspaceState> | null | undefined): ToolsWorkspaceState {
+  if (!raw || typeof raw !== 'object' || !raw.catalog || typeof raw.catalog !== 'object') {
+    return createInitialDemoWorkspace();
+  }
+  const locale: LocaleCode =
+    raw.locale === 'pt-BR' || raw.locale === 'en' || raw.locale === 'es-AR' ? raw.locale : 'es-AR';
+  const currency = typeof raw.currency === 'string' && raw.currency.trim() !== '' ? raw.currency.trim() : 'ARS';
+  const base = createEmptyWorkspace(locale, currency);
+
+  const rawIngredients = Array.isArray(raw.catalog.ingredients) ? raw.catalog.ingredients.filter(Boolean) : [];
+  const rawPrices = Array.isArray(raw.catalog.purchase_prices) ? raw.catalog.purchase_prices.filter(Boolean) : [];
+  const rawRecipes = Array.isArray(raw.catalog.recipes) ? raw.catalog.recipes.filter(Boolean) : [];
+
+  // Si el workspace ya fue sincronizado con Pizzalog App y se removió prod_margherita,
+  // limpiar restos de IDs demo que hayan quedado de sincronizaciones previas.
+  const hasSyncedFromApp =
+    rawRecipes.some((r) => typeof r?.id === 'string' && (r.id.startsWith('prod_app_') || r.id.startsWith('sub_app_'))) ||
+    rawIngredients.some((i) => typeof i?.id === 'string' && i.id.startsWith('ing_app_'));
+  const hasMainDemoRecipe = rawRecipes.some((r) => r?.id === 'prod_margherita');
+  const shouldStripLeftoverDemo = hasSyncedFromApp && !hasMainDemoRecipe;
+
+  const demoIngSet = new Set([
+    'ing_harina', 'ing_levadura', 'ing_sal', 'ing_agua', 'ing_tomate',
+    'ing_aceite', 'ing_mozzarella', 'ing_pollo', 'ing_garbanzo', 'ing_trufa',
+  ]);
+  const demoRecSet = new Set([
+    'sub_masa_poolish', 'sub_salsa', 'prod_margherita', 'prod_focaccia_a',
+    'prod_pollo_merma', 'prod_trufa_incompleta',
+  ]);
+  const demoExpSet = new Set(['exp_1', 'exp_2', 'exp_3', 'exp_4']);
+  const demoSnapSet = new Set(['snap_margh_sep', 'snap_margh_oct', 'snap_margh_nov']);
+
+  const cleanIngredients = shouldStripLeftoverDemo
+    ? rawIngredients.filter((i) => !demoIngSet.has(i.id))
+    : rawIngredients;
+  const cleanPrices = shouldStripLeftoverDemo
+    ? rawPrices.filter((p) => !demoIngSet.has(p.ingredient_id))
+    : rawPrices;
+  const cleanRecipes = (shouldStripLeftoverDemo
+    ? rawRecipes.filter((r) => !demoRecSet.has(r.id))
+    : rawRecipes
+  ).map((r) => ({
+    ...r,
+    id: String(r.id ?? ''),
+    name: String(r.name ?? 'Receta sin nombre'),
+    recipe_type: r.recipe_type === 'subrecipe' ? 'subrecipe' : 'product',
+    yield_quantity: Number(r.yield_quantity) > 0 ? Number(r.yield_quantity) : 1,
+    yield_unit: r.yield_unit || 'unit',
+    currency: r.currency || currency,
+    components: Array.isArray(r.components) ? r.components : undefined,
+  })) as ToolsWorkspaceState['catalog']['recipes'];
+
+  const rawExpenses = Array.isArray(raw.operatingExpenses) ? raw.operatingExpenses.filter(Boolean) : [];
+  const cleanExpenses = shouldStripLeftoverDemo
+    ? rawExpenses.filter((e) => !demoExpSet.has(e.id) && !(typeof e.name === 'string' && e.name.includes('(Demo)')))
+    : rawExpenses;
+
+  const rawSnapshots = Array.isArray(raw.snapshots) ? raw.snapshots.filter(Boolean) : [];
+  const cleanSnapshots = shouldStripLeftoverDemo
+    ? rawSnapshots.filter((s) => !demoSnapSet.has(s.snapshot_id) && !demoRecSet.has(s.recipe_id))
+    : rawSnapshots;
+
+  const rawSalesHistory = Array.isArray(raw.salesHistory) ? raw.salesHistory.filter(Boolean) : [];
+  const cleanSalesHistory = rawSalesHistory
+    .filter((s) => !shouldStripLeftoverDemo || !demoRecSet.has(s.product_id ?? ''))
+    .map((s, idx) => ({
+      ...s,
+      id: String(s.id ?? `sale_${idx}`),
+      product_id: s.product_id ?? null,
+      product_name: String(s.product_name ?? 'Producto'),
+      quantity: Number.isFinite(Number(s.quantity)) ? Number(s.quantity) : 0,
+      period_start: typeof s.period_start === 'string' && s.period_start ? s.period_start : '2026-01-01',
+      period_end: typeof s.period_end === 'string' && s.period_end ? s.period_end : (typeof s.period_start === 'string' && s.period_start ? s.period_start : '2026-01-31'),
+      channel: typeof s.channel === 'string' ? s.channel : 'Mostrador',
+      source: typeof s.source === 'string' ? s.source : 'Importado',
+      imported_at: typeof s.imported_at === 'string' ? s.imported_at : '2026-01-01',
+    }));
+
+  const targetFc = Number(raw.defaultTargetFoodCostPct);
+  const roundingInc = Number(raw.defaultRoundingIncrement);
+  const pkgCost = Number(raw.defaultPackagingCost);
+  const chanFee = Number(raw.defaultChannelFeePct);
+
+  return {
+    ...base,
+    ...raw,
+    businessName:
+      typeof raw.businessName === 'string' && raw.businessName.trim() !== ''
+        ? raw.businessName
+        : 'Mi Pizzería',
+    currency,
+    locale,
+    unitSystem: raw.unitSystem === 'us_customary' ? 'us_customary' : 'metric',
+    defaultTargetFoodCostPct: Number.isFinite(targetFc) && targetFc > 0 && targetFc < 100 ? targetFc : 30,
+    defaultRoundingIncrement: Number.isFinite(roundingInc) && roundingInc > 0 ? roundingInc : 100,
+    defaultPackagingCost: Number.isFinite(pkgCost) && pkgCost >= 0 ? pkgCost : 0,
+    defaultChannelFeePct: Number.isFinite(chanFee) && chanFee >= 0 && chanFee < 100 ? chanFee : 0,
+    catalog: {
+      ...raw.catalog,
+      ingredients: cleanIngredients,
+      purchase_prices: cleanPrices,
+      recipes: cleanRecipes,
+    },
+    productSalesMap:
+      raw.productSalesMap && typeof raw.productSalesMap === 'object' && !Array.isArray(raw.productSalesMap)
+        ? raw.productSalesMap
+        : {},
+    salesHistory: cleanSalesHistory,
+    operatingExpenses: cleanExpenses,
+    snapshots: cleanSnapshots,
+    equivalences:
+      raw.equivalences && typeof raw.equivalences === 'object' && !Array.isArray(raw.equivalences)
+        ? raw.equivalences
+        : {},
+  };
 }
 
 export function createEmptyWorkspace(locale: LocaleCode = 'es-AR', currency = 'ARS'): ToolsWorkspaceState {

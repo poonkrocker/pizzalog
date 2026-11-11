@@ -25,6 +25,7 @@ spl_autoload_register(function (string $class): void {
 });
 
 // --- Configuración ----------------------------------------------------
+$exampleConfigFile = BASE_PATH . '/config/config.example.php';
 $configFile = BASE_PATH . '/config/config.php';
 $localConfigFile = BASE_PATH . '/config/config.local.php';
 if (!is_file($configFile) && !is_file($localConfigFile)) {
@@ -33,7 +34,13 @@ if (!is_file($configFile) && !is_file($localConfigFile)) {
     echo json_encode(['ok' => false, 'error' => 'Falta archivo de configuración (config.local.php o config.php)']);
     exit;
 }
-$config = is_file($configFile) ? (require $configFile) : [];
+$config = is_file($exampleConfigFile) ? (require $exampleConfigFile) : [];
+if (is_file($configFile)) {
+    $baseConfig = require $configFile;
+    if (is_array($baseConfig)) {
+        $config = array_replace_recursive($config, $baseConfig);
+    }
+}
 if (is_file($localConfigFile)) {
     $localConfig = require $localConfigFile;
     if (is_array($localConfig)) {
