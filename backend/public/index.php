@@ -9,6 +9,7 @@ use Pizzalog\Core\Auth;
 use Pizzalog\Core\Request;
 use Pizzalog\Core\Router;
 use Pizzalog\Controllers\AnalyticsController;
+use Pizzalog\Controllers\SeasonalPizzaController;
 use Pizzalog\Controllers\AttendanceController;
 use Pizzalog\Controllers\CashController;
 use Pizzalog\Controllers\ComboController;
@@ -36,10 +37,13 @@ use Pizzalog\Controllers\TableController;
 use Pizzalog\Controllers\TableSessionController;
 use Pizzalog\Controllers\UserController;
 use Pizzalog\Controllers\StaffController;
+use Pizzalog\Controllers\PriceListController;
 use Pizzalog\Controllers\ToolsAuthController;
+use Pizzalog\Controllers\BillingWebhookController;
+use Pizzalog\Controllers\ToolsSyncController;
 use Pizzalog\Controllers\ToolsWorkspaceController;
-use Pizzalog\Controllers\ToolsImportController;
 use Pizzalog\Controllers\ToolsAdminController;
+use Pizzalog\Controllers\ToolsImportController;
 use Pizzalog\Core\ToolsAuth;
 
 require dirname(__DIR__) . '/bootstrap.php';
@@ -50,14 +54,6 @@ $manage = Auth::requireRole(['admin', 'manager']);  // crear/editar/borrar catá
 $admin  = Auth::requireRole(['admin']);             // gestión de usuarios
 $toolsAuth = ToolsAuth::authenticate();
 
-// --- Pizzalog Tools ---------------------------------------------------
-$router->post('/tools/auth/login', [ToolsAuthController::class, 'login']);
-$router->get('/tools/auth/me', [ToolsAuthController::class, 'me'], [$toolsAuth]);
-$router->get('/tools/workspace', [ToolsWorkspaceController::class, 'show'], [$toolsAuth]);
-$router->put('/tools/workspace', [ToolsWorkspaceController::class, 'save'], [$toolsAuth]);
-$router->post('/tools/import/preview', [ToolsImportController::class, 'preview'], [$toolsAuth]);
-$router->post('/tools/admin/accounts', [ToolsAdminController::class, 'createAccount'], [$auth, $admin]);
-
 // --- Salud ------------------------------------------------------------
 $router->get('/', fn() => \Pizzalog\Core\Response::ok(['service' => 'pizzalog-api', 'status' => 'up']));
 
@@ -65,6 +61,25 @@ $router->get('/', fn() => \Pizzalog\Core\Response::ok(['service' => 'pizzalog-ap
 $router->post('/auth/login', [AuthController::class, 'login']);
 $router->get('/auth/me', [AuthController::class, 'me'], [$auth]);
 $router->post('/auth/change-password', [AuthController::class, 'changePassword'], [$auth]);
+
+// --- Pizzalog Tools (cuentas comerciales independientes de App) -------
+$router->post('/tools/auth/login', [ToolsAuthController::class, 'login']);
+$router->post('/tools/auth/activate', [ToolsAuthController::class, 'activate']);
+$router->post('/tools/auth/forgot-password', [ToolsAuthController::class, 'forgotPassword']);
+$router->post('/tools/auth/reset-password', [ToolsAuthController::class, 'resetPassword']);
+$router->get('/tools/auth/me', [ToolsAuthController::class, 'me'], [$toolsAuth]);
+
+// --- Facturación & Webhooks multicanal (LemonSqueezy + Mercado Pago) ---
+$router->post('/billing/webhook/lemonsqueezy', [BillingWebhookController::class, 'lemonSqueezy']);
+$router->post('/billing/webhook/mercadopago', [BillingWebhookController::class, 'mercadoPago']);
+$router->get('/tools/workspace', [ToolsWorkspaceController::class, 'show'], [$toolsAuth]);
+$router->put('/tools/workspace', [ToolsWorkspaceController::class, 'save'], [$toolsAuth]);
+$router->post('/tools/import/preview', [ToolsImportController::class, 'preview'], [$toolsAuth]);
+$router->get('/tools/sync/status', [ToolsSyncController::class, 'status'], [$toolsAuth]);
+$router->post('/tools/sync/link-app', [ToolsSyncController::class, 'linkApp'], [$toolsAuth]);
+$router->post('/tools/sync/preview', [ToolsSyncController::class, 'preview'], [$toolsAuth]);
+$router->post('/tools/sync/apply', [ToolsSyncController::class, 'apply'], [$toolsAuth]);
+$router->post('/tools/admin/accounts', [ToolsAdminController::class, 'createAccount'], [$auth, $admin]);
 
 // --- Categorías -------------------------------------------------------
 $router->get('/categories', [CategoryController::class, 'index'], [$auth]);
@@ -131,16 +146,16 @@ $router->get('/analytics/sales-over-time', [AnalyticsController::class, 'salesOv
 $router->get('/analytics/weekly-pizzas', [AnalyticsController::class, 'weeklyPizzas'], [$auth, $manage]);
 $router->get('/analytics/product-trends', [AnalyticsController::class, 'productTrends'], [$auth, $manage]);
 $router->get('/analytics/products-list', [AnalyticsController::class, 'productsList'], [$auth, $manage]);
+$router->get('/analytics/seasonal-pizzas', [SeasonalPizzaController::class, 'index'], [$auth, $manage]);
+$router->put('/analytics/seasonal-pizzas/{variant_id}/recipe', [SeasonalPizzaController::class, 'linkRecipe'], [$auth, $manage]);
+$router->delete('/analytics/seasonal-pizzas/{variant_id}/recipe', [SeasonalPizzaController::class, 'unlinkRecipe'], [$auth, $manage]);
+$router->post('/analytics/seasonal-pizzas/{variant_id}/availability', [SeasonalPizzaController::class, 'addAvailabilityPeriod'], [$auth, $manage]);
 
 // --- Producción / Masas / Escandallos (Calculadora) -------------------
 $router->get('/production/dough-profiles', [ProductionController::class, 'doughProfiles'], [$auth]);
 $router->post('/production/dough-profiles', [ProductionController::class, 'doughProfileStore'], [$auth, $manage]);
 $router->put('/production/dough-profiles/{id}', [ProductionController::class, 'doughProfileUpdate'], [$auth, $manage]);
 $router->delete('/production/dough-profiles/{id}', [ProductionController::class, 'doughProfileDestroy'], [$auth, $manage]);
-$router->post('/production/dough-calculate', [ProductionController::class, 'doughCalculate'], [$auth]);
-$router->get('/production/cost-margins', [ProductionController::class, 'costMargins'], [$auth, $manage]);
-$router->post('/production/recipes', [ProductionController::class, 'saveRecipe'], [$auth, $manage]);
-$router->post('/production/simulate', [ProductionController::class, 'simulate'], [$auth, $manage]);
 $router->get('/production/recipe-studio', [RecipeCostingController::class, 'recipesIndex'], [$auth, $manage]);
 $router->post('/production/recipe-studio/recipes', [RecipeCostingController::class, 'recipesSave'], [$auth, $manage]);
 $router->post('/production/recipe-studio/import-legacy', [RecipeCostingController::class, 'importLegacyRecipes'], [$auth, $manage]);
@@ -279,6 +294,11 @@ $router->put('/suppliers/{id}', [SupplierController::class, 'update'], [$auth, $
 $router->delete('/suppliers/{id}', [SupplierController::class, 'destroy'], [$auth, $manage]);
 
 // --- Insumos ----------------------------------------------------------
+// Actualizador rápido de precios por lista de proveedor
+$router->get('/supplies/price-lists/aliases', [PriceListController::class, 'aliases'], [$auth, $manage]);
+$router->post('/supplies/price-lists/apply', [PriceListController::class, 'apply'], [$auth, $manage]);
+$router->post('/supplies/price-lists/{batch}/revert', [PriceListController::class, 'revert'], [$auth, $manage]);
+$router->get('/supplies/{id}/price-history', [PriceListController::class, 'history'], [$auth, $manage]);
 $router->get('/supplies', [SupplyController::class, 'index'], [$auth]);
 $router->get('/supplies/low-stock', [SupplyController::class, 'lowStock'], [$auth]);
 $router->post('/supplies', [SupplyController::class, 'store'], [$auth, $manage]);
@@ -294,5 +314,15 @@ $router->post('/customers', [CustomerController::class, 'store'], [$auth]);
 $router->get('/customers/{id}', [CustomerController::class, 'show'], [$auth]);
 $router->put('/customers/{id}', [CustomerController::class, 'update'], [$auth, $manage]);
 $router->delete('/customers/{id}', [CustomerController::class, 'destroy'], [$auth, $manage]);
+
+// Límite temprano de cuerpos JSON para endpoints de Tools antes de leer php://input.
+$toolsPath = parse_url((string)($_SERVER['REQUEST_URI'] ?? ''), PHP_URL_PATH);
+$contentLength = (int)($_SERVER['CONTENT_LENGTH'] ?? 0);
+if ($toolsPath === '/tools/import/preview' && $contentLength > 5 * 1024 * 1024) {
+    \Pizzalog\Core\Response::error('La solicitud de importación supera el límite de 5 MB', 413);
+}
+if ($toolsPath === '/tools/workspace' && strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) === 'PUT' && $contentLength > 6 * 1024 * 1024) {
+    \Pizzalog\Core\Response::error('El espacio de trabajo supera el límite de solicitud de 6 MB', 413);
+}
 
 $router->dispatch(Request::capture());

@@ -6,10 +6,14 @@ import {
   type CostResult,
   type CostSnapshot,
   type ExchangeRate,
+  type FainaSpec,
   type Ingredient,
   type MissingInput,
   type PricingScenarioInput,
   type PricingScenarioResult,
+  type PortfolioScenarioInput,
+  type PortfolioScenarioResult,
+  type PortfolioScenarioRow,
   type PurchasePrice,
   type Recipe,
   type RecipeComponent,
@@ -88,12 +92,27 @@ export function selectEffectivePurchasePrice(
   purchasePrices: PurchasePrice[],
   asOfDate?: string
 ): PurchasePrice | undefined {
-  const matches = purchasePrices.filter(
-    (p) => p.ingredient_id === ingredientId && (!asOfDate || !p.purchase_date || p.purchase_date <= asOfDate)
-  );
-  if (matches.length === 0) return undefined;
-  matches.sort((a, b) => (b.purchase_date ?? '').localeCompare(a.purchase_date ?? ''));
-  return matches[0];
+  let selected: PurchasePrice | undefined;
+  let selectedDate = '';
+  let selectedIndex = -1;
+
+  purchasePrices.forEach((price, index) => {
+    if (
+      price.ingredient_id !== ingredientId ||
+      (asOfDate && price.purchase_date && price.purchase_date > asOfDate)
+    ) {
+      return;
+    }
+
+    const date = price.purchase_date ?? '';
+    if (date > selectedDate || (date === selectedDate && index > selectedIndex)) {
+      selected = price;
+      selectedDate = date;
+      selectedIndex = index;
+    }
+  });
+
+  return selected;
 }
 
 export interface UsableUnitCostResult {
@@ -216,12 +235,43 @@ export function expandBakersDoughSpec(spec: BakersDoughSpec): {
   yieldQuantityG: number;
   flourTotalG: number;
   waterTotalG: number;
+  flourBreakdown: Array<{ ingredient_id: string; quantityG: number; index: number }>;
+  biga: { flourG: number; waterG: number; yeastG: number; totalG: number };
+  poolish: { flourG: number; waterG: number; yeastG: number; totalG: number };
+  final: { flourG: number; waterG: number };
+  direct: { yeastG: number; saltG: number; sugarG: number; oilG: number };
 } {
   if (!Number.isFinite(spec.hydration_pct) || spec.hydration_pct < 0) {
     throw new CostEngineValidationError('INVALID_DOUGH_SPEC', 'La hidratación debe ser un porcentaje válido >= 0.');
   }
   if (!spec.flours || spec.flours.length === 0) {
     throw new CostEngineValidationError('INVALID_DOUGH_SPEC', 'El perfil de masa debe declarar al menos una harina.');
+  }
+
+  const percentageInputs: Array<[string, number]> = [
+    ['biga.flour_pct', spec.biga?.flour_pct ?? 0],
+    ['biga.water_pct', spec.biga?.water_pct ?? 0],
+    ['biga.yeast_pct', spec.biga?.yeast_pct ?? 0],
+    ['poolish.flour_pct', spec.poolish?.flour_pct ?? 0],
+    ['poolish.water_pct', spec.poolish?.water_pct ?? 0],
+    ['poolish.yeast_pct', spec.poolish?.yeast_pct ?? 0],
+    ['direct_yeast_pct', spec.direct_yeast_pct ?? 0],
+    ['salt_pct', spec.salt_pct ?? 0],
+    ['sugar_pct', spec.sugar_pct ?? 0],
+    ['oil_pct', spec.oil_pct ?? 0],
+  ];
+  for (const [field, value] of percentageInputs) {
+    if (!Number.isFinite(value) || value < 0) {
+      throw new CostEngineValidationError(
+        'INVALID_DOUGH_SPEC',
+        `El porcentaje "${field}" debe ser un número finito no negativo.`,
+        { field, value }
+      );
+    }
+  }
+
+  if (spec.total_flour_g !== undefined && (!Number.isFinite(spec.total_flour_g) || spec.total_flour_g <= 0)) {
+    throw new CostEngineValidationError('INVALID_DOUGH_SPEC', 'total_flour_g debe ser un número finito mayor a cero.');
   }
 
   const bigaFlourPct = spec.biga?.flour_pct ?? 0;
@@ -303,16 +353,56 @@ export function expandBakersDoughSpec(spec: BakersDoughSpec): {
   const waterTotalG = flourTotalG * (spec.hydration_pct / 100);
 
   // Resolver proporción de cada harina (por peso de referencia o por share_pct)
-  const usesWeights = spec.flours.every((f) => f.weight_kg !== undefined && f.weight_kg >= 0);
+  const hasAnyWeight = spec.flours.some((f) => f.weight_kg !== undefined);
+  const usesWeights = spec.flours.every(
+    (f) => f.weight_kg !== undefined && Number.isFinite(f.weight_kg) && f.weight_kg >= 0
+  );
+  if (hasAnyWeight && !usesWeights) {
+    throw new CostEngineValidationError(
+      'INVALID_DOUGH_SPEC',
+      'Si se usan pesos de harina, todos los componentes deben declarar un weight_kg válido.'
+    );
+  }
+
   const weightSum = usesWeights ? spec.flours.reduce((acc, f) => acc + (f.weight_kg ?? 0), 0) : 0;
+  if (usesWeights && (!Number.isFinite(weightSum) || weightSum <= 0)) {
+    throw new CostEngineValidationError(
+      'INVALID_DOUGH_SPEC',
+      'La suma de los pesos de harina debe ser mayor a cero.'
+    );
+  }
+
+  const shareValues = spec.flours.map((f) => f.share_pct);
+  if (!usesWeights) {
+    if (shareValues.some((value) => value === undefined || !Number.isFinite(value) || value < 0)) {
+      throw new CostEngineValidationError(
+        'INVALID_DOUGH_SPEC',
+        'Cada harina debe declarar un share_pct finito no negativo o todas deben declarar weight_kg.'
+      );
+    }
+    const shareSum = shareValues.reduce<number>((sum, value) => sum + (value ?? 0), 0);
+    if (Math.abs(shareSum - 100) > 0.01) {
+      throw new CostEngineValidationError(
+        'INVALID_DOUGH_SPEC',
+        'La suma de share_pct de las harinas debe ser 100%.',
+        { share_sum: shareSum }
+      );
+    }
+  }
+
+  if (spec.flours.some((f) => !f.ingredient_id || !f.ingredient_id.trim())) {
+    throw new CostEngineValidationError('INVALID_DOUGH_SPEC', 'Cada harina debe tener un ingredient_id.');
+  }
 
   const components: RecipeComponent[] = [];
+  const flourBreakdown: Array<{ ingredient_id: string; quantityG: number; index: number }> = [];
 
-  for (const f of spec.flours) {
+  for (const [index, f] of spec.flours.entries()) {
     const fraction = usesWeights
       ? (f.weight_kg ?? 0) / weightSum
       : (f.share_pct ?? 0) / 100;
     const grams = flourTotalG * fraction;
+    flourBreakdown.push({ ingredient_id: f.ingredient_id, quantityG: grams, index });
     if (grams > 0) {
       components.push({
         component_type: 'ingredient',
@@ -323,6 +413,17 @@ export function expandBakersDoughSpec(spec: BakersDoughSpec): {
     }
   }
 
+  const bigaFlourG = flourTotalG * (bigaFlourPct / 100);
+  const bigaWaterG = bigaFlourG * (bigaWaterPct / 100);
+  const bigaYeastG = bigaFlourG * (bigaYeastPct / 100);
+  const poolishFlourG = flourTotalG * (poolishFlourPct / 100);
+  const poolishWaterG = poolishFlourG * (poolishWaterPct / 100);
+  const poolishYeastG = poolishFlourG * (poolishYeastPct / 100);
+  const directYeastG = flourTotalG * (directYeastPct / 100);
+  const saltG = flourTotalG * (saltPct / 100);
+  const sugarG = flourTotalG * (sugarPct / 100);
+  const oilG = flourTotalG * (oilPct / 100);
+
   if (waterTotalG > 0 && spec.water_ingredient_id) {
     components.push({
       component_type: 'ingredient',
@@ -332,23 +433,55 @@ export function expandBakersDoughSpec(spec: BakersDoughSpec): {
     });
   }
 
-  // Levadura (biga + poolish + directa) contada una sola vez sobre la harina correspondiente
-  const yeastId =
-    spec.biga?.yeast_ingredient_id ??
-    spec.poolish?.yeast_ingredient_id ??
-    spec.yeast_ingredient_id;
-  const totalYeastG = flourTotalG * (totalYeastPctOnTotalFlour / 100);
-  if (totalYeastG > 0 && yeastId) {
+  // Cada prefermento conserva su propio insumo de levadura: no mezclar costos
+  // cuando biga, poolish y levadura directa usan productos diferentes.
+  const yeastComponents: Array<{ ingredientId: string | undefined; quantityG: number; source: string }> = [
+    {
+      ingredientId: spec.biga?.yeast_ingredient_id,
+      quantityG: bigaYeastG,
+      source: 'biga',
+    },
+    {
+      ingredientId: spec.poolish?.yeast_ingredient_id,
+      quantityG: poolishYeastG,
+      source: 'poolish',
+    },
+    {
+      ingredientId: spec.yeast_ingredient_id,
+      quantityG: directYeastG,
+      source: 'direct_yeast',
+    },
+  ];
+
+  for (const yeast of yeastComponents) {
+    if (yeast.quantityG <= 0) continue;
+    if (!yeast.ingredientId || !yeast.ingredientId.trim()) {
+      throw new CostEngineValidationError(
+        'INVALID_DOUGH_SPEC',
+        `Falta el ingrediente de levadura para "${yeast.source}" aunque su porcentaje es mayor a cero.`,
+        { source: yeast.source, quantity_g: yeast.quantityG }
+      );
+    }
     components.push({
       component_type: 'ingredient',
-      ingredient_id: yeastId,
-      quantity: totalYeastG,
+      ingredient_id: yeast.ingredientId,
+      quantity: yeast.quantityG,
       unit: 'g',
     });
   }
 
+  // Los porcentajes positivos deben tener un insumo asignado; nunca omitir un costo silenciosamente.
+  if (saltPct > 0 && !spec.salt_ingredient_id?.trim()) {
+    throw new CostEngineValidationError('INVALID_DOUGH_SPEC', 'Falta asignar el insumo de sal.');
+  }
+  if (sugarPct > 0 && !spec.sugar_ingredient_id?.trim()) {
+    throw new CostEngineValidationError('INVALID_DOUGH_SPEC', 'Falta asignar el insumo de azúcar.');
+  }
+  if (oilPct > 0 && !spec.oil_ingredient_id?.trim()) {
+    throw new CostEngineValidationError('INVALID_DOUGH_SPEC', 'Falta asignar el insumo de aceite.');
+  }
+
   // Sal
-  const saltG = flourTotalG * (saltPct / 100);
   if (saltG > 0 && spec.salt_ingredient_id) {
     components.push({
       component_type: 'ingredient',
@@ -359,7 +492,6 @@ export function expandBakersDoughSpec(spec: BakersDoughSpec): {
   }
 
   // Azúcar
-  const sugarG = flourTotalG * (sugarPct / 100);
   if (sugarG > 0 && spec.sugar_ingredient_id) {
     components.push({
       component_type: 'ingredient',
@@ -370,7 +502,6 @@ export function expandBakersDoughSpec(spec: BakersDoughSpec): {
   }
 
   // Aceite
-  const oilG = flourTotalG * (oilPct / 100);
   if (oilG > 0 && spec.oil_ingredient_id) {
     components.push({
       component_type: 'ingredient',
@@ -385,6 +516,76 @@ export function expandBakersDoughSpec(spec: BakersDoughSpec): {
     yieldQuantityG,
     flourTotalG,
     waterTotalG,
+    flourBreakdown,
+    biga: {
+      flourG: bigaFlourG,
+      waterG: bigaWaterG,
+      yeastG: bigaYeastG,
+      totalG: bigaFlourG + bigaWaterG + bigaYeastG,
+    },
+    poolish: {
+      flourG: poolishFlourG,
+      waterG: poolishWaterG,
+      yeastG: poolishYeastG,
+      totalG: poolishFlourG + poolishWaterG + poolishYeastG,
+    },
+    final: {
+      flourG: flourTotalG - bigaFlourG - poolishFlourG,
+      waterG: waterTotalG - bigaWaterG - poolishWaterG,
+    },
+    direct: { yeastG: directYeastG, saltG, sugarG, oilG },
+  };
+}
+
+/**
+ * Expande la fórmula operativa de fainá en componentes explícitos.
+ * Los parámetros de receta histórica viven en Cost Engine, no en controladores/UI.
+ */
+export function expandFainaSpec(spec: FainaSpec): {
+  components: RecipeComponent[];
+  chickpeaFlourG: number;
+  waterG: number;
+  saltG: number;
+  oilMl: number;
+  totalWeightG: number;
+} {
+  if (!Number.isFinite(spec.units_count) || spec.units_count <= 0) {
+    throw new CostEngineValidationError('INVALID_DOUGH_SPEC', 'La cantidad de moldes de fainá debe ser mayor a cero.');
+  }
+  for (const [field, value] of [
+    ['chickpea_flour_ingredient_id', spec.chickpea_flour_ingredient_id],
+    ['salt_ingredient_id', spec.salt_ingredient_id],
+    ['oil_ingredient_id', spec.oil_ingredient_id],
+  ] as Array<[string, string]>) {
+    if (!value || !value.trim()) {
+      throw new CostEngineValidationError('INVALID_DOUGH_SPEC', `Falta asignar el insumo "${field}" para fainá.`);
+    }
+  }
+
+  const chickpeaFlourG = spec.units_count * 185;
+  const waterG = chickpeaFlourG * 2.25;
+  const saltG = chickpeaFlourG * 0.05;
+  const oilMl = spec.units_count * 12;
+  const components: RecipeComponent[] = [
+    { component_type: 'ingredient', ingredient_id: spec.chickpea_flour_ingredient_id, quantity: chickpeaFlourG, unit: 'g' },
+    { component_type: 'ingredient', ingredient_id: spec.salt_ingredient_id, quantity: saltG, unit: 'g' },
+    { component_type: 'ingredient', ingredient_id: spec.oil_ingredient_id, quantity: oilMl, unit: 'ml' },
+  ];
+  if (spec.water_ingredient_id) {
+    components.push({
+      component_type: 'ingredient',
+      ingredient_id: spec.water_ingredient_id,
+      quantity: waterG,
+      unit: 'g',
+    });
+  }
+  return {
+    components,
+    chickpeaFlourG,
+    waterG,
+    saltG,
+    oilMl,
+    totalWeightG: chickpeaFlourG + waterG,
   };
 }
 
@@ -853,4 +1054,110 @@ export function createCostSnapshot(
   );
 
   return Object.freeze(snapshot);
+}
+
+/**
+ * Simula cambios porcentuales de costos y precios sobre un conjunto de recetas.
+ * Los productos incompletos permanecen incompletos: nunca se sustituyen costos faltantes por cero.
+ */
+export function calculatePortfolioScenario(input: PortfolioScenarioInput): PortfolioScenarioResult {
+  const roundingIncrement = input.rounding_increment ?? 100;
+  const targetFoodCostPct = input.target_food_cost_pct ?? 30;
+  if (
+    !Number.isFinite(input.cost_delta_pct) ||
+    !Number.isFinite(input.price_delta_pct) ||
+    input.cost_delta_pct <= -100 ||
+    input.price_delta_pct <= -100 ||
+    !Number.isFinite(roundingIncrement) ||
+    roundingIncrement <= 0
+  ) {
+    throw new CostEngineValidationError(
+      'INVALID_PRICING_PARAMETERS',
+      'Las variaciones deben ser finitas y mayores a -100%; el redondeo debe ser positivo.'
+    );
+  }
+
+  const rows: PortfolioScenarioRow[] = input.items.map((item) => {
+    if (item.status !== 'complete' || item.unit_cost === null || !Number.isFinite(item.unit_cost) || item.unit_cost <= 0) {
+      return {
+        id: item.id,
+        name: item.name,
+        status: 'incomplete',
+        current_cost: null,
+        simulated_cost: null,
+        current_price: item.selling_price !== null && item.selling_price > 0 ? item.selling_price : null,
+        simulated_price: null,
+        current_food_cost_pct: null,
+        simulated_food_cost_pct: null,
+        current_margin: null,
+        simulated_margin: null,
+      };
+    }
+
+    const currentPrice = item.selling_price !== null && Number.isFinite(item.selling_price) && item.selling_price > 0
+      ? item.selling_price
+      : null;
+    const simulatedCost = item.unit_cost * (1 + input.cost_delta_pct / 100);
+    const proposedSimulatedPrice = currentPrice === null
+      ? null
+      : Math.round((currentPrice * (1 + input.price_delta_pct / 100)) / roundingIncrement) * roundingIncrement;
+    const simulatedPrice = proposedSimulatedPrice !== null && proposedSimulatedPrice > 0
+      ? proposedSimulatedPrice
+      : null;
+
+    const currentScenario = calculatePricingScenario({
+      unit_cost: item.unit_cost,
+      status: 'complete',
+      currency: 'ARS',
+      target_food_cost_pct: targetFoodCostPct,
+      rounding_increment: roundingIncrement,
+      rounding_mode: 'nearest',
+      ...(currentPrice !== null ? { selling_price: currentPrice } : {}),
+    });
+    const simulatedScenario = calculatePricingScenario({
+      unit_cost: simulatedCost,
+      status: 'complete',
+      currency: 'ARS',
+      target_food_cost_pct: targetFoodCostPct,
+      rounding_increment: roundingIncrement,
+      rounding_mode: 'nearest',
+      ...(simulatedPrice !== null ? { selling_price: simulatedPrice } : {}),
+    });
+
+    return {
+      id: item.id,
+      name: item.name,
+      status: 'complete',
+      current_cost: item.unit_cost,
+      simulated_cost: simulatedCost,
+      current_price: currentPrice,
+      simulated_price: simulatedPrice,
+      current_food_cost_pct: currentScenario.food_cost_pct,
+      simulated_food_cost_pct: simulatedPrice === null ? null : simulatedScenario.food_cost_pct,
+      current_margin: currentPrice === null || currentScenario.gross_profit === null ? null : Number(currentScenario.gross_profit),
+      simulated_margin: simulatedPrice === null || simulatedScenario.gross_profit === null ? null : Number(simulatedScenario.gross_profit),
+    };
+  });
+
+  const pricedRows = rows.filter((row) => row.status === 'complete' && row.current_price !== null && row.simulated_price !== null);
+  const currentRevenue = pricedRows.reduce((sum, row) => sum + (row.current_price ?? 0), 0);
+  const simulatedRevenue = pricedRows.reduce((sum, row) => sum + (row.simulated_price ?? 0), 0);
+  const currentCost = pricedRows.reduce((sum, row) => sum + (row.current_cost ?? 0), 0);
+  const simulatedCost = pricedRows.reduce((sum, row) => sum + (row.simulated_cost ?? 0), 0);
+
+  return {
+    rows,
+    complete_items: rows.filter((row) => row.status === 'complete').length,
+    incomplete_items: rows.filter((row) => row.status === 'incomplete').length,
+    current_revenue: currentRevenue,
+    simulated_revenue: simulatedRevenue,
+    current_cost: currentCost,
+    simulated_cost: simulatedCost,
+    current_food_cost_pct: currentRevenue > 0 ? (currentCost / currentRevenue) * 100 : null,
+    simulated_food_cost_pct: simulatedRevenue > 0 ? (simulatedCost / simulatedRevenue) * 100 : null,
+    current_gross_profit: currentRevenue - currentCost,
+    simulated_gross_profit: simulatedRevenue - simulatedCost,
+    current_margin_pct: currentRevenue > 0 ? ((currentRevenue - currentCost) / currentRevenue) * 100 : null,
+    simulated_margin_pct: simulatedRevenue > 0 ? ((simulatedRevenue - simulatedCost) / simulatedRevenue) * 100 : null,
+  };
 }

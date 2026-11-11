@@ -309,7 +309,7 @@ export function ProductsPage() {
       key: 'cost',
       header: 'Costo',
       align: 'right',
-      render: (p) => (p.cost != null ? formatARS(p.cost) : '—'),
+      render: (p) => (p.cost_is_current === 1 && p.cost != null ? formatARS(p.cost) : 'Desactualizado'),
     },
     {
       key: 'actions',

@@ -74,7 +74,7 @@ export function ItemsReportPage() {
       it.category_name,
       it.units,
       it.gross_sales,
-      it.cost,
+      it.cost ?? '',
       it.margin_pct !== null ? `${it.margin_pct}%` : '',
       `${it.share_pct}%`,
     ]);
@@ -215,7 +215,7 @@ export function ItemsReportPage() {
             </div>
           </div>
           <div style={card}>
-            <div style={{ color: '#64748b', fontSize: '.82rem' }}>Margen promedio catálogo</div>
+            <div style={{ color: '#64748b', fontSize: '.82rem' }}>Margen promedio (costos vigentes)</div>
             <div style={{ fontSize: '1.6rem', fontWeight: 800 }}>
               {summary.margin_pct !== null ? `${summary.margin_pct}%` : '—'}
             </div>
@@ -274,7 +274,7 @@ export function ItemsReportPage() {
                       {formatARS(it.gross_sales)}
                     </td>
                     <td style={{ padding: '0.6rem 0.5rem', textAlign: 'right', color: '#64748b' }}>
-                      {it.cost > 0 ? formatARS(it.cost) : '—'}
+                      {it.cost !== null ? formatARS(it.cost) : 'Desactualizado'}
                     </td>
                     <td
                       style={{

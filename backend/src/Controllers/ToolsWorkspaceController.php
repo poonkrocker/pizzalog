@@ -7,16 +7,21 @@ use Pizzalog\Core\Response;
 
 class ToolsWorkspaceController
 {
+    /**
+     * GET /tools/workspace
+     * Devuelve el espacio de trabajo del usuario autenticado junto con su versión de concurrencia (updated_at).
+     */
     public function show(Request $req): void
     {
+        $accountId = (int) $req->auth['tools_account_id'];
         $stmt = Database::pdo()->prepare(
-            'SELECT workspace_json, schema_version
+            'SELECT workspace_json, schema_version, updated_at
                FROM tools_workspaces
               WHERE account_id = ?
               LIMIT 1'
         );
-        $stmt->execute([(int) $req->auth['tools_account_id']]);
-        $row = $stmt->fetch();
+        $stmt->execute([$accountId]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
 
         $workspace = null;
         if ($row) {
@@ -35,12 +40,20 @@ class ToolsWorkspaceController
         Response::ok([
             'workspace' => $workspace,
             'schema_version' => $row ? (int) $row['schema_version'] : 1,
+            'updated_at' => $row ? (string) $row['updated_at'] : null,
         ]);
     }
 
+    /**
+     * PUT /tools/workspace
+     * Guarda el espacio de trabajo con control de concurrencia optimista y bloqueo de fila (SELECT ... FOR UPDATE).
+     */
     public function save(Request $req): void
     {
+        $accountId = (int) $req->auth['tools_account_id'];
         $workspace = $req->input('workspace');
+        $expectedUpdatedAt = $req->input('updated_at');
+
         if (
             !is_array($workspace)
             || !is_array($workspace['catalog'] ?? null)
@@ -59,13 +72,57 @@ class ToolsWorkspaceController
             Response::error('El espacio de trabajo supera el tamaño permitido (5 MB)', 413);
         }
 
-        $stmt = Database::pdo()->prepare(
-            'INSERT INTO tools_workspaces (account_id, workspace_json, schema_version)
-             VALUES (?, ?, 1)
-             ON DUPLICATE KEY UPDATE workspace_json = VALUES(workspace_json), schema_version = 1'
-        );
-        $stmt->execute([(int) $req->auth['tools_account_id'], $json]);
+        $pdo = Database::pdo();
+        $pdo->beginTransaction();
 
-        Response::ok(['saved' => true]);
+        try {
+            // Bloqueo de fila para concurrencia optimista
+            $checkStmt = $pdo->prepare(
+                'SELECT id, updated_at FROM tools_workspaces WHERE account_id = ? FOR UPDATE'
+            );
+            $checkStmt->execute([$accountId]);
+            $existing = $checkStmt->fetch(\PDO::FETCH_ASSOC);
+
+            if ($existing) {
+                $currentUpdatedAt = (string) $existing['updated_at'];
+                // Control optimista: si el cliente envió un updated_at previo y ya cambió en la base de datos
+                if ($expectedUpdatedAt !== null && $expectedUpdatedAt !== '' && $expectedUpdatedAt !== $currentUpdatedAt) {
+                    $pdo->rollBack();
+                    Response::error('El espacio de trabajo fue modificado en otra sesión o pestaña. Recargá los cambios antes de guardar.', 409, [
+                        'current_updated_at' => $currentUpdatedAt,
+                    ]);
+                }
+
+                $updateStmt = $pdo->prepare(
+                    'UPDATE tools_workspaces
+                        SET workspace_json = ?, schema_version = 1, updated_at = NOW()
+                      WHERE account_id = ?'
+                );
+                $updateStmt->execute([$json, $accountId]);
+            } else {
+                $insertStmt = $pdo->prepare(
+                    'INSERT INTO tools_workspaces (account_id, workspace_json, schema_version, updated_at)
+                     VALUES (?, ?, 1, NOW())'
+                );
+                $insertStmt->execute([$accountId, $json]);
+            }
+
+            // Obtener el updated_at actualizado
+            $refreshStmt = $pdo->prepare('SELECT updated_at FROM tools_workspaces WHERE account_id = ? LIMIT 1');
+            $refreshStmt->execute([$accountId]);
+            $newUpdatedAt = (string) $refreshStmt->fetchColumn();
+
+            $pdo->commit();
+
+            Response::ok([
+                'saved' => true,
+                'updated_at' => $newUpdatedAt,
+            ]);
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            Response::error('No se pudo guardar el espacio de trabajo: ' . $e->getMessage(), 500);
+        }
     }
 }

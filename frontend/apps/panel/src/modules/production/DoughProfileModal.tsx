@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
-import type { DoughProfile, DoughProfileInput } from '@pizzalog/shared';
+import { useQuery } from '@tanstack/react-query';
+import type { DoughIngredientMap, DoughProfile, DoughProfileInput } from '@pizzalog/shared';
 import { Button, Field, Input, Modal, Select, Textarea } from '@/ui';
 import { useCreateDoughProfile, useDeleteDoughProfile, useUpdateDoughProfile } from './hooks';
+import { useApi } from '@/lib/auth';
 
 export function DoughProfileModal({
   open,
@@ -15,6 +17,9 @@ export function DoughProfileModal({
   onSaved?: (saved: DoughProfile) => void;
 }) {
   const isEditing = Boolean(profile);
+  const api = useApi();
+  const suppliesQuery = useQuery({ queryKey: ['production', 'recipe-studio'], queryFn: () => api.production.recipeStudio() });
+  const supplies = suppliesQuery.data?.supplies ?? [];
   const createMutation = useCreateDoughProfile();
   const updateMutation = useUpdateDoughProfile();
   const deleteMutation = useDeleteDoughProfile();
@@ -43,7 +48,7 @@ export function DoughProfileModal({
   const [flourSemolaPct, setFlourSemolaPct] = useState<number>(6.08);
   const [flourIntegralPct, setFlourIntegralPct] = useState<number>(12.17);
 
-  const [costPerKg, setCostPerKg] = useState<number>(932.3);
+  const [ingredientMap, setIngredientMap] = useState<DoughIngredientMap>({});
   const [notes, setNotes] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -78,7 +83,7 @@ export function DoughProfileModal({
       setFlourSemolaPct(profile.flour_semola_pct);
       setFlourIntegralPct(profile.flour_integral_pct);
 
-      setCostPerKg(profile.cost_per_kg);
+      setIngredientMap(profile.ingredient_map ?? {});
       setNotes(profile.notes ?? '');
     } else {
       // Defaults para nueva masa (directo por defecto o editable)
@@ -99,7 +104,7 @@ export function DoughProfileModal({
       setFlourWhitePct(100);
       setFlourSemolaPct(0);
       setFlourIntegralPct(0);
-      setCostPerKg(920);
+      setIngredientMap({});
       setNotes('');
     }
     setError(null);
@@ -114,9 +119,10 @@ export function DoughProfileModal({
       return;
     }
 
+    const isFaina = /fain[aá]/i.test(name.trim());
     const flourSum = flourWhitePct + flourSemolaPct + flourIntegralPct;
-    if (Math.abs(flourSum - 100) > 1.0) {
-      setError(`La suma de harinas debe ser 100%. Actualmente suma ${flourSum.toFixed(1)}%.`);
+    if (!isFaina && Math.abs(flourSum - 100) > 0.01) {
+      setError(`La suma de harinas debe ser exactamente 100%. Actualmente suma ${flourSum.toFixed(2)}%.`);
       return;
     }
 
@@ -137,7 +143,7 @@ export function DoughProfileModal({
       flour_white_pct: Number(flourWhitePct),
       flour_integral_pct: Number(flourIntegralPct),
       flour_semola_pct: Number(flourSemolaPct),
-      cost_per_kg: Number(costPerKg) || 932.3,
+      ingredient_map: ingredientMap,
       notes: notes.trim() || null,
     };
 
@@ -428,6 +434,57 @@ export function DoughProfileModal({
               />
             </Field>
           </div>
+        </div>
+
+        <div style={{ background: '#f8fafc', padding: '0.85rem 1rem', borderRadius: 6, border: '1px solid #e2e8f0' }}>
+          <div style={{ fontSize: '0.9rem', fontWeight: 700, marginBottom: '.35rem', color: '#1e293b' }}>
+            Insumos vinculados al Cost Engine
+          </div>
+          <p style={{ margin: '0 0 .75rem', color: '#64748b', fontSize: '.8rem' }}>
+            Asigná los insumos reales del catálogo. Si falta una asignación o un precio válido, el cálculo de costo se mostrará incompleto; no se usarán precios estimados.
+          </p>
+          {suppliesQuery.isLoading ? <div style={{ color: '#64748b', fontSize: '.82rem' }}>Cargando insumos...</div> : null}
+          {(() => {
+            const isFaina = /fain[aá]/i.test(name);
+            const fields: Array<{ key: keyof DoughIngredientMap; label: string }> = isFaina
+              ? [
+                  { key: 'chickpea_flour_id', label: 'Harina de garbanzos' },
+                  { key: 'salt_id', label: 'Sal' },
+                  { key: 'oil_id', label: 'Aceite (precio por volumen)' },
+                  { key: 'water_id', label: 'Agua (opcional; unidad de masa)' },
+                ]
+              : [
+                  ...(flourWhitePct > 0 ? [{ key: 'flour_white_id' as const, label: 'Harina blanca / 0000' }] : []),
+                  ...(flourSemolaPct > 0 ? [{ key: 'flour_semola_id' as const, label: 'Sémola rimacinata' }] : []),
+                  ...(flourIntegralPct > 0 ? [{ key: 'flour_integral_id' as const, label: 'Harina integral' }] : []),
+                  ...(method === 'biga' && bigaPct > 0 ? [{ key: 'biga_yeast_id' as const, label: 'Levadura de biga' }] : []),
+                  ...(method === 'poolish' && poolishPct > 0 ? [{ key: 'poolish_yeast_id' as const, label: 'Levadura de poolish' }] : []),
+                  ...(method === 'direct' && directYeastPct > 0 ? [{ key: 'direct_yeast_id' as const, label: 'Levadura directa' }] : []),
+                  ...(saltPct > 0 ? [{ key: 'salt_id' as const, label: 'Sal' }] : []),
+                  ...(sugarPct > 0 ? [{ key: 'sugar_id' as const, label: 'Azúcar' }] : []),
+                  ...(oilPct > 0 ? [{ key: 'oil_id' as const, label: 'Aceite (masa o volumen)' }] : []),
+                ];
+            return (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '.65rem' }}>
+                {fields.map((field) => (
+                  <Field key={field.key} label={field.label}>
+                    <Select
+                      value={ingredientMap[field.key] ?? ''}
+                      onChange={(event) => setIngredientMap((previous) => ({
+                        ...previous,
+                        [field.key]: event.target.value ? Number(event.target.value) : null,
+                      }))}
+                    >
+                      <option value="">Sin asignar</option>
+                      {supplies.map((supply) => (
+                        <option key={supply.id} value={supply.id}>{supply.name} · {supply.unit}</option>
+                      ))}
+                    </Select>
+                  </Field>
+                ))}
+              </div>
+            );
+          })()}
         </div>
 
         <Field label="Notas / Instrucciones de Amasado">

@@ -39,6 +39,10 @@ export interface Product {
   description: string | null;
   price: number;
   cost: number | null;
+  cost_is_current?: number;
+  cost_engine_version?: string | null;
+  cost_input_hash?: string | null;
+  cost_calculated_at?: string | null;
   image_url: string | null;
   track_stock: number;
   stock?: number;
@@ -611,6 +615,20 @@ export interface AnalyticsWinningCombinations {
 
 // --- Producción / Calculadora de Masas & Costos ---------------------------
 
+export interface DoughIngredientMap {
+  flour_white_id?: number | null;
+  flour_integral_id?: number | null;
+  flour_semola_id?: number | null;
+  biga_yeast_id?: number | null;
+  poolish_yeast_id?: number | null;
+  direct_yeast_id?: number | null;
+  salt_id?: number | null;
+  sugar_id?: number | null;
+  oil_id?: number | null;
+  chickpea_flour_id?: number | null;
+  water_id?: number | null;
+}
+
 export interface DoughProfile {
   id: number;
   business_id: number;
@@ -631,6 +649,7 @@ export interface DoughProfile {
   flour_integral_pct: number;
   flour_semola_pct: number;
   cost_per_kg: number;
+  ingredient_map?: DoughIngredientMap | null;
   notes: string | null;
 }
 
@@ -669,7 +688,7 @@ export interface DoughCalculation {
     salt_g: number;
     direct_yeast_g: number;
     sugar_g: number;
-    oil_cc: number;
+    oil_g: number;
   };
   total?: {
     chickpea_flour_kg: number;
@@ -689,9 +708,10 @@ export interface DoughCalculation {
     oil_liters?: number;
   };
   cost: {
-    total: number;
-    per_kg: number;
-    per_unit: number;
+    total: number | null;
+    per_kg: number | null;
+    per_unit: number | null;
+    status: 'complete' | 'incomplete';
   };
   whatsapp_text: string;
 }
@@ -701,10 +721,10 @@ export interface RecipeIngredient {
   category: string;
   quantity: number;
   unit: string;
-  unit_cost: number;
+  unit_cost: number | null;
   cost_unit?: string;
   unit_mismatch?: boolean;
-  total_cost: number;
+  total_cost: number | null;
 }
 
 export interface CostMarginProduct {
@@ -735,10 +755,11 @@ export interface SupplyItem {
   name: string;
   category: string;
   unit: string;
-  cost: number;
+  cost: number | null;
 }
 
 export interface DoughProfileInput {
+  ingredient_map?: DoughIngredientMap | null;
   name: string;
   unit_weight_grams: number;
   hydration_pct: number;
@@ -812,6 +833,8 @@ export interface SaveStudioRecipeInput {
   price: number;
   target_food_cost_pct: number;
   components: StudioRecipeComponentInput[];
+  /** Cost Engine result; backend only persists this projection and never recalculates it. */
+  cost_snapshots?: Array<{ linked_product_id: number; unit_cost: number; engine_version: string; input_snapshot_hash: string }>;
 }
 export interface StudioRecipeComponent {
   component_type: StudioComponentType;
@@ -819,10 +842,10 @@ export interface StudioRecipeComponent {
   name: string;
   quantity: number;
   unit: string;
-  unit_cost: number;
+  unit_cost: number | null;
   cost_unit?: string;
   unit_mismatch?: boolean;
-  total_cost: number;
+  total_cost: number | null;
 }
 export interface StudioRecipe {
   id: number;
@@ -833,12 +856,12 @@ export interface StudioRecipe {
   yield_unit: string;
   price: number;
   target_food_cost_pct: number;
-  batch_cost: number;
-  unit_cost: number;
+  batch_cost: number | null;
+  unit_cost: number | null;
   cost_unit?: string;
   unit_mismatch?: boolean;
-  suggested_price: number;
-  food_cost_pct: number;
+  suggested_price: number | null;
+  food_cost_pct: number | null;
   warnings?: string[];
   is_incomplete?: boolean;
   components: StudioRecipeComponent[];

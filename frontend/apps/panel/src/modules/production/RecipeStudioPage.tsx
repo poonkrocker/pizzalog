@@ -11,13 +11,20 @@ import {
 } from '@pizzalog/shared';
 import {
   areUnitsCompatible,
-  convertQuantity,
   calculatePricingScenario,
+  calculatePortfolioScenario,
+  CostEngine,
+  ENGINE_VERSION,
+  type CostCatalog,
+  type Dimension,
+  type Recipe as EngineRecipe,
+  type UnitCode,
+  type CostResult,
 } from '@pizzalog/cost-engine';
 import { useApi } from '@/lib/auth';
 import { Field, Input, Loading, Modal } from '@/ui';
 
-type View = 'recipes' | 'costs';
+type View = 'recipes' | 'costs' | 'scenario';
 type ComponentRow = StudioRecipeComponentInput;
 type CostRow = BusinessCostInput;
 
@@ -57,9 +64,28 @@ const secondaryButton: React.CSSProperties = {
   background: 'var(--c-surface, #fff)', color: 'var(--c-text, #222)', fontWeight: 600, cursor: 'pointer',
 };
 
-function safeConvertQuantity(quantity: number, from: string, to: string): number {
-  if (!areUnitsCompatible(from, to)) return 0;
-  return convertQuantity(quantity, from, to);
+const ENGINE_UNIT_ALIASES: Record<string, UnitCode> = {
+  kilo: 'kg', kilos: 'kg', gr: 'g', gramo: 'g', gramos: 'g',
+  lt: 'L', litro: 'L', litros: 'L', cc: 'cc', ml: 'ml',
+  u: 'unit', un: 'unit', unidad: 'unit', unidades: 'unit',
+  docena: 'dozen',
+};
+const ENGINE_UNITS = new Set<UnitCode>([
+  'kg', 'g', 'mg', 'lb', 'oz', 'L', 'l', 'ml', 'cc',
+  'fl_oz_us', 'gal_us', 'unit', 'u', 'dozen', 'docena',
+]);
+
+function toEngineUnit(value: string): UnitCode | null {
+  const normalized = value.trim().toLowerCase();
+  const aliased = ENGINE_UNIT_ALIASES[normalized];
+  if (aliased) return aliased;
+  return ENGINE_UNITS.has(value.trim() as UnitCode) ? value.trim() as UnitCode : null;
+}
+
+function dimensionForEngineUnit(unit: UnitCode): Dimension {
+  if (['kg', 'g', 'mg', 'lb', 'oz'].includes(unit)) return 'mass';
+  if (['L', 'l', 'ml', 'cc', 'fl_oz_us', 'gal_us'].includes(unit)) return 'volume';
+  return 'count';
 }
 
 function freshComponent(): ComponentRow {
@@ -73,6 +99,8 @@ export function RecipeStudioPage() {
   const api = useApi();
   const qc = useQueryClient();
   const [view, setView] = useState<View>('recipes');
+  const [scenarioCostDelta, setScenarioCostDelta] = useState(10);
+  const [scenarioPriceDelta, setScenarioPriceDelta] = useState(15);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [recipeModalOpen, setRecipeModalOpen] = useState(false);
   const [recipeName, setRecipeName] = useState('');
@@ -96,10 +124,140 @@ export function RecipeStudioPage() {
     queryKey: ['production', 'business-costs'],
     queryFn: () => api.production.businessCosts(),
   });
-  const recipes = recipesQuery.data?.recipes ?? [];
+  const rawRecipes = recipesQuery.data?.recipes ?? [];
   const supplies = recipesQuery.data?.supplies ?? [];
   const products = recipesQuery.data?.products ?? [];
   const legacyUnimportedCount = recipesQuery.data?.legacy_unimported_count ?? 0;
+
+  const costEngineModel = useMemo(() => {
+    const ingredients = supplies.flatMap((supply) => {
+      const unit = toEngineUnit(supply.unit);
+      if (!unit) return [];
+      return [{
+        id: `supply_${supply.id}`,
+        name: supply.name,
+        base_dimension: dimensionForEngineUnit(unit),
+        base_unit: unit,
+        is_active: true,
+      }];
+    });
+    const purchase_prices = supplies.flatMap((supply) => {
+      const unit = toEngineUnit(supply.unit);
+      if (!unit || supply.cost === null || !Number.isFinite(supply.cost) || supply.cost <= 0) return [];
+      return [{
+        ingredient_id: `supply_${supply.id}`,
+        purchase_price: supply.cost,
+        currency: 'ARS',
+        pack_quantity: 1,
+        pack_unit: unit,
+        yield_pct: 100,
+      }];
+    });
+    const invalidRecipeIds = new Set<number>();
+    const engineRecipes: EngineRecipe[] = [];
+
+    for (const recipe of rawRecipes) {
+      const yieldUnit = toEngineUnit(recipe.yield_unit);
+      if (!yieldUnit) {
+        invalidRecipeIds.add(recipe.id);
+        continue;
+      }
+      const mappedComponents = [];
+      let invalid = false;
+      for (const component of recipe.components) {
+        const unit = toEngineUnit(component.unit);
+        if (!unit || !Number.isFinite(component.quantity) || component.quantity <= 0) {
+          invalid = true;
+          break;
+        }
+        if (component.component_type === 'supply') {
+          const supply = supplies.find((item) => item.id === component.component_id);
+          if (!supply || !toEngineUnit(supply.unit)) {
+            invalid = true;
+            break;
+          }
+          mappedComponents.push({
+            component_type: 'ingredient' as const,
+            ingredient_id: `supply_${component.component_id}`,
+            quantity: component.quantity,
+            unit,
+          });
+        } else {
+          mappedComponents.push({
+            component_type: 'subrecipe' as const,
+            recipe_id: String(component.component_id),
+            quantity: component.quantity,
+            unit,
+          });
+        }
+      }
+      if (invalid) {
+        invalidRecipeIds.add(recipe.id);
+        continue;
+      }
+      engineRecipes.push({
+        id: String(recipe.id),
+        name: recipe.name,
+        recipe_type: recipe.recipe_type,
+        yield_quantity: recipe.yield_quantity,
+        yield_unit: yieldUnit,
+        currency: 'ARS',
+        components: mappedComponents,
+      });
+    }
+
+    const catalog: CostCatalog = { ingredients, purchase_prices, recipes: engineRecipes };
+    return { catalog, engine: new CostEngine(catalog), invalidRecipeIds };
+  }, [rawRecipes, supplies]);
+
+  const recipes = useMemo(() => rawRecipes.map((recipe) => {
+    if (costEngineModel.invalidRecipeIds.has(recipe.id)) {
+      return {
+        ...recipe,
+        batch_cost: null,
+        unit_cost: null,
+        suggested_price: null,
+        food_cost_pct: null,
+        warnings: ['La receta contiene unidades no compatibles con el Cost Engine o componentes sin referencia válida.'],
+        is_incomplete: true,
+      };
+    }
+    try {
+      const result = costEngineModel.engine.calculateRecipeCost(String(recipe.id));
+      const pricing = result.status === 'complete' && result.raw_unit_cost !== null && recipe.recipe_type === 'product'
+        ? calculatePricingScenario({
+            unit_cost: result.raw_unit_cost,
+            status: result.status,
+            currency: 'ARS',
+            target_food_cost_pct: Math.max(1, Math.min(99, recipe.target_food_cost_pct)),
+            rounding_increment: 100,
+            rounding_mode: 'ceil',
+            ...(recipe.price > 0 ? { selling_price: recipe.price } : {}),
+          })
+        : null;
+      return {
+        ...recipe,
+        batch_cost: result.status === 'complete' ? result.raw_batch_cost : null,
+        unit_cost: result.status === 'complete' ? result.raw_unit_cost : null,
+        suggested_price: pricing?.raw_suggested_price ?? null,
+        food_cost_pct: pricing?.food_cost_pct ?? null,
+        warnings: result.warnings,
+        is_incomplete: result.status !== 'complete',
+      };
+    } catch (error) {
+      return {
+        ...recipe,
+        batch_cost: null,
+        unit_cost: null,
+        suggested_price: null,
+        food_cost_pct: null,
+        warnings: [error instanceof Error ? error.message : 'No se pudo calcular esta receta.'],
+        is_incomplete: true,
+      };
+    }
+  }), [rawRecipes, costEngineModel]);
+
+
 
   const importLegacyMutation = useMutation({
     mutationFn: () => api.production.importLegacyRecipes(),
@@ -154,22 +312,62 @@ export function RecipeStudioPage() {
     setRecipeModalOpen(true);
   }
 
-  const componentCostMap = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const s of supplies) map.set(`supply:${s.id}`, s.cost);
-    for (const r of recipes) map.set(`recipe:${r.id}`, r.unit_cost);
-    return map;
-  }, [supplies, recipes]);
+  const draftEngineContext = useMemo<{
+    engine: CostEngine;
+    recipeId: string;
+    result: CostResult;
+  } | null>(() => {
+    const yieldUnitCode = toEngineUnit(yieldUnit);
+    if (!yieldUnitCode) return null;
+    const draftRecipeId = editingId ? String(editingId) : '__draft_recipe__';
+    const mappedComponents = [];
+    for (const component of components) {
+      const unit = toEngineUnit(component.unit);
+      if (!unit || component.quantity <= 0) return null;
+      if (component.component_type === 'supply') {
+        const supply = supplies.find((item) => item.id === component.component_id);
+        if (!supply || !toEngineUnit(supply.unit)) return null;
+        mappedComponents.push({
+          component_type: 'ingredient' as const,
+          ingredient_id: `supply_${component.component_id}`,
+          quantity: component.quantity,
+          unit,
+        });
+      } else {
+        mappedComponents.push({
+          component_type: 'subrecipe' as const,
+          recipe_id: String(component.component_id),
+          quantity: component.quantity,
+          unit,
+        });
+      }
+    }
+    const draft: EngineRecipe = {
+      id: draftRecipeId,
+      name: recipeName || 'Receta en edición',
+      recipe_type: recipeType,
+      yield_quantity: Math.max(0.0001, yieldQuantity),
+      yield_unit: yieldUnitCode,
+      currency: 'ARS',
+      components: mappedComponents,
+    };
+    const recipesWithoutDraft = costEngineModel.catalog.recipes.filter((recipe) => recipe.id !== draftRecipeId);
+    try {
+      const engine = new CostEngine({
+        ...costEngineModel.catalog,
+        recipes: [...recipesWithoutDraft, draft],
+      });
+      return { engine, recipeId: draftRecipeId, result: engine.calculateRecipeCost(draftRecipeId) };
+    } catch {
+      return null;
+    }
+  }, [costEngineModel, components, editingId, recipeName, recipeType, yieldQuantity, yieldUnit, supplies]);
 
-  const computedBatchCost = components.reduce((sum, c) => {
-    const selectedSupply = c.component_type === 'supply' ? supplies.find((s) => s.id === c.component_id) : null;
-    const selectedRecipe = c.component_type === 'recipe' ? recipes.find((r) => r.id === c.component_id) : null;
-    const costUnit = selectedSupply?.unit ?? selectedRecipe?.yield_unit ?? c.unit;
-    const quantity = safeConvertQuantity(Math.max(0, c.quantity || 0), c.unit, costUnit);
-    return sum + quantity * (componentCostMap.get(`${c.component_type}:${c.component_id}`) ?? 0);
-  }, 0);
-  const computedUnitCost = computedBatchCost / Math.max(0.0001, yieldQuantity);
-  const pricingScenario = recipeType === 'product' && computedUnitCost > 0
+  const draftCostResult = draftEngineContext?.result ?? null;
+
+  const computedBatchCost = draftCostResult?.status === 'complete' ? draftCostResult.raw_batch_cost : null;
+  const computedUnitCost = draftCostResult?.status === 'complete' ? draftCostResult.raw_unit_cost : null;
+  const pricingScenario = recipeType === 'product' && computedUnitCost !== null
     ? calculatePricingScenario({
         unit_cost: computedUnitCost,
         status: 'complete',
@@ -180,8 +378,24 @@ export function RecipeStudioPage() {
         ...(price > 0 ? { selling_price: price } : {}),
       })
     : null;
-  const suggestedPrice = pricingScenario?.raw_suggested_price ?? 0;
-  const foodCost = pricingScenario?.food_cost_pct ?? 0;
+  const suggestedPrice = pricingScenario?.raw_suggested_price ?? null;
+  const foodCost = pricingScenario?.food_cost_pct ?? null;
+
+  const portfolioScenario = useMemo(() => calculatePortfolioScenario({
+    items: recipes
+      .filter((recipe) => recipe.recipe_type === 'product')
+      .map((recipe) => ({
+        id: String(recipe.id),
+        name: recipe.name,
+        unit_cost: recipe.unit_cost,
+        status: recipe.is_incomplete ? 'incomplete' as const : 'complete' as const,
+        selling_price: recipe.price > 0 ? recipe.price : null,
+      })),
+    cost_delta_pct: scenarioCostDelta,
+    price_delta_pct: scenarioPriceDelta,
+    rounding_increment: 100,
+    target_food_cost_pct: 30,
+  }), [recipes, scenarioCostDelta, scenarioPriceDelta]);
 
   const monthlyTotal = costsQuery.data?.monthly_total ?? 0;
   const enteredMonthly = costItems.reduce((sum, item) => {
@@ -218,6 +432,10 @@ export function RecipeStudioPage() {
   function submitRecipe() {
     setRecipeError('');
     if (!recipeName.trim()) { setRecipeError('Ingresá un nombre para la receta.'); return; }
+    if (!toEngineUnit(yieldUnit)) {
+      setRecipeError(`La unidad de rendimiento '${yieldUnit}' no está soportada por el Cost Engine. Usá una unidad estándar.`);
+      return;
+    }
     const validComponents = components.filter((c) => c.component_id > 0 && c.quantity > 0);
     if (!validComponents.length) {
       setRecipeError('Agregá al menos un ingrediente o una subreceta con cantidad mayor que cero.'); return;
@@ -227,11 +445,40 @@ export function RecipeStudioPage() {
       const selectedRecipe = c.component_type === 'recipe' ? recipes.find((r) => r.id === c.component_id) : null;
       const costUnit = selectedSupply?.unit ?? selectedRecipe?.yield_unit ?? c.unit;
       const compName = selectedSupply?.name ?? selectedRecipe?.name ?? 'Componente';
-      if (!areUnitsCompatible(c.unit, costUnit)) {
+      const recipeUnitCode = toEngineUnit(c.unit);
+      const costUnitCode = toEngineUnit(costUnit);
+      if (!recipeUnitCode || !costUnitCode) {
+        setRecipeError(`La unidad de '${compName}' no está soportada por el Cost Engine: '${c.unit}' / '${costUnit}'. Usá una unidad estándar o definí una equivalencia explícita.`);
+        return;
+      }
+      if (!areUnitsCompatible(recipeUnitCode, costUnitCode)) {
         setRecipeError(`Unidad incompatible en '${compName}': usaste '${c.unit}' pero cotiza por '${costUnit}'.`);
         return;
       }
     }
+    const costByProduct = new Map<number, { unit_cost: number; engine_version: string; input_snapshot_hash: string }>();
+    if (draftEngineContext) {
+      for (const savedRecipe of rawRecipes) {
+        if (savedRecipe.recipe_type !== 'product') continue;
+        const productId = savedRecipe.id === editingId ? linkedProductId : (savedRecipe.linked_product_id ?? 0);
+        if (!productId) continue;
+        if (savedRecipe.id === editingId && recipeType !== 'product') continue;
+        try {
+          const result = draftEngineContext.engine.calculateRecipeCost(String(savedRecipe.id));
+          if (result.status === 'complete' && result.raw_unit_cost !== null) {
+            costByProduct.set(productId, { unit_cost: result.raw_unit_cost, engine_version: result.engine_version || ENGINE_VERSION, input_snapshot_hash: result.input_snapshot_hash });
+          }
+        } catch {
+          // Una receta incompleta no actualiza el costo almacenado del producto.
+        }
+      }
+      if (!editingId && recipeType === 'product' && linkedProductId > 0 &&
+          draftEngineContext.result.status === 'complete' && draftEngineContext.result.raw_unit_cost !== null) {
+        costByProduct.set(linkedProductId, { unit_cost: draftEngineContext.result.raw_unit_cost, engine_version: draftEngineContext.result.engine_version || ENGINE_VERSION, input_snapshot_hash: draftEngineContext.result.input_snapshot_hash });
+      }
+    }
+    const costSnapshots = Array.from(costByProduct, ([linked_product_id, snapshot]) => ({ linked_product_id, ...snapshot }));
+
     const body: SaveStudioRecipeInput = {
       ...(editingId ? { id: editingId } : {}),
       name: recipeName.trim(), recipe_type: recipeType, linked_product_id: linkedProductId || null,
@@ -239,6 +486,7 @@ export function RecipeStudioPage() {
       price: recipeType === 'product' ? Math.max(0, price) : 0,
       target_food_cost_pct: targetPct,
       components: validComponents,
+      cost_snapshots: costSnapshots,
     };
     saveRecipe.mutate(body);
   }
@@ -260,6 +508,7 @@ export function RecipeStudioPage() {
         <div style={{ display: 'flex', gap: '.4rem', flexWrap: 'wrap' }}>
           <button type="button" style={view === 'recipes' ? primaryButton : secondaryButton} onClick={() => setView('recipes')}>🍕 Recetas</button>
           <button type="button" style={view === 'costs' ? primaryButton : secondaryButton} onClick={() => setView('costs')}>🏠 Costeo del negocio</button>
+          <button type="button" style={view === 'scenario' ? primaryButton : secondaryButton} onClick={() => setView('scenario')}>📈 Simulador de escenarios</button>
         </div>
       </div>
 
@@ -299,10 +548,10 @@ export function RecipeStudioPage() {
                   </div>
                 )}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '.5rem' }}>
-                  <div><div style={{ fontSize: '.75rem', color: '#64748b' }}>Costo total del lote</div><strong>{formatARS(recipe.batch_cost)}</strong></div>
-                  <div><div style={{ fontSize: '.75rem', color: '#64748b' }}>Costo por {recipe.yield_unit}</div><strong>{formatARS(recipe.unit_cost)}</strong></div>
-                  {recipe.recipe_type === 'product' && <div><div style={{ fontSize: '.75rem', color: '#64748b' }}>Precio sugerido</div><strong style={{ color: 'var(--c-accent, #c7101b)' }}>{formatARS(recipe.suggested_price)}</strong></div>}
-                  {recipe.recipe_type === 'product' && <div><div style={{ fontSize: '.75rem', color: '#64748b' }}>Food cost actual</div><strong>{recipe.price > 0 ? `${recipe.food_cost_pct}%` : 'Sin precio cargado'}</strong></div>}
+                  <div><div style={{ fontSize: '.75rem', color: '#64748b' }}>Costo total del lote</div><strong>{recipe.batch_cost !== null ? formatARS(recipe.batch_cost) : 'Incompleto'}</strong></div>
+                  <div><div style={{ fontSize: '.75rem', color: '#64748b' }}>Costo por {recipe.yield_unit}</div><strong>{recipe.unit_cost !== null ? formatARS(recipe.unit_cost) : '—'}</strong></div>
+                  {recipe.recipe_type === 'product' && <div><div style={{ fontSize: '.75rem', color: '#64748b' }}>Precio sugerido</div><strong style={{ color: 'var(--c-accent, #c7101b)' }}>{recipe.suggested_price !== null ? formatARS(recipe.suggested_price) : '—'}</strong></div>}
+                  {recipe.recipe_type === 'product' && <div><div style={{ fontSize: '.75rem', color: '#64748b' }}>Food cost actual</div><strong>{recipe.price > 0 ? (recipe.food_cost_pct !== null ? `${recipe.food_cost_pct}%` : 'Incompleto') : 'Sin precio cargado'}</strong></div>}
                 </div>
                 <button type="button" style={{ ...secondaryButton, alignSelf: 'start' }} onClick={() => editRecipe(recipe)}>Editar receta</button>
               </article>
@@ -338,7 +587,7 @@ export function RecipeStudioPage() {
               </Field>
               <Field label="Unidad del rendimiento">
                 <select value={yieldUnit} onChange={(e) => setYieldUnit(e.target.value)} style={controlStyle}>
-                  {units.map((unit) => <option key={unit} value={unit}>{unit}</option>)}
+                  {units.map((unit) => <option key={unit} value={unit} disabled={!toEngineUnit(unit)}>{toEngineUnit(unit) ? unit : `${unit} (sin equivalencia)`}</option>)}
                 </select>
               </Field>
               {recipeType === 'product' && <>
@@ -367,22 +616,23 @@ export function RecipeStudioPage() {
                   const componentList = c.component_type === 'supply'
                     ? supplies.map((s) => ({ id: s.id, name: s.name, unit: s.unit, cost: s.cost }))
                     : recipes.filter((r) => r.recipe_type === 'subrecipe' && r.id !== editingId).map((r) => ({ id: r.id, name: r.name, unit: r.yield_unit, cost: r.unit_cost }));
-                  const unitCost = componentCostMap.get(`${c.component_type}:${c.component_id}`) ?? 0;
                   const costUnit = componentList.find((v) => v.id === c.component_id)?.unit ?? c.unit;
-                  const isCompatible = areUnitsCompatible(c.unit, costUnit);
-                  const displayedSubtotal = safeConvertQuantity(c.quantity, c.unit, costUnit) * unitCost;
+                  const fromUnit = toEngineUnit(c.unit);
+                  const toUnit = toEngineUnit(costUnit);
+                  const isCompatible = Boolean(fromUnit && toUnit && areUnitsCompatible(fromUnit, toUnit));
+                  const displayedSubtotal = draftCostResult?.components[index]?.raw_total_cost ?? null;
                   return <div key={index} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 145px), 1fr))', gap: '.5rem', alignItems: 'end', padding: '.65rem', border: `1px solid ${!isCompatible ? '#ef4444' : 'var(--c-border, #ddd)'}`, borderRadius: 7 }}>
                     <Field label="Tipo"><select value={c.component_type} onChange={(e) => changeComponent(index, { component_type: e.target.value as 'supply' | 'recipe' })} style={controlStyle}><option value="supply">Ingrediente / insumo</option><option value="recipe">Subreceta</option></select></Field>
                     <Field label={c.component_type === 'supply' ? 'Ingrediente' : 'Preparación'}>
                       <select value={c.component_id} onChange={(e) => { const id = Number(e.target.value); const found = componentList.find((v) => v.id === id); changeComponent(index, { component_id: id, unit: found?.unit || c.unit }); }} style={controlStyle}>
                         <option value={0}>Seleccionar...</option>
-                        {componentList.map((v) => <option key={v.id} value={v.id}>{v.name} · {formatARS(v.cost)}/{v.unit}</option>)}
+                        {componentList.map((v) => <option key={v.id} value={v.id}>{v.name} · {v.cost !== null ? formatARS(v.cost) : 'Sin costo'}/{v.unit}</option>)}
                       </select>
                     </Field>
                     <Field label="Cantidad"><Input type="number" min="0" step="0.001" value={c.quantity} onChange={(e) => changeComponent(index, { quantity: Math.max(0, Number(e.target.value) || 0) })} /></Field>
-                    <Field label="Unidad"><select value={c.unit} onChange={(e) => changeComponent(index, { unit: e.target.value })} style={controlStyle}>{units.map((u) => <option key={u} value={u}>{u}</option>)}</select></Field>
+                    <Field label="Unidad"><select value={c.unit} onChange={(e) => changeComponent(index, { unit: e.target.value })} style={controlStyle}>{units.map((u) => <option key={u} value={u} disabled={!toEngineUnit(u)}>{toEngineUnit(u) ? u : `${u} (sin equivalencia)`}</option>)}</select></Field>
                     <div style={{ padding: '.5rem 0', fontWeight: 700, color: !isCompatible ? '#dc2626' : 'inherit' }}>
-                      {!isCompatible ? `⚠️ Incompatible (${costUnit})` : `Subtotal: ${formatARS(displayedSubtotal)}`}
+                      {!isCompatible ? `⚠️ Incompatible (${costUnit})` : displayedSubtotal !== null ? `Subtotal: ${formatARS(displayedSubtotal)}` : 'Costo incompleto'}
                     </div>
                     <button type="button" aria-label="Quitar componente" style={{ ...secondaryButton, color: '#b91c1c' }} onClick={() => setComponents((prev) => prev.filter((_, i) => i !== index))}>Quitar</button>
                   </div>;
@@ -391,15 +641,82 @@ export function RecipeStudioPage() {
             </div>
 
             <div style={{ marginTop: '1rem', padding: '1rem', borderRadius: 8, background: 'var(--c-muted, #f8fafc)', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 155px), 1fr))', gap: '.75rem' }}>
-              <div><div style={{ color: '#64748b', fontSize: '.75rem' }}>Costo del lote</div><strong style={{ fontSize: '1.2rem' }}>{formatARS(computedBatchCost)}</strong></div>
-              <div><div style={{ color: '#64748b', fontSize: '.75rem' }}>Costo por rendimiento</div><strong style={{ fontSize: '1.2rem' }}>{formatARS(computedUnitCost)} / {yieldUnit}</strong></div>
+              <div><div style={{ color: '#64748b', fontSize: '.75rem' }}>Costo del lote</div><strong style={{ fontSize: '1.2rem' }}>{computedBatchCost !== null ? formatARS(computedBatchCost) : 'Incompleto'}</strong></div>
+              <div><div style={{ color: '#64748b', fontSize: '.75rem' }}>Costo por rendimiento</div><strong style={{ fontSize: '1.2rem' }}>{computedUnitCost !== null ? formatARS(computedUnitCost) : '—'} / {yieldUnit}</strong></div>
               {recipeType === 'product' && <>
-                <div><div style={{ color: '#64748b', fontSize: '.75rem' }}>Precio sugerido por food cost {targetPct}%</div><strong style={{ fontSize: '1.25rem', color: 'var(--c-accent, #c7101b)' }}>{formatARS(suggestedPrice)}</strong></div>
-                <div><div style={{ color: '#64748b', fontSize: '.75rem' }}>Food cost al precio cargado</div><strong style={{ fontSize: '1.2rem' }}>{foodCost.toFixed(1)}%</strong></div>
+                <div><div style={{ color: '#64748b', fontSize: '.75rem' }}>Precio sugerido por food cost {targetPct}%</div><strong style={{ fontSize: '1.25rem', color: 'var(--c-accent, #c7101b)' }}>{suggestedPrice !== null ? formatARS(suggestedPrice) : '—'}</strong></div>
+                <div><div style={{ color: '#64748b', fontSize: '.75rem' }}>Food cost al precio cargado</div><strong style={{ fontSize: '1.2rem' }}>{foodCost !== null ? `${foodCost.toFixed(1)}%` : '—'}</strong></div>
               </>}
             </div>
           </Modal>
         </>
+      )}
+
+      {view === 'scenario' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div style={panelStyle}>
+            <h3 style={{ marginTop: 0 }}>Simulador de costos y precios</h3>
+            <p style={{ color: '#64748b', fontSize: '.88rem' }}>
+              Simula variaciones sobre los costos unitarios calculados por Cost Engine. Las recetas incompletas quedan fuera de los totales hasta que tengan todos sus insumos y precios.
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '.75rem' }}>
+              <Field label="Variación de costos (%)">
+                <Input type="number" min="-99" step="1" value={scenarioCostDelta} onChange={(event) => setScenarioCostDelta(Math.max(-99, Number(event.target.value) || 0))} />
+              </Field>
+              <Field label="Variación de precios (%)">
+                <Input type="number" min="-99" step="1" value={scenarioPriceDelta} onChange={(event) => setScenarioPriceDelta(Math.max(-99, Number(event.target.value) || 0))} />
+              </Field>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '.75rem' }}>
+            <div style={panelStyle}>
+              <div style={{ color: '#64748b', fontSize: '.75rem', textTransform: 'uppercase' }}>Food cost actual</div>
+              <strong style={{ display: 'block', fontSize: '1.45rem' }}>{portfolioScenario.current_food_cost_pct !== null ? `${portfolioScenario.current_food_cost_pct.toFixed(1)}%` : '—'}</strong>
+              <div style={{ color: '#64748b', fontSize: '.78rem' }}>Recetas completas con precio</div>
+            </div>
+            <div style={panelStyle}>
+              <div style={{ color: '#64748b', fontSize: '.75rem', textTransform: 'uppercase' }}>Food cost simulado</div>
+              <strong style={{ display: 'block', fontSize: '1.45rem' }}>{portfolioScenario.simulated_food_cost_pct !== null ? `${portfolioScenario.simulated_food_cost_pct.toFixed(1)}%` : '—'}</strong>
+              <div style={{ color: '#64748b', fontSize: '.78rem' }}>Con las variaciones seleccionadas</div>
+            </div>
+            <div style={panelStyle}>
+              <div style={{ color: '#64748b', fontSize: '.75rem', textTransform: 'uppercase' }}>Facturación simulada</div>
+              <strong style={{ display: 'block', fontSize: '1.45rem' }}>{formatARS(portfolioScenario.simulated_revenue)}</strong>
+              <div style={{ color: '#64748b', fontSize: '.78rem' }}>Suma de precios por producto, sin volumen de ventas</div>
+            </div>
+            <div style={panelStyle}>
+              <div style={{ color: '#64748b', fontSize: '.75rem', textTransform: 'uppercase' }}>Margen bruto simulado</div>
+              <strong style={{ display: 'block', fontSize: '1.45rem' }}>{formatARS(portfolioScenario.simulated_gross_profit)}</strong>
+              <div style={{ color: '#64748b', fontSize: '.78rem' }}>{portfolioScenario.simulated_margin_pct !== null ? `${portfolioScenario.simulated_margin_pct.toFixed(1)}% sobre facturación` : 'Sin datos suficientes'}</div>
+            </div>
+          </div>
+          <div style={panelStyle}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '.5rem', marginBottom: '.75rem' }}>
+              <strong>Detalle por producto</strong>
+              <span style={{ color: '#64748b', fontSize: '.8rem' }}>{portfolioScenario.complete_items} completos · {portfolioScenario.incomplete_items} incompletos</span>
+            </div>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '.86rem' }}>
+                <thead><tr style={{ textAlign: 'left', color: '#64748b', borderBottom: '1px solid var(--c-border, #ddd)' }}>
+                  <th style={{ padding: '.55rem' }}>Producto</th><th style={{ padding: '.55rem' }}>Costo actual</th><th style={{ padding: '.55rem' }}>Costo simulado</th><th style={{ padding: '.55rem' }}>Precio actual</th><th style={{ padding: '.55rem' }}>Precio simulado</th><th style={{ padding: '.55rem' }}>Food cost simulado</th>
+                </tr></thead>
+                <tbody>
+                  {portfolioScenario.rows.map((row) => <tr key={row.id} style={{ borderBottom: '1px solid var(--c-border, #eee)' }}>
+                    <td style={{ padding: '.6rem .55rem', fontWeight: 600 }}>{row.name}</td>
+                    <td style={{ padding: '.6rem .55rem' }}>{row.current_cost !== null ? formatARS(row.current_cost) : 'Incompleto'}</td>
+                    <td style={{ padding: '.6rem .55rem' }}>{row.simulated_cost !== null ? formatARS(row.simulated_cost) : '—'}</td>
+                    <td style={{ padding: '.6rem .55rem' }}>{row.current_price !== null ? formatARS(row.current_price) : 'Sin precio'}</td>
+                    <td style={{ padding: '.6rem .55rem' }}>{row.simulated_price !== null ? formatARS(row.simulated_price) : '—'}</td>
+                    <td style={{ padding: '.6rem .55rem' }}>{row.simulated_food_cost_pct !== null ? `${row.simulated_food_cost_pct.toFixed(1)}%` : '—'}</td>
+                  </tr>)}
+                </tbody>
+              </table>
+            </div>
+            <p style={{ marginBottom: 0, color: '#64748b', fontSize: '.78rem' }}>
+              El resumen es una comparación unitaria por producto, no una proyección de ventas ponderada por cantidades vendidas.
+            </p>
+          </div>
+        </div>
       )}
 
       {view === 'costs' && (

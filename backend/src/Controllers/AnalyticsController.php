@@ -224,34 +224,36 @@ class AnalyticsController
         $stmt = Database::pdo()->prepare(
             'SELECT si.product_id,
                     MAX(COALESCE(p.name, si.product_name)) AS name,
-                    p.cost AS unit_cost,
-                    SUM(si.quantity)   AS units,
+                    CASE WHEN p.cost_is_current = 1 THEN p.cost ELSE NULL END AS unit_cost,
+                    SUM(si.quantity) AS units,
                     SUM(si.line_total) AS revenue,
-                    SUM(si.line_total) - (p.cost * SUM(si.quantity)) AS profit
+                    CASE WHEN p.cost_is_current = 1
+                         THEN SUM(si.line_total) - (p.cost * SUM(si.quantity))
+                         ELSE NULL END AS profit
                FROM sale_items si
                JOIN sales s ON s.id = si.sale_id
                JOIN products p ON p.id = si.product_id
               WHERE s.business_id = ? AND s.status = "completed"
                 AND si.parent_sale_item_id IS NULL
                 AND s.created_at BETWEEN ? AND ?' . $timeFilter . '
-              GROUP BY si.product_id, p.cost
+              GROUP BY si.product_id, p.cost, p.cost_is_current
               ORDER BY profit DESC'
         );
         $stmt->execute([$bid, $fromDt, $toDt]);
 
         Response::ok(['products' => array_map(static function (array $r): array {
             $revenue = (float) $r['revenue'];
-            $profit  = (float) $r['profit'];
+            $hasCost = $r['unit_cost'] !== null && $r['profit'] !== null;
+            $profit = $hasCost ? (float)$r['profit'] : null;
             return [
                 'product_id' => (int) $r['product_id'],
                 'name'       => $r['name'],
-                'unit_cost'  => (float) $r['unit_cost'],
+                'unit_cost'  => $hasCost ? (float)$r['unit_cost'] : null,
                 'units'      => (float) $r['units'],
                 'revenue'    => round($revenue, 2),
-                'profit'     => round($profit, 2),
-                'margin_pct' => $revenue > 0 ? round($profit / $revenue * 100, 1) : null,
-                // Si no cargaste el costo, el margen no es confiable: lo avisamos.
-                'has_cost'   => (float) $r['unit_cost'] > 0,
+                'profit'     => $profit !== null ? round($profit, 2) : null,
+                'margin_pct' => $profit !== null && $revenue > 0 ? round($profit / $revenue * 100, 1) : null,
+                'has_cost'   => $hasCost,
             ];
         }, $stmt->fetchAll())]);
     }
@@ -974,6 +976,7 @@ class AnalyticsController
      */
     private function ctx(Request $req): array
     {
+        ProductController::ensureColumns();
         $bid  = (int) $req->auth['business_id'];
         $to   = $req->query['to']   ?? date('Y-m-d');
         $from = $req->query['from'] ?? date('Y-m-d', strtotime('-29 days'));

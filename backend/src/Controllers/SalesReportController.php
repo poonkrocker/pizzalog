@@ -45,7 +45,7 @@ final class SalesReportController
                        MAX($catExpr) AS category_name,
                        SUM(si.quantity) AS units,
                        SUM(si.line_total) AS gross_sales,
-                       MAX(COALESCE(p.cost, 0)) AS unit_cost
+                       MAX(CASE WHEN p.cost_is_current = 1 THEN p.cost ELSE NULL END) AS unit_cost
                   FROM sale_items si
                   JOIN sales s ON s.id = si.sale_id
              LEFT JOIN products p ON p.id = si.product_id
@@ -63,19 +63,25 @@ final class SalesReportController
 
         $totalUnits = 0.0;
         $totalGross = 0.0;
-        $totalCost  = 0.0;
+        $totalCost = 0.0;
+        $hasIncompleteCost = false;
 
         foreach ($rows as $r) {
             $totalUnits += (float)$r['units'];
             $totalGross += (float)$r['gross_sales'];
-            $totalCost  += (float)$r['units'] * (float)$r['unit_cost'];
+            if ($r['unit_cost'] === null) {
+                $hasIncompleteCost = true;
+            } else {
+                $totalCost += (float)$r['units'] * (float)$r['unit_cost'];
+            }
         }
 
         $items = array_map(static function (array $r) use ($totalGross): array {
             $units = (float)$r['units'];
             $gross = (float)$r['gross_sales'];
-            $cost  = (float)$r['unit_cost'] * $units;
-            $marginPct = $gross > 0 && (float)$r['unit_cost'] > 0
+            $unitCost = $r['unit_cost'] !== null ? (float)$r['unit_cost'] : null;
+            $cost = $unitCost !== null ? round($unitCost * $units, 2) : null;
+            $marginPct = $cost !== null && $gross > 0
                 ? round((($gross - $cost) / $gross) * 100, 1)
                 : null;
             $sharePct = $totalGross > 0 ? round(($gross / $totalGross) * 100, 1) : 0.0;
@@ -86,7 +92,7 @@ final class SalesReportController
                 'category_name' => (string)$r['category_name'],
                 'units'         => $units,
                 'gross_sales'   => $gross,
-                'cost'          => round($cost, 2),
+                'cost'          => $cost,
                 'margin_pct'    => $marginPct,
                 'share_pct'     => $sharePct,
             ];
@@ -96,8 +102,11 @@ final class SalesReportController
             'summary' => [
                 'total_units' => round($totalUnits, 2),
                 'total_gross' => round($totalGross, 2),
-                'total_cost'  => round($totalCost, 2),
-                'margin_pct'  => $totalGross > 0 && $totalCost > 0 ? round((($totalGross - $totalCost) / $totalGross) * 100, 1) : null,
+                'total_cost'  => $hasIncompleteCost ? null : round($totalCost, 2),
+                'margin_pct'  => !$hasIncompleteCost && $totalGross > 0 && $totalCost > 0
+                    ? round((($totalGross - $totalCost) / $totalGross) * 100, 1)
+                    : null,
+                'has_incomplete_cost' => $hasIncompleteCost,
                 'items_count' => count($items),
             ],
             'items' => $items,
@@ -472,6 +481,7 @@ final class SalesReportController
      */
     private function ctx(Request $req): array
     {
+        ProductController::ensureColumns();
         $bid  = (int)$req->auth['business_id'];
         $from = $req->query['from'] ?? date('Y-m-d', strtotime('-29 days'));
         $to   = $req->query['to']   ?? date('Y-m-d');

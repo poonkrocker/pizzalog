@@ -9,6 +9,54 @@ use Pizzalog\Core\Response;
 
 class ToolsAuthController
 {
+    public static function ensureTables(?\PDO $pdo = null): void
+    {
+        $pdo ??= Database::pdo();
+        try {
+            $pdo->exec("
+                CREATE TABLE IF NOT EXISTS tools_accounts (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    email VARCHAR(190) NOT NULL,
+                    environment ENUM('production', 'staging') NOT NULL DEFAULT 'production',
+                    name VARCHAR(120) NOT NULL DEFAULT 'Usuario Tools',
+                    password_hash VARCHAR(255) NULL,
+                    app_user_id BIGINT UNSIGNED NULL,
+                    business_id BIGINT UNSIGNED NULL,
+                    is_active TINYINT(1) NOT NULL DEFAULT 1,
+                    expires_at DATETIME NULL,
+                    last_login_at DATETIME NULL,
+                    activation_token VARCHAR(128) NULL,
+                    activation_token_expires_at DATETIME NULL,
+                    subscription_status VARCHAR(32) NOT NULL DEFAULT 'none',
+                    subscription_plan VARCHAR(64) NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY uq_tools_accounts_email_env (email, environment),
+                    UNIQUE KEY uq_tools_accounts_app_user_env (app_user_id, environment)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ");
+            $pdo->exec("
+                CREATE TABLE IF NOT EXISTS tools_workspaces (
+                    account_id INT UNSIGNED NOT NULL PRIMARY KEY,
+                    workspace_json LONGTEXT NOT NULL,
+                    schema_version INT UNSIGNED NOT NULL DEFAULT 1,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ");
+            $pdo->exec("
+                CREATE TABLE IF NOT EXISTS tools_login_attempts (
+                    email_hash CHAR(64) NOT NULL,
+                    ip_hash CHAR(64) NOT NULL,
+                    attempts INT UNSIGNED NOT NULL DEFAULT 1,
+                    window_started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (email_hash, ip_hash)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ");
+        } catch (\Throwable $e) {
+            // Ignorar si ya existen con FKs previas
+        }
+    }
+
     public function login(Request $req): void
     {
         $email = strtolower(trim((string) $req->input('email', '')));
@@ -19,10 +67,12 @@ class ToolsAuthController
         }
 
         if ($email === '' || $password === '' || strlen($email) > 190 || strlen($password) > 1024) {
-            Response::error('Ingresá un email válido y una contraseña de hasta 1024 caracteres', 422);
+            Response::error('Ingresá un email o usuario válido y una contraseña de hasta 1024 caracteres', 422);
         }
 
         $pdo = Database::pdo();
+        self::ensureTables($pdo);
+
         $jwtConfig = Config::get('jwt', []);
         $jwtSecret = (string)($jwtConfig['secret'] ?? '');
         if (strlen($jwtSecret) < 32 || str_contains($jwtSecret, 'CAMBIAR')) {
@@ -54,46 +104,52 @@ class ToolsAuthController
         }
 
         $accountQuery = $pdo->prepare(
-            'SELECT id, email, name, password_hash, app_user_id, is_active, expires_at
-               FROM tools_accounts WHERE email = ? AND environment = ? LIMIT 1'
+            'SELECT id, email, environment, name, password_hash, app_user_id, business_id, is_active, expires_at
+               FROM tools_accounts
+              WHERE LOWER(email) = ?
+              ORDER BY (environment = ?) DESC, id ASC
+              LIMIT 1'
         );
         $accountQuery->execute([$email, $environment]);
         $account = $accountQuery->fetch();
+        $effectiveEnv = $account && !empty($account['environment']) ? (string)$account['environment'] : $environment;
 
-        // Las cuentas vinculadas validan siempre contra la contraseña vigente de App.
+        // Las cuentas vinculadas validan contra la contraseña de App o la contraseña propia de Tools.
         $appUser = null;
         if ($account && !empty($account['app_user_id'])) {
             $userQuery = $pdo->prepare(
-                "SELECT id, business_id, name, email, password_hash, role, is_active
-                   FROM users WHERE id = ? AND LOWER(email) = ? LIMIT 1"
+                "SELECT id, business_id, name, email, username, password_hash, role, is_active
+                   FROM users WHERE id = ? LIMIT 1"
             );
-            $userQuery->execute([(int)$account['app_user_id'], $email]);
+            $userQuery->execute([(int)$account['app_user_id']]);
             $appUser = $userQuery->fetch() ?: null;
         } else {
-            // La vinculación inicial está reservada a usuarios administradores activos.
+            // La vinculación inicial está reservada a usuarios administradores activos (por email o username).
             $userQuery = $pdo->prepare(
-                "SELECT id, business_id, name, email, password_hash, role, is_active
+                "SELECT id, business_id, name, email, username, password_hash, role, is_active
                    FROM users
-                  WHERE LOWER(email) = ? AND role = 'admin' AND is_active = 1
+                  WHERE (LOWER(email) = ? OR LOWER(username) = ?) AND role = 'admin' AND is_active = 1
                   ORDER BY id ASC LIMIT 2"
             );
-            $userQuery->execute([$email]);
+            $userQuery->execute([$email, $email]);
             $matches = $userQuery->fetchAll();
             if (count($matches) > 1) {
-                Response::error('Este email está asociado a más de un negocio. Contactá al administrador para vincular Tools.', 409);
+                Response::error('Este usuario está asociado a más de un negocio. Contactá al administrador para vincular Tools.', 409);
             }
             $appUser = $matches[0] ?? null;
         }
 
         $linkedToApp = $appUser !== null;
         if ($linkedToApp) {
+            $validAppPassword = !empty($appUser['password_hash']) && password_verify($password, (string)$appUser['password_hash']);
+            $validToolsPassword = $account && !empty($account['password_hash']) && password_verify($password, (string)$account['password_hash']);
+
             if (
                 (int)$appUser['is_active'] !== 1
                 || $appUser['role'] !== 'admin'
-                || empty($appUser['password_hash'])
-                || !password_verify($password, (string)$appUser['password_hash'])
+                || (!$validAppPassword && !$validToolsPassword)
             ) {
-                Response::error('Email o contraseña incorrectos', 401);
+                Response::error('Email/usuario o contraseña incorrectos', 401);
             }
 
             if ($account && (int)$account['is_active'] !== 1) {
@@ -103,21 +159,27 @@ class ToolsAuthController
                 Response::error('El acceso a Pizzalog Tools ha vencido', 403);
             }
 
-            // No se copia ni duplica el hash de App: Tools guarda únicamente la referencia al usuario.
+            $canonicalEmail = $account ? (string)$account['email'] : (!empty($appUser['email']) ? strtolower(trim((string)$appUser['email'])) : $email);
+
+            // Liberar cualquier colisión previa de app_user_id en el mismo entorno antes de vincular
+            $pdo->prepare(
+                'UPDATE tools_accounts SET app_user_id = NULL WHERE app_user_id = ? AND environment = ? AND LOWER(email) <> ?'
+            )->execute([(int)$appUser['id'], $effectiveEnv, strtolower($canonicalEmail)]);
+
             $pdo->prepare(
                 'INSERT INTO tools_accounts (email, environment, name, password_hash, app_user_id, business_id, is_active)
                  VALUES (?, ?, ?, NULL, ?, ?, 1)
                  ON DUPLICATE KEY UPDATE
                     name = VALUES(name),
                     app_user_id = VALUES(app_user_id),
-                    business_id = VALUES(business_id),
-                    password_hash = NULL'
-            )->execute([$email, $environment, (string)$appUser['name'], (int)$appUser['id'], (int)$appUser['business_id']]);
+                    business_id = VALUES(business_id)'
+            )->execute([$canonicalEmail, $effectiveEnv, (string)$appUser['name'], (int)$appUser['id'], (int)$appUser['business_id']]);
 
-            $accountQuery->execute([$email, $environment]);
+            $accountQuery->execute([strtolower($canonicalEmail), $effectiveEnv]);
             $account = $accountQuery->fetch();
+            $effectiveEnv = $account && !empty($account['environment']) ? (string)$account['environment'] : $effectiveEnv;
         } elseif (!$account || empty($account['password_hash']) || !password_verify($password, (string)$account['password_hash'])) {
-            Response::error('Email o contraseña incorrectos', 401);
+            Response::error('Email/usuario o contraseña incorrectos', 401);
         }
 
         if (!$account || (int)$account['is_active'] !== 1) {
@@ -136,7 +198,7 @@ class ToolsAuthController
             [
                 'sub' => (int) $account['id'],
                 'aud' => 'pizzalog-tools',
-                'env' => $environment,
+                'env' => $effectiveEnv,
             ],
             $jwtSecret,
             max(300, min((int) ($jwtConfig['ttl'] ?? 28800), 43200)),
@@ -161,6 +223,172 @@ class ToolsAuthController
                 'id' => (int) $req->auth['tools_account_id'],
                 'email' => (string) $req->auth['tools_email'],
                 'name' => (string) $req->auth['tools_name'],
+            ],
+        ]);
+    }
+
+    /**
+     * POST /tools/auth/activate
+     * Activa una cuenta post-pago y define la contraseña inicial a partir del token de un solo uso.
+     */
+    public function activate(Request $req): void
+    {
+        $token = trim((string) $req->input('token', ''));
+        $password = (string) $req->input('password', '');
+
+        if ($token === '' || strlen($token) > 128) {
+            Response::error('Token de activación inválido', 422);
+        }
+        if (strlen($password) < 8 || strlen($password) > 1024) {
+            Response::error('La contraseña debe tener al menos 8 caracteres', 422);
+        }
+
+        $pdo = Database::pdo();
+        self::ensureTables($pdo);
+        $stmt = $pdo->prepare(
+            'SELECT id, email, environment, name, is_active, expires_at
+               FROM tools_accounts
+              WHERE activation_token = ?
+                AND (activation_token_expires_at IS NULL OR activation_token_expires_at > NOW())
+              LIMIT 1'
+        );
+        $stmt->execute([$token]);
+        $account = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+        if (!$account) {
+            Response::error('El enlace de activación expiró o es inválido. Si ya activaste tu cuenta, ingresá directamente con tu contraseña.', 404);
+        }
+
+        $hash = password_hash($password, PASSWORD_DEFAULT);
+        $update = $pdo->prepare(
+            'UPDATE tools_accounts
+                SET password_hash = ?,
+                    activation_token = NULL,
+                    activation_token_expires_at = NULL,
+                    is_active = 1,
+                    last_login_at = NOW()
+              WHERE id = ?'
+        );
+        $update->execute([$hash, (int) $account['id']]);
+
+        $jwtConfig = Config::get('jwt', []);
+        $jwtSecret = (string)($jwtConfig['secret'] ?? '');
+        $jwtToken = Jwt::encode(
+            [
+                'sub' => (int) $account['id'],
+                'aud' => 'pizzalog-tools',
+                'env' => $account['environment'],
+            ],
+            $jwtSecret,
+            max(300, min((int) ($jwtConfig['ttl'] ?? 28800), 43200)),
+            (string) ($jwtConfig['issuer'] ?? 'pizzalog')
+        );
+
+        Response::ok([
+            'token' => $jwtToken,
+            'account' => [
+                'id' => (int) $account['id'],
+                'email' => (string) $account['email'],
+                'name' => (string) $account['name'],
+                'expires_at' => $account['expires_at'],
+            ],
+        ]);
+    }
+
+    /**
+     * POST /tools/auth/forgot-password
+     * Envía enlace de recuperación por correo electrónico.
+     */
+    public function forgotPassword(Request $req): void
+    {
+        $email = strtolower(trim((string) $req->input('email', '')));
+        $environment = (string) $req->input('environment', 'production');
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            Response::error('Ingresá un email válido', 422);
+        }
+
+        $pdo = Database::pdo();
+        self::ensureTables($pdo);
+        $stmt = $pdo->prepare('SELECT id, name, is_active FROM tools_accounts WHERE email = ? AND environment = ? LIMIT 1');
+        $stmt->execute([$email, $environment]);
+        $account = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+        if ($account && (int) $account['is_active'] === 1) {
+            $resetToken = bin2hex(random_bytes(32));
+            $tokenExpiresAt = date('Y-m-d H:i:s', strtotime('+2 hours'));
+            $pdo->prepare('UPDATE tools_accounts SET activation_token = ?, activation_token_expires_at = ? WHERE id = ?')
+                ->execute([$resetToken, $tokenExpiresAt, (int) $account['id']]);
+
+            $toolsBaseUrl = trim((string) (Config::get('tools', [])['url'] ?? 'https://tools.pizzalog.net'), '/');
+            $resetLink = "{$toolsBaseUrl}/?reset={$resetToken}";
+            \Pizzalog\Services\Mailer::sendPasswordReset($email, (string) $account['name'], $resetLink);
+        }
+
+        Response::ok(['sent' => true]);
+    }
+
+    /**
+     * POST /tools/auth/reset-password
+     * Establece la nueva contraseña usando el token de recuperación.
+     */
+    public function resetPassword(Request $req): void
+    {
+        $token = trim((string) $req->input('token', ''));
+        $password = (string) $req->input('password', '');
+
+        if ($token === '' || strlen($token) > 128) {
+            Response::error('Token inválido', 422);
+        }
+        if (strlen($password) < 8 || strlen($password) > 1024) {
+            Response::error('La contraseña debe tener al menos 8 caracteres', 422);
+        }
+
+        $pdo = Database::pdo();
+        self::ensureTables($pdo);
+        $stmt = $pdo->prepare(
+            'SELECT id, email, environment, name, is_active, expires_at
+               FROM tools_accounts
+              WHERE activation_token = ?
+                AND activation_token_expires_at > NOW()
+              LIMIT 1'
+        );
+        $stmt->execute([$token]);
+        $account = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+        if (!$account) {
+            Response::error('El enlace de recuperación venció o ya fue utilizado.', 404);
+        }
+
+        $hash = password_hash($password, PASSWORD_DEFAULT);
+        $pdo->prepare(
+            'UPDATE tools_accounts
+                SET password_hash = ?,
+                    activation_token = NULL,
+                    activation_token_expires_at = NULL,
+                    last_login_at = NOW()
+              WHERE id = ?'
+        )->execute([$hash, (int) $account['id']]);
+
+        $jwtConfig = Config::get('jwt', []);
+        $jwtSecret = (string)($jwtConfig['secret'] ?? '');
+        $jwtToken = Jwt::encode(
+            [
+                'sub' => (int) $account['id'],
+                'aud' => 'pizzalog-tools',
+                'env' => $account['environment'],
+            ],
+            $jwtSecret,
+            max(300, min((int) ($jwtConfig['ttl'] ?? 28800), 43200)),
+            (string) ($jwtConfig['issuer'] ?? 'pizzalog')
+        );
+
+        Response::ok([
+            'token' => $jwtToken,
+            'account' => [
+                'id' => (int) $account['id'],
+                'email' => (string) $account['email'],
+                'name' => (string) $account['name'],
+                'expires_at' => $account['expires_at'],
             ],
         ]);
     }

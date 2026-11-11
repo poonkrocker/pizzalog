@@ -97,7 +97,14 @@ export async function listDevices(): Promise<BtDevice[]> {
     .map((d) => ({ name: d.name || d.address, address: d.address }));
 }
 
-/** Envía un payload ESC/POS a la impresora configurada o a la dirección indicada. */
+/**
+ * Envía un payload ESC/POS a la impresora configurada o a la dirección indicada.
+ *
+ * Muchas impresoras térmicas SPP económicas solo aceptan RFCOMM sin
+ * autenticación (insecure). Se intenta primero la conexión normal y, si falla,
+ * la conexión insecure. El ticket se manda en bloques para evitar que algunos
+ * buffers pequeños de impresora descarten parte o todo el contenido.
+ */
 export async function printRaw(payload: string, targetAddress?: string): Promise<void> {
   if (!isNative()) {
     // Modo emulación en navegador para pruebas
@@ -109,6 +116,9 @@ export async function printRaw(payload: string, targetAddress?: string): Promise
   if (!address) {
     throw new Error('No hay ninguna impresora configurada ni seleccionada. Elegila en Ajustes.');
   }
+  if (!payload) {
+    throw new Error('El ticket está vacío; no hay nada para imprimir.');
+  }
 
   await BluetoothSerial.enable();
 
@@ -119,17 +129,50 @@ export async function printRaw(payload: string, targetAddress?: string): Promise
     /* ignorar */
   }
 
-  // Conectar por RFCOMM SPP
-  await BluetoothSerial.connect({ address });
+  let connected = false;
+  let lastConnectError: unknown;
   try {
-    await BluetoothSerial.write({ address, value: payload });
-    // Esperar a que el búfer de la comandera térmica termine de imprimir antes de cerrar
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-  } finally {
     try {
-      await BluetoothSerial.disconnect({ address });
-    } catch {
-      /* sin acción */
+      await BluetoothSerial.connect({ address });
+      connected = true;
+    } catch (error) {
+      lastConnectError = error;
+    }
+
+    if (!connected) {
+      try {
+        await BluetoothSerial.connectInsecure({ address });
+        connected = true;
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error ?? '');
+        const previous = lastConnectError instanceof Error ? lastConnectError.message : String(lastConnectError ?? '');
+        throw new Error(
+          `No se pudo conectar con ${s.name ?? address} por Bluetooth. ${detail || previous || 'Verificá que esté encendida, emparejada y fuera de otra conexión.'}`,
+        );
+      }
+    }
+
+    // ESC/POS se genera como ASCII, por lo que cortar el string no divide
+    // caracteres multibyte. Escrituras secuenciales respetan el orden del ticket.
+    const chunkSize = 128;
+    for (let offset = 0; offset < payload.length; offset += chunkSize) {
+      await BluetoothSerial.write({
+        address,
+        value: payload.slice(offset, offset + chunkSize),
+      });
+    }
+    // Esperar a que el búfer de la comandera térmica termine de imprimir antes de cerrar
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error ?? '');
+    throw new Error(detail || 'Falló la comunicación Bluetooth con la impresora.');
+  } finally {
+    if (connected) {
+      try {
+        await BluetoothSerial.disconnect({ address });
+      } catch {
+        // No ocultar el resultado real de la impresión por un fallo al desconectar.
+      }
     }
   }
 }

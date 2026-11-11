@@ -14,6 +14,8 @@ import type { Column } from '@/ui';
 import { useDeleteSupply, useSupplies } from './hooks';
 import { SupplyForm } from './SupplyForm';
 import { StockModal } from './StockModal';
+import { PriceListModal } from './PriceListModal';
+import { PriceHistoryModal } from './PriceHistoryModal';
 
 function isLow(s: Supply): boolean {
   return s.min_stock != null && s.stock <= s.min_stock;
@@ -25,6 +27,8 @@ export function SuppliesPage() {
   const [editing, setEditing] = useState<Supply | null>(null);
   const [creating, setCreating] = useState(false);
   const [stockFor, setStockFor] = useState<Supply | null>(null);
+  const [historyFor, setHistoryFor] = useState<Supply | null>(null);
+  const [priceListOpen, setPriceListOpen] = useState(false);
 
   const lowCount = (supplies.data ?? []).filter(isLow).length;
 
@@ -53,6 +57,9 @@ export function SuppliesPage() {
           <button className="link" onClick={() => setStockFor(s)}>
             Stock
           </button>
+          <button className="link" onClick={() => setHistoryFor(s)}>
+            Historial
+          </button>
           <button className="link" onClick={() => setEditing(s)}>
             Editar
           </button>
@@ -74,7 +81,14 @@ export function SuppliesPage() {
       <PageHeader
         eyebrow="Abastecimiento"
         title="Insumos"
-        actions={<Button onClick={() => setCreating(true)}>Nuevo insumo</Button>}
+        actions={
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <Button variant="secondary" onClick={() => setPriceListOpen(true)}>
+              📋 Actualizar por lista de proveedor
+            </Button>
+            <Button onClick={() => setCreating(true)}>Nuevo insumo</Button>
+          </div>
+        }
       />
 
       {lowCount > 0 && (
@@ -121,6 +135,20 @@ export function SuppliesPage() {
       >
         {stockFor && <StockModal supply={stockFor} onDone={() => setStockFor(null)} />}
       </Modal>
+
+      <PriceListModal
+        open={priceListOpen}
+        onClose={() => setPriceListOpen(false)}
+        supplies={supplies.data ?? []}
+        onApplied={() => {
+          supplies.refetch();
+        }}
+      />
+
+      <PriceHistoryModal
+        supply={historyFor}
+        onClose={() => setHistoryFor(null)}
+      />
     </section>
   );
 }
