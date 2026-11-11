@@ -5,7 +5,8 @@ import { CommercialPlansModal } from './CommercialPlansModal';
 
 const API_URL = ((import.meta.env.VITE_API_URL as string | undefined) ?? 'https://api.pizzalog.net').replace(/\/+$/, '');
 const TOKEN_KEY = 'pizzalog_tools_session';
-const TOOLS_ENVIRONMENT = ((import.meta.env.VITE_TOOLS_ENV as string | undefined) ?? 'production') === 'staging' ? 'staging' : 'production';
+const isStagingHost = typeof window !== 'undefined' && window.location.hostname.toLowerCase().includes('staging');
+const TOOLS_ENVIRONMENT = (isStagingHost || ((import.meta.env.VITE_TOOLS_ENV as string | undefined) === 'staging')) ? 'staging' : 'production';
 
 const LEGACY_WORKSPACE_KEY = 'pizzalog_tools_workspace_v2';
 
@@ -31,19 +32,19 @@ function removeLegacyWorkspace(): void {
   try { localStorage.removeItem(LEGACY_WORKSPACE_KEY); } catch { /* Retain the local recovery copy if storage is unavailable. */ }
 }
 
-async function restoreOrMigrateWorkspace(token: string): Promise<ToolsWorkspaceState> {
-  const server = await api<{ workspace: ToolsWorkspaceState | null }>('/tools/workspace', token);
-  if (server.workspace) return server.workspace;
+async function restoreOrMigrateWorkspace(token: string): Promise<{ workspace: ToolsWorkspaceState; updatedAt: string | null }> {
+  const server = await api<{ workspace: ToolsWorkspaceState | null; updated_at?: string | null }>('/tools/workspace', token);
+  if (server.workspace) return { workspace: server.workspace, updatedAt: server.updated_at ?? null };
 
   const legacy = readLegacyWorkspace();
-  if (!legacy) return createInitialDemoWorkspace();
+  if (!legacy) return { workspace: createInitialDemoWorkspace(), updatedAt: null };
 
-  await api<{ saved: boolean }>('/tools/workspace', token, {
+  const saved = await api<{ saved: boolean; updated_at?: string | null }>('/tools/workspace', token, {
     method: 'PUT',
     body: JSON.stringify({ workspace: legacy }),
   });
   removeLegacyWorkspace();
-  return legacy;
+  return { workspace: legacy, updatedAt: saved.updated_at ?? null };
 }
 
 function readSessionToken(): string | null {
@@ -158,8 +159,9 @@ export function ToolsAuthGate() {
         setToken(savedToken);
         setAccount(me.account);
         try {
-          const restoredWorkspace = await restoreOrMigrateWorkspace(savedToken);
-          setWorkspace(restoredWorkspace);
+          const restored = await restoreOrMigrateWorkspace(savedToken);
+          setWorkspace(restored.workspace);
+          setWorkspaceUpdatedAt(restored.updatedAt);
           setWorkspaceError('');
         } catch (err) {
           setWorkspaceError(err instanceof Error ? err.message : 'No se pudo recuperar el espacio de trabajo');
@@ -194,8 +196,9 @@ export function ToolsAuthGate() {
       setToken(result.token);
       setAccount(result.account);
       try {
-        const restoredWorkspace = await restoreOrMigrateWorkspace(result.token);
-        setWorkspace(restoredWorkspace);
+        const restored = await restoreOrMigrateWorkspace(result.token);
+        setWorkspace(restored.workspace);
+        setWorkspaceUpdatedAt(restored.updatedAt);
       } catch (err) {
         setWorkspaceError(err instanceof Error ? err.message : 'No se pudo recuperar el espacio de trabajo');
       }
@@ -233,8 +236,9 @@ export function ToolsAuthGate() {
       setToken(result.token);
       setAccount(result.account);
       try {
-        const restoredWorkspace = await restoreOrMigrateWorkspace(result.token);
-        setWorkspace(restoredWorkspace);
+        const restored = await restoreOrMigrateWorkspace(result.token);
+        setWorkspace(restored.workspace);
+        setWorkspaceUpdatedAt(restored.updatedAt);
       } catch (err) {
         setWorkspaceError(err instanceof Error ? err.message : 'No se pudo recuperar el espacio de trabajo');
       }
@@ -268,8 +272,9 @@ export function ToolsAuthGate() {
     setLoading(true);
     setWorkspaceError('');
     try {
-      const restoredWorkspace = await restoreOrMigrateWorkspace(token);
-      setWorkspace(restoredWorkspace);
+      const restored = await restoreOrMigrateWorkspace(token);
+      setWorkspace(restored.workspace);
+      setWorkspaceUpdatedAt(restored.updatedAt);
     } catch (err) {
       setWorkspaceError(err instanceof Error ? err.message : 'No se pudo recuperar el espacio de trabajo');
     } finally {
@@ -282,6 +287,7 @@ export function ToolsAuthGate() {
     setToken(null);
     setAccount(null);
     setWorkspace(null);
+    setWorkspaceUpdatedAt(null);
     setEmail('');
     setPassword('');
     setConfirmPassword('');
@@ -308,6 +314,7 @@ export function ToolsAuthGate() {
     setToken('guest-demo-token');
     setAccount(guestAccount);
     setWorkspace(demoWs);
+    setWorkspaceUpdatedAt(null);
   }
 
   if (loading) {
@@ -436,8 +443,8 @@ export function ToolsAuthGate() {
         <h1>Restaurant Profit Kit</h1>
         <p>Ingresá con la cuenta que recibiste al adquirir el producto o vinculá tu usuario de Pizzalog App.</p>
         <label className="field">
-          <span>Email</span>
-          <input type="email" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} />
+          <span>Email o Usuario</span>
+          <input type="text" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} />
         </label>
         <label className="field">
           <span>Contraseña</span>

@@ -866,6 +866,7 @@ export function App({
         });
         const wsData = await wsRes.json();
         if (wsData.ok && wsData.data?.workspace) {
+          workspaceUpdatedAtRef.current = wsData.data.updated_at ?? data.data?.updated_at ?? null;
           setState(wsData.data.workspace);
         }
         const importedProds = data.data.imported_products ?? data.data.imported_recipes ?? 0;
@@ -2765,13 +2766,13 @@ export function App({
               </p>
               <form onSubmit={handleLinkApp} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <label className="field">
-                  <span>Email en Pizzalog App</span>
+                  <span>Usuario o Email en Pizzalog App</span>
                   <input
-                    type="email"
+                    type="text"
                     required
                     value={syncLinkEmail}
                     onChange={(e) => setSyncLinkEmail(e.target.value)}
-                    placeholder="admin@mitienda.com"
+                    placeholder="admin o admin@mitienda.com"
                   />
                 </label>
                 <label className="field">

@@ -7,6 +7,38 @@ use Pizzalog\Core\Response;
 
 class SeasonalPizzaController
 {
+    public static function ensureTables(?\PDO $pdo = null): void
+    {
+        $pdo ??= Database::pdo();
+        RecipeCostingController::ensureTables($pdo);
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS seasonal_pizza_variant_periods (
+              id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+              business_id BIGINT UNSIGNED NOT NULL,
+              variant_id BIGINT UNSIGNED NOT NULL,
+              start_date DATE NOT NULL,
+              end_date DATE DEFAULT NULL,
+              source ENUM('manual','inferred') NOT NULL DEFAULT 'manual',
+              verified TINYINT(1) NOT NULL DEFAULT 0,
+              notes VARCHAR(500) DEFAULT NULL,
+              created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+              PRIMARY KEY (id),
+              KEY idx_seasonal_period_variant (business_id,variant_id,start_date,end_date)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ");
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS seasonal_pizza_variant_recipes (
+              business_id BIGINT UNSIGNED NOT NULL,
+              variant_id BIGINT UNSIGNED NOT NULL,
+              recipe_id BIGINT UNSIGNED NOT NULL,
+              created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY (business_id,variant_id),
+              UNIQUE KEY uq_seasonal_variant_recipe (business_id,recipe_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ");
+    }
+
     public function index(Request $req): void
     {
         $bid=(int)$req->auth['business_id'];
@@ -16,6 +48,7 @@ class SeasonalPizzaController
             Response::error('Rango de fechas inválido.',422); return;
         }
         $pdo=Database::pdo();
+        self::ensureTables($pdo);
         $p=$pdo->prepare("SELECT id FROM products WHERE business_id=? AND name='Pizza de la semana' LIMIT 1");
         $p->execute([$bid]); $parentId=(int)($p->fetchColumn()?:0);
         if(!$parentId){Response::ok(['parent_product_id'=>null,'from'=>$from,'to'=>$to,'variants'=>[],'recipes'=>[]]);return;}
@@ -80,6 +113,7 @@ class SeasonalPizzaController
         $recipeId=(int)$req->input('recipe_id',0);
         if($variantId<=0||$recipeId<=0){Response::error('Variante y receta son obligatorias.',422);return;}
         $pdo=Database::pdo();
+        self::ensureTables($pdo);
         $v=$pdo->prepare("SELECT pv.id FROM product_variants pv JOIN products p
             ON p.id=pv.product_id AND p.business_id=pv.business_id
             WHERE pv.id=? AND pv.business_id=? AND p.name='Pizza de la semana' LIMIT 1");
@@ -95,7 +129,6 @@ class SeasonalPizzaController
         Response::ok(['success'=>true,'variant_id'=>$variantId,'recipe_id'=>$recipeId]);
     }
 
-
     public function addAvailabilityPeriod(Request $req): void
     {
         $bid=(int)$req->auth['business_id'];
@@ -106,6 +139,7 @@ class SeasonalPizzaController
             Response::error('Indicá un período válido, con inicio y fin.',422);return;
         }
         $pdo=Database::pdo();
+        self::ensureTables($pdo);
         $v=$pdo->prepare("SELECT pv.id FROM product_variants pv JOIN products p
             ON p.id=pv.product_id AND p.business_id=pv.business_id
             WHERE pv.id=? AND pv.business_id=? AND p.name='Pizza de la semana' LIMIT 1");
@@ -126,7 +160,9 @@ class SeasonalPizzaController
     public function unlinkRecipe(Request $req): void
     {
         $bid=(int)$req->auth['business_id'];$variantId=(int)$req->param('variant_id');
-        Database::pdo()->prepare("DELETE FROM seasonal_pizza_variant_recipes WHERE business_id=? AND variant_id=?")
+        $pdo=Database::pdo();
+        self::ensureTables($pdo);
+        $pdo->prepare("DELETE FROM seasonal_pizza_variant_recipes WHERE business_id=? AND variant_id=?")
             ->execute([$bid,$variantId]);
         Response::ok(['success'=>true]);
     }

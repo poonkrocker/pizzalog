@@ -11,8 +11,12 @@ class Cors
     public const DEFAULT_ALLOWED_ORIGINS = [
         'https://tools.pizzalog.net',
         'https://staging.pizzalog.net',
+        'https://app-staging.pizzalog.net',
         'https://app.pizzalog.net',
+        'https://pos.pizzalog.net',
+        'https://carta.pizzalog.net',
         'https://pizzalog.net',
+        'https://www.pizzalog.net',
         'http://localhost:5173',
         'http://localhost:5174',
         'http://localhost:5175',
