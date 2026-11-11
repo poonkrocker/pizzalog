@@ -55,7 +55,7 @@ class Request
 
     public function bearerToken(): ?string
     {
-        $auth = $this->headers['Authorization'] ?? '';
+        $auth = $this->headers['Authorization'] ?? $this->headers['X-Pizzalog-Authorization'] ?? '';
         if (preg_match('/Bearer\s+(.+)/i', $auth, $m)) {
             return trim($m[1]);
         }

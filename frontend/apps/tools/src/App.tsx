@@ -37,12 +37,13 @@ import {
   type CatalogEntry,
 } from '@pizzalog/price-list';
 import { applyImportMappings, findUnmatchedComponents, type ImportSheetMapping } from './importNormalization';
+import { toolsFetch } from './ToolsAuthGate';
 
 const ALL_UNITS: UnitCode[] = ['g', 'kg', 'mg', 'lb', 'oz', 'ml', 'cc', 'L', 'fl_oz_us', 'gal_us', 'unit', 'dozen'];
 
 type ToolsAccount = { id: number; email: string; name: string; expires_at?: string | null };
 
-const API_URL = ((import.meta.env.VITE_API_URL as string | undefined) ?? 'https://api.pizzalog.net').replace(/\/+$/, '');
+
 
 const IMPORT_FIELD_LABELS: Record<ImportSheetMapping['kind'], Array<[string, string]>> = {
   ingredients: [
@@ -179,7 +180,7 @@ export function App({
         .then(async () => {
           setIsSavingWorkspace(true);
           try {
-            const response = await fetch(`${API_URL}/tools/workspace`, {
+            const response = await toolsFetch(`/tools/workspace`, {
               method: 'PUT',
               headers: {
                 'Content-Type': 'application/json',
@@ -512,7 +513,7 @@ export function App({
     setIsSmartImporting(true);
     try {
       const sheets = await parseImportFile(file);
-      const response = await fetch(`${API_URL}/tools/import/preview`, {
+      const response = await toolsFetch(`/tools/import/preview`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -785,7 +786,7 @@ export function App({
     setSyncLoading(true);
     setSyncError(null);
     try {
-      const res = await fetch(`${API_URL}/tools/sync/status`, {
+      const res = await toolsFetch(`/tools/sync/status`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
@@ -805,7 +806,7 @@ export function App({
     setSyncError(null);
     setSyncNotice(null);
     try {
-      const res = await fetch(`${API_URL}/tools/sync/link-app`, {
+      const res = await toolsFetch(`/tools/sync/link-app`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ email: syncLinkEmail, password: syncLinkPassword }),
@@ -826,7 +827,7 @@ export function App({
     setSyncLoading(true);
     setSyncError(null);
     try {
-      const res = await fetch(`${API_URL}/tools/sync/preview`, {
+      const res = await toolsFetch(`/tools/sync/preview`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ direction }),
@@ -850,7 +851,7 @@ export function App({
     setSyncError(null);
     setSyncNotice(null);
     try {
-      const res = await fetch(`${API_URL}/tools/sync/apply`, {
+      const res = await toolsFetch(`/tools/sync/apply`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ direction }),
@@ -861,7 +862,7 @@ export function App({
       if (direction === 'to_app') {
         setSyncNotice(`Sincronización completada hacia Pizzalog App: ${data.data.created_supplies} insumos creados, ${data.data.updated_supplies} precios actualizados.`);
       } else {
-        const wsRes = await fetch(`${API_URL}/tools/workspace`, {
+        const wsRes = await toolsFetch(`/tools/workspace`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         const wsData = await wsRes.json();

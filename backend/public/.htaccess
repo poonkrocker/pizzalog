@@ -5,6 +5,10 @@
 </IfModule>
 CGIPassAuth On
 
+<IfModule mod_headers.c>
+    Header unset Upgrade
+</IfModule>
+
 RewriteEngine On
 
 # Respaldo: copiar Authorization a una variable de entorno accesible.

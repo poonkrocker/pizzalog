@@ -10,6 +10,53 @@ const TOOLS_ENVIRONMENT = (isStagingHost || ((import.meta.env.VITE_TOOLS_ENV as 
 
 const LEGACY_WORKSPACE_KEY = 'pizzalog_tools_workspace_v2';
 
+let preferSameOriginToolsProxy = false;
+
+function canUseSameOriginToolsProxy(): boolean {
+  if (typeof window === 'undefined') return false;
+  const proto = window.location.protocol;
+  const host = window.location.hostname.toLowerCase();
+  return (proto === 'https:' || proto === 'http:') && host.endsWith('pizzalog.net');
+}
+
+export async function toolsFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers);
+  const auth = headers.get('Authorization');
+  if (auth) {
+    headers.set('X-Pizzalog-Authorization', auth);
+  }
+
+  if (preferSameOriginToolsProxy && canUseSameOriginToolsProxy()) {
+    try {
+      return await fetch(`/api-proxy.php?endpoint=${encodeURIComponent(path)}`, {
+        ...init,
+        headers,
+      });
+    } catch {
+      // Si fallara el proxy local, reintentar vía URL directa
+    }
+  }
+
+  try {
+    return await fetch(`${API_URL}${path}`, init);
+  } catch {
+    try {
+      await fetch(`${API_URL}/`, { method: 'GET', cache: 'no-store', mode: 'cors' });
+      return await fetch(`${API_URL}${path}`, init);
+    } catch {
+      if (canUseSameOriginToolsProxy()) {
+        const proxyRes = await fetch(`/api-proxy.php?endpoint=${encodeURIComponent(path)}`, {
+          ...init,
+          headers,
+        });
+        preferSameOriginToolsProxy = true;
+        return proxyRes;
+      }
+      throw new Error('No se pudo conectar con el servidor');
+    }
+  }
+}
+
 function readLegacyWorkspace(): ToolsWorkspaceState | null {
   try {
     const raw = localStorage.getItem(LEGACY_WORKSPACE_KEY);
@@ -73,7 +120,7 @@ async function api<T>(path: string, token?: string, init: RequestInit = {}): Pro
   if (token) headers.set('Authorization', `Bearer ${token}`);
   let response: Response;
   try {
-    response = await fetch(`${API_URL}${path}`, { ...init, headers });
+    response = await toolsFetch(path, { ...init, headers });
   } catch {
     throw new ToolsApiError('No se pudo conectar con el servidor', 0);
   }

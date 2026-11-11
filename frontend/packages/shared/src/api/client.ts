@@ -25,12 +25,67 @@ export class ApiError extends Error {
 type JsonObject = Record<string, unknown>;
 
 export class ApiClient {
+  private preferSameOriginProxy = false;
+
   constructor(private readonly config: ApiClientConfig) {}
 
   private async getBaseUrl(): Promise<string> {
     const b = this.config.baseUrl;
     const url = typeof b === 'function' ? await b() : b;
     return url.replace(/\/+$/, '');
+  }
+
+  private canUseSameOriginProxy(): boolean {
+    if (typeof window === 'undefined') return false;
+    const proto = window.location.protocol;
+    const host = window.location.hostname.toLowerCase();
+    return (proto === 'https:' || proto === 'http:') && host.endsWith('pizzalog.net');
+  }
+
+  private async fetchWithFallback(
+    baseUrl: string,
+    path: string,
+    init: RequestInit,
+    token?: string | null
+  ): Promise<Response> {
+    const proxyHeaders: Record<string, string> = {
+      ...(init.headers as Record<string, string> | undefined),
+    };
+    if (token) {
+      proxyHeaders['X-Pizzalog-Authorization'] = `Bearer ${token}`;
+    }
+
+    if (this.preferSameOriginProxy && this.canUseSameOriginProxy()) {
+      try {
+        return await fetch(`/api-proxy.php?endpoint=${encodeURIComponent(path)}`, {
+          ...init,
+          headers: proxyHeaders,
+        });
+      } catch {
+        // Si fallara el proxy local, reintentar vía URL directa
+      }
+    }
+
+    try {
+      return await fetch(`${baseUrl}${path}`, init);
+    } catch {
+      // 1. Pre-calentar la sesión TLS con un GET simple sin cuerpo (evita fallos de renegociación TLS en POST)
+      try {
+        await fetch(`${baseUrl}/`, { method: 'GET', cache: 'no-store', mode: 'cors' });
+        return await fetch(`${baseUrl}${path}`, init);
+      } catch {
+        // 2. Fallback automático al proxy same-origin (/api-proxy.php) en *.pizzalog.net
+        if (this.canUseSameOriginProxy()) {
+          const proxyRes = await fetch(`/api-proxy.php?endpoint=${encodeURIComponent(path)}`, {
+            ...init,
+            headers: proxyHeaders,
+          });
+          this.preferSameOriginProxy = true;
+          return proxyRes;
+        }
+        throw new Error('Network error');
+      }
+    }
   }
 
   async request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -43,17 +98,22 @@ export class ApiClient {
 
     let res: Response;
     try {
-      res = await fetch(`${baseUrl}${path}`, {
-        method,
-        headers,
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-      });
+      res = await this.fetchWithFallback(
+        baseUrl,
+        path,
+        {
+          method,
+          headers,
+          body: body !== undefined ? JSON.stringify(body) : undefined,
+        },
+        token
+      );
     } catch {
       // Sin respuesta: caída de red. status 0 lo marca como offline.
       throw new ApiError('No se pudo conectar con el servidor', 0);
     }
 
-    if (res.status === 401) {
+    if (res.status === 401 && path !== '/auth/login') {
       this.config.onUnauthorized?.();
       throw new ApiError('Sesión expirada', 401);
     }
@@ -88,7 +148,7 @@ export class ApiClient {
     const baseUrl = await this.getBaseUrl();
     let res: Response;
     try {
-      res = await fetch(`${baseUrl}${path}`, { method: 'POST', headers, body: form });
+      res = await this.fetchWithFallback(baseUrl, path, { method: 'POST', headers, body: form }, token);
     } catch {
       throw new ApiError('No se pudo conectar con el servidor', 0);
     }
