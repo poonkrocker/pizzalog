@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { createInitialDemoWorkspace, type ToolsWorkspaceState } from './demoData';
+import { createInitialDemoWorkspace, normalizeWorkspace, type ToolsWorkspaceState } from './demoData';
 import { App } from './App';
 import { CommercialPlansModal } from './CommercialPlansModal';
 
@@ -81,17 +81,18 @@ function removeLegacyWorkspace(): void {
 
 async function restoreOrMigrateWorkspace(token: string): Promise<{ workspace: ToolsWorkspaceState; updatedAt: string | null }> {
   const server = await api<{ workspace: ToolsWorkspaceState | null; updated_at?: string | null }>('/tools/workspace', token);
-  if (server.workspace) return { workspace: server.workspace, updatedAt: server.updated_at ?? null };
+  if (server.workspace) return { workspace: normalizeWorkspace(server.workspace), updatedAt: server.updated_at ?? null };
 
   const legacy = readLegacyWorkspace();
   if (!legacy) return { workspace: createInitialDemoWorkspace(), updatedAt: null };
 
+  const normalizedLegacy = normalizeWorkspace(legacy);
   const saved = await api<{ saved: boolean; updated_at?: string | null }>('/tools/workspace', token, {
     method: 'PUT',
-    body: JSON.stringify({ workspace: legacy }),
+    body: JSON.stringify({ workspace: normalizedLegacy }),
   });
   removeLegacyWorkspace();
-  return { workspace: legacy, updatedAt: saved.updated_at ?? null };
+  return { workspace: normalizedLegacy, updatedAt: saved.updated_at ?? null };
 }
 
 function readSessionToken(): string | null {

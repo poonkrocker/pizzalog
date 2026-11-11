@@ -741,7 +741,15 @@ class ToolsSyncController
                 }
             }
 
+            $bizNameStmt = $pdo->prepare('SELECT name FROM businesses WHERE id = ? LIMIT 1');
+            $bizNameStmt->execute([$bid]);
+            $appBusinessName = trim((string) ($bizNameStmt->fetchColumn() ?: ''));
+            $resolvedBusinessName = $appBusinessName !== ''
+                ? $appBusinessName
+                : (trim((string) ($existingWs['businessName'] ?? '')) ?: 'Mi Pizzería');
+
             $newWs = [
+                'businessName' => $resolvedBusinessName,
                 'currency' => $existingWs['currency'] ?? 'ARS',
                 'locale' => $existingWs['locale'] ?? 'es-AR',
                 'unitSystem' => $existingWs['unitSystem'] ?? 'metric',
@@ -787,6 +795,7 @@ class ToolsSyncController
                 'imported_products' => count($appProducts),
                 'imported_sales' => count($salesHistory),
                 'updated_at' => $updatedAt ?: null,
+                'workspace' => $newWs,
             ]);
         }
     }

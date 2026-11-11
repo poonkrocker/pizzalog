@@ -18,6 +18,7 @@ import {
   createInitialDemoWorkspace,
   createEmptyWorkspace,
   isDemoWorkspace,
+  normalizeWorkspace,
   type LocaleCode,
   type OperatingExpenseItem,
   type ToolsWorkspaceState,
@@ -88,7 +89,7 @@ export function App({
   initialUpdatedAt?: string | null;
   onLogout: () => void;
 }) {
-  const [state, setState] = useState<ToolsWorkspaceState>(initialWorkspace);
+  const [state, setState] = useState<ToolsWorkspaceState>(() => normalizeWorkspace(initialWorkspace));
   const workspaceUpdatedAtRef = useRef<string | null>(initialUpdatedAt ?? null);
   const [workspaceConflict, setWorkspaceConflict] = useState<string | null>(null);
   const [importEquivalences, setImportEquivalences] = useState<Record<string, string>>({});
@@ -862,13 +863,18 @@ export function App({
       if (direction === 'to_app') {
         setSyncNotice(`Sincronización completada hacia Pizzalog App: ${data.data.created_supplies} insumos creados, ${data.data.updated_supplies} precios actualizados.`);
       } else {
-        const wsRes = await toolsFetch(`/tools/workspace`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const wsData = await wsRes.json();
-        if (wsData.ok && wsData.data?.workspace) {
-          workspaceUpdatedAtRef.current = wsData.data.updated_at ?? data.data?.updated_at ?? null;
-          setState(wsData.data.workspace);
+        if (data.data?.workspace) {
+          workspaceUpdatedAtRef.current = data.data.updated_at ?? workspaceUpdatedAtRef.current;
+          setState(normalizeWorkspace(data.data.workspace));
+        } else {
+          const wsRes = await toolsFetch(`/tools/workspace`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const wsData = await wsRes.json();
+          if (wsData.ok && wsData.data?.workspace) {
+            workspaceUpdatedAtRef.current = wsData.data.updated_at ?? data.data?.updated_at ?? null;
+            setState(normalizeWorkspace(wsData.data.workspace));
+          }
         }
         const importedProds = data.data.imported_products ?? data.data.imported_recipes ?? 0;
         const importedSales = data.data.imported_sales ?? 0;

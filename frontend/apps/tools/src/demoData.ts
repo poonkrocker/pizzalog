@@ -118,8 +118,65 @@ export const I18N: Record<
 };
 
 export function isDemoWorkspace(state: ToolsWorkspaceState): boolean {
-  return state.businessName.includes('Il Forno') ||
-    state.catalog.recipes.some((r) => r.id === 'prod_margherita' && r.name.includes('Demo'));
+  const name = typeof state?.businessName === 'string' ? state.businessName : '';
+  const recipes = Array.isArray(state?.catalog?.recipes) ? state.catalog.recipes : [];
+  return name.includes('Il Forno') ||
+    recipes.some((r) => r?.id === 'prod_margherita' && typeof r?.name === 'string' && r.name.includes('Demo'));
+}
+
+export function normalizeWorkspace(raw: Partial<ToolsWorkspaceState> | null | undefined): ToolsWorkspaceState {
+  if (!raw || typeof raw !== 'object' || !raw.catalog || typeof raw.catalog !== 'object') {
+    return createInitialDemoWorkspace();
+  }
+  const locale: LocaleCode =
+    raw.locale === 'pt-BR' || raw.locale === 'en' || raw.locale === 'es-AR' ? raw.locale : 'es-AR';
+  const currency = typeof raw.currency === 'string' && raw.currency.trim() !== '' ? raw.currency.trim() : 'ARS';
+  const base = createEmptyWorkspace(locale, currency);
+
+  return {
+    ...base,
+    ...raw,
+    businessName:
+      typeof raw.businessName === 'string' && raw.businessName.trim() !== ''
+        ? raw.businessName
+        : 'Mi Pizzería',
+    currency,
+    locale,
+    unitSystem: raw.unitSystem === 'us_customary' ? 'us_customary' : 'metric',
+    defaultTargetFoodCostPct:
+      typeof raw.defaultTargetFoodCostPct === 'number' && Number.isFinite(raw.defaultTargetFoodCostPct)
+        ? raw.defaultTargetFoodCostPct
+        : 30,
+    defaultRoundingIncrement:
+      typeof raw.defaultRoundingIncrement === 'number' && Number.isFinite(raw.defaultRoundingIncrement) && raw.defaultRoundingIncrement > 0
+        ? raw.defaultRoundingIncrement
+        : 100,
+    defaultPackagingCost:
+      typeof raw.defaultPackagingCost === 'number' && Number.isFinite(raw.defaultPackagingCost)
+        ? raw.defaultPackagingCost
+        : 0,
+    defaultChannelFeePct:
+      typeof raw.defaultChannelFeePct === 'number' && Number.isFinite(raw.defaultChannelFeePct)
+        ? raw.defaultChannelFeePct
+        : 0,
+    catalog: {
+      ...raw.catalog,
+      ingredients: Array.isArray(raw.catalog.ingredients) ? raw.catalog.ingredients : [],
+      purchase_prices: Array.isArray(raw.catalog.purchase_prices) ? raw.catalog.purchase_prices : [],
+      recipes: Array.isArray(raw.catalog.recipes) ? raw.catalog.recipes : [],
+    },
+    productSalesMap:
+      raw.productSalesMap && typeof raw.productSalesMap === 'object' && !Array.isArray(raw.productSalesMap)
+        ? raw.productSalesMap
+        : {},
+    salesHistory: Array.isArray(raw.salesHistory) ? raw.salesHistory : [],
+    operatingExpenses: Array.isArray(raw.operatingExpenses) ? raw.operatingExpenses : [],
+    snapshots: Array.isArray(raw.snapshots) ? raw.snapshots : [],
+    equivalences:
+      raw.equivalences && typeof raw.equivalences === 'object' && !Array.isArray(raw.equivalences)
+        ? raw.equivalences
+        : {},
+  };
 }
 
 export function createEmptyWorkspace(locale: LocaleCode = 'es-AR', currency = 'ARS'): ToolsWorkspaceState {

@@ -35,6 +35,21 @@ class ToolsWorkspaceController
             ) {
                 Response::error('El espacio de trabajo guardado está dañado o tiene una versión incompatible. No se sobrescribieron los datos.', 500);
             }
+            if (empty($workspace['businessName']) || !is_string($workspace['businessName'])) {
+                $workspace['businessName'] = 'Mi Pizzería';
+            }
+            $workspace['currency'] = is_string($workspace['currency'] ?? null) && $workspace['currency'] !== '' ? $workspace['currency'] : 'ARS';
+            $workspace['locale'] = in_array($workspace['locale'] ?? '', ['es-AR', 'pt-BR', 'en'], true) ? $workspace['locale'] : 'es-AR';
+            $workspace['unitSystem'] = ($workspace['unitSystem'] ?? '') === 'us_customary' ? 'us_customary' : 'metric';
+            $workspace['defaultTargetFoodCostPct'] = is_numeric($workspace['defaultTargetFoodCostPct'] ?? null) ? (float) $workspace['defaultTargetFoodCostPct'] : 30;
+            $workspace['defaultRoundingIncrement'] = is_numeric($workspace['defaultRoundingIncrement'] ?? null) ? (float) $workspace['defaultRoundingIncrement'] : 100;
+            $workspace['defaultPackagingCost'] = is_numeric($workspace['defaultPackagingCost'] ?? null) ? (float) $workspace['defaultPackagingCost'] : 0;
+            $workspace['defaultChannelFeePct'] = is_numeric($workspace['defaultChannelFeePct'] ?? null) ? (float) $workspace['defaultChannelFeePct'] : 0;
+            $workspace['operatingExpenses'] = array_values((array) ($workspace['operatingExpenses'] ?? []));
+            $workspace['salesHistory'] = array_values((array) ($workspace['salesHistory'] ?? []));
+            $workspace['snapshots'] = array_values((array) ($workspace['snapshots'] ?? []));
+            $workspace['productSalesMap'] = (object) (is_array($workspace['productSalesMap'] ?? null) ? $workspace['productSalesMap'] : []);
+            $workspace['equivalences'] = (object) (is_array($workspace['equivalences'] ?? null) ? $workspace['equivalences'] : []);
         }
 
         Response::ok([
