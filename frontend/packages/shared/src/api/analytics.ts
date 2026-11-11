@@ -101,14 +101,31 @@ export function analyticsApi(client: ApiClient) {
         variants: Array<{
           variant_id: number; label: string; price: number; is_active: number;
           units: number; revenue: number; tickets: number;
+          sale_days?: number; span_days?: number; units_per_sale_day?: number | null;
+          midday_units?: number; night_units?: number;
+          local_units?: number; delivery_units?: number;
           first_sale: string | null; last_sale: string | null;
           verified_days: number; units_per_available_day: number | null;
           recipe_id: number | null; recipe_name: string | null;
         }>;
         recipes: Array<{ id: number; name: string; linked_product_id: number | null; yield_quantity: number; yield_unit: string; price: number }>;
       }>(`/analytics/seasonal-pizzas${queryStr(params)}`),
-    linkSeasonalPizzaRecipe: (variantId: number, recipeId: number) =>
-      client.put<{ success: boolean }>(`/analytics/seasonal-pizzas/${variantId}/recipe`, { recipe_id: recipeId }),
+    linkSeasonalPizzaRecipe: (
+      variantId: number,
+      recipeOrPayload: number | {
+        recipe_id?: number;
+        name?: string;
+        yield_quantity?: number;
+        yield_unit?: string;
+        price?: number;
+        target_food_cost_pct?: number;
+        components: Array<{ component_type: 'supply' | 'recipe'; component_id: number; quantity: number; unit: string }>;
+      },
+    ) =>
+      client.put<{ success: boolean; variant_id: number; recipe_id: number }>(
+        `/analytics/seasonal-pizzas/${variantId}/recipe`,
+        typeof recipeOrPayload === 'number' ? { recipe_id: recipeOrPayload } : recipeOrPayload,
+      ),
     unlinkSeasonalPizzaRecipe: (variantId: number) =>
       client.delete<{ success: boolean }>(`/analytics/seasonal-pizzas/${variantId}/recipe`),
     addSeasonalPizzaAvailability: (variantId: number, startDate: string, endDate: string) =>
