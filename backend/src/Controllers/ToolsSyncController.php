@@ -547,7 +547,8 @@ class ToolsSyncController
                     $ar = $appRecipeByProdId[$pid];
                     $yieldQty = (float) ($ar['yield_quantity'] > 0 ? $ar['yield_quantity'] : 1);
                     $yieldUnit = self::normalizeCostEngineUnit((string) ($ar['yield_unit'] ?? 'unit'), 'unit');
-                    $targetFoodCost = (float) ($ar['target_food_cost_pct'] > 0 ? $ar['target_food_cost_pct'] : 30);
+                    $rawFc = (float) ($ar['target_food_cost_pct'] ?? 30);
+                    $targetFoodCost = ($rawFc > 0 && $rawFc < 100) ? $rawFc : 30.0;
 
                     try {
                         $compStmt->execute([$bid, $ar['id']]);
@@ -691,12 +692,17 @@ class ToolsSyncController
             // Conjunto de IDs demo a eliminar para evitar duplicados y datos ficticios
             $demoIds = [
                 'prod_margherita', 'prod_focaccia_a', 'prod_pollo_merma', 'prod_trufa_incompleta',
+                'sub_masa_poolish', 'sub_salsa',
                 'sub_masa_napolitana', 'sub_salsa_san_marzano', 'sub_aceite_ajo_romero',
-                'ing_harina_00', 'ing_agua', 'ing_levadura_fresca', 'ing_sal_fina', 'ing_aceite_oliva',
+                'ing_harina', 'ing_levadura', 'ing_sal', 'ing_agua', 'ing_tomate',
+                'ing_aceite', 'ing_mozzarella', 'ing_pollo', 'ing_garbanzo', 'ing_trufa',
+                'ing_harina_00', 'ing_levadura_fresca', 'ing_sal_fina', 'ing_aceite_oliva',
                 'ing_tomate_pelado', 'ing_mozzarella_fior', 'ing_albahaca_fresca', 'ing_pechuga_pollo',
                 'ing_trufa_negra', 'ing_caja_pizza_33', 'ing_bolsa_delivery',
             ];
             $demoSet = array_flip($demoIds);
+            $demoExpenseSet = array_flip(['exp_1', 'exp_2', 'exp_3', 'exp_4']);
+            $demoSnapshotSet = array_flip(['snap_margh_sep', 'snap_margh_oct', 'snap_margh_nov']);
 
             // Preservar recetas personalizadas existentes que no sean demo ni colisionen con las de App
             $combinedRecipes = array_merge($subrecipes, $productRecipes);
@@ -748,6 +754,24 @@ class ToolsSyncController
                 ? $appBusinessName
                 : (trim((string) ($existingWs['businessName'] ?? '')) ?: 'Mi Pizzería');
 
+            $cleanExpenses = [];
+            foreach ((array) ($existingWs['operatingExpenses'] ?? []) as $exExp) {
+                $eid = (string) ($exExp['id'] ?? '');
+                $ename = (string) ($exExp['name'] ?? '');
+                if (!isset($demoExpenseSet[$eid]) && !str_contains($ename, '(Demo)')) {
+                    $cleanExpenses[] = $exExp;
+                }
+            }
+
+            $cleanSnapshots = [];
+            foreach ((array) ($existingWs['snapshots'] ?? []) as $exSnap) {
+                $sid = (string) ($exSnap['snapshot_id'] ?? '');
+                $rid = (string) ($exSnap['recipe_id'] ?? '');
+                if (!isset($demoSnapshotSet[$sid]) && !isset($demoSet[$rid])) {
+                    $cleanSnapshots[] = $exSnap;
+                }
+            }
+
             $newWs = [
                 'businessName' => $resolvedBusinessName,
                 'currency' => $existingWs['currency'] ?? 'ARS',
@@ -764,10 +788,10 @@ class ToolsSyncController
                     'purchase_prices' => array_values($purchasePrices),
                     'recipes' => array_values($combinedRecipes),
                 ],
-                'operatingExpenses' => array_values((array) ($existingWs['operatingExpenses'] ?? [])),
+                'operatingExpenses' => array_values($cleanExpenses),
                 'productSalesMap' => (object) $productSalesMap,
                 'salesHistory' => array_values($salesHistory),
-                'snapshots' => array_values((array) ($existingWs['snapshots'] ?? [])),
+                'snapshots' => array_values($cleanSnapshots),
                 'equivalences' => (object) ($existingWs['equivalences'] ?? []),
                 'pricingScenario' => $existingWs['pricingScenario'] ?? [
                     'target_margin_pct' => 70,

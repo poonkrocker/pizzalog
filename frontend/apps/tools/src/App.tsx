@@ -902,20 +902,41 @@ export function App({
     const rows = products.map((prod) => {
       const res = results.get(prod.id);
       const salesPlan = wsState.productSalesMap?.[prod.id] ?? { sellingPrice: null };
-      const customPrice = salesPlan.sellingPrice && salesPlan.sellingPrice > 0 ? salesPlan.sellingPrice : undefined;
-      const pricing = res
-        ? calculatePricingScenario({
-            unit_cost: res.raw_unit_cost,
-            status: res.status,
-            currency: wsState.currency,
-            target_food_cost_pct: prod.target_food_cost_pct ?? wsState.defaultTargetFoodCostPct,
-            rounding_increment: wsState.defaultRoundingIncrement,
+      const rawSellingPrice = Number(salesPlan.sellingPrice);
+      const customPrice = Number.isFinite(rawSellingPrice) && rawSellingPrice > 0 ? rawSellingPrice : undefined;
+
+      const rawTargetFc = Number(prod.target_food_cost_pct ?? wsState.defaultTargetFoodCostPct ?? 30);
+      const safeTargetFc = Number.isFinite(rawTargetFc) && rawTargetFc > 0 && rawTargetFc < 100 ? rawTargetFc : 30;
+      const rawRounding = Number(wsState.defaultRoundingIncrement ?? 100);
+      const safeRounding = Number.isFinite(rawRounding) && rawRounding > 0 ? rawRounding : 100;
+      const rawPackaging = Number(wsState.defaultPackagingCost ?? 0);
+      const safePackaging = Number.isFinite(rawPackaging) && rawPackaging >= 0 ? rawPackaging : 0;
+      const rawChannelFee = Number(wsState.defaultChannelFeePct ?? 0);
+      const safeChannelFee = Number.isFinite(rawChannelFee) && rawChannelFee >= 0 && rawChannelFee < 100 ? rawChannelFee : 0;
+
+      let pricing: ReturnType<typeof calculatePricingScenario> | null = null;
+      if (res) {
+        try {
+          const canPrice =
+            res.status === 'complete' &&
+            typeof res.raw_unit_cost === 'number' &&
+            Number.isFinite(res.raw_unit_cost) &&
+            res.raw_unit_cost > 0;
+          pricing = calculatePricingScenario({
+            unit_cost: canPrice ? res.raw_unit_cost : null,
+            status: canPrice ? 'complete' : 'incomplete',
+            currency: wsState.currency || 'ARS',
+            target_food_cost_pct: safeTargetFc,
+            rounding_increment: safeRounding,
             rounding_mode: 'ceil',
             selling_price: customPrice,
-            packaging_cost: wsState.defaultPackagingCost,
-            channel_fee_pct: wsState.defaultChannelFeePct,
-          })
-        : null;
+            packaging_cost: safePackaging,
+            channel_fee_pct: safeChannelFee,
+          });
+        } catch {
+          pricing = null;
+        }
+      }
 
       // Filtrar registros de ventas para este producto
       let units: number | null = null;
@@ -923,16 +944,17 @@ export function App({
       let periodNetRevenue: number | null = null;
 
       const matchingSales = salesHistory.filter((sale) => {
-        if (sale.product_id !== prod.id) return false;
-        if (periodFilter !== 'all' && !sale.period_start.startsWith(periodFilter)) return false;
+        if (!sale || sale.product_id !== prod.id) return false;
+        const pStart = typeof sale.period_start === 'string' ? sale.period_start : '';
+        if (periodFilter !== 'all' && !pStart.startsWith(periodFilter)) return false;
         if (channelFilter !== 'all' && sale.channel !== channelFilter) return false;
         return true;
       });
 
       if (matchingSales.length > 0) {
-        units = matchingSales.reduce((acc, s) => acc + s.quantity, 0);
-        periodGrossRevenue = matchingSales.reduce((acc, s) => acc + (s.gross_revenue ?? 0), 0);
-        periodNetRevenue = matchingSales.reduce((acc, s) => acc + (s.net_revenue ?? 0), 0);
+        units = matchingSales.reduce((acc, s) => acc + (Number(s.quantity) || 0), 0);
+        periodGrossRevenue = matchingSales.reduce((acc, s) => acc + (Number(s.gross_revenue) || 0), 0);
+        periodNetRevenue = matchingSales.reduce((acc, s) => acc + (Number(s.net_revenue) || 0), 0);
       } else if (periodFilter === 'all' && channelFilter === 'all' && salesPlan.monthlyUnitsSold !== null && salesPlan.monthlyUnitsSold !== undefined && Number.isFinite(Number(salesPlan.monthlyUnitsSold))) {
         units = Math.max(0, Number(salesPlan.monthlyUnitsSold));
       }
@@ -940,7 +962,7 @@ export function App({
       const isComplete = res?.status === 'complete' && pricing?.status === 'complete';
       const hasSalesData = units !== null;
       const unitCost = isComplete && res?.raw_unit_cost ? res.raw_unit_cost : 0;
-      const evaluatedPrice = isComplete && pricing?.raw_evaluated_price ? pricing.raw_evaluated_price : 0;
+      const evaluatedPrice = isComplete && pricing?.raw_evaluated_price ? pricing.raw_evaluated_price : (customPrice ?? 0);
       const unitGrossProfit = isComplete && pricing?.raw_gross_profit ? pricing.raw_gross_profit : 0;
 
       const monthlyRevenue = isComplete && hasSalesData
@@ -952,7 +974,9 @@ export function App({
       // Diagnóstico de datos incompletos
       let incompleteReason: string | null = null;
       if (!res || res.status !== 'complete') {
-        incompleteReason = 'Falta costo o precio de compra de algún ingrediente';
+        incompleteReason = (prod.components?.length ?? 0) === 0 && !prod.bakers_dough
+          ? 'Sin receta cargada (hacé clic en ✏️ Receta para armarla)'
+          : 'Falta costo o precio de compra de algún ingrediente';
       } else if (!pricing || pricing.status !== 'complete' || evaluatedPrice <= 0) {
         incompleteReason = 'Falta definir precio de venta sugerido o manual';
       }
@@ -1039,7 +1063,7 @@ export function App({
   const availablePeriods = useMemo(() => {
     const periods = new Set<string>();
     for (const s of state.salesHistory ?? []) {
-      const ym = s.period_start.slice(0, 7);
+      const ym = typeof s?.period_start === 'string' ? s.period_start.slice(0, 7) : '';
       if (ym) periods.add(ym);
     }
     return [...periods].sort().reverse();
@@ -1048,7 +1072,7 @@ export function App({
   const availableChannels = useMemo(() => {
     const channels = new Set<string>();
     for (const s of state.salesHistory ?? []) {
-      if (s.channel && s.channel.trim()) channels.add(s.channel.trim());
+      if (typeof s?.channel === 'string' && s.channel.trim()) channels.add(s.channel.trim());
     }
     return [...channels].sort();
   }, [state.salesHistory]);
@@ -3249,11 +3273,17 @@ export function App({
               <tbody>
                 {monthlySummary.rows.map((row) => {
                   const { prod, res, pricing, isComplete, units, customPrice, monthlyContribution, matrixClass, matrixLabel } = row;
+                  const hasNoRecipeYet = (prod.components?.length ?? 0) === 0 && !prod.bakers_dough;
                   return (
                     <tr key={prod.id}>
                       <td>
                         <strong>{prod.name}</strong>
-                        {!isComplete && res && res.missing_inputs.length > 0 && (
+                        {!isComplete && hasNoRecipeYet && (
+                          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                            📋 Sin receta cargada — hacé clic en «✏️ Receta» para asignar insumos
+                          </div>
+                        )}
+                        {!isComplete && !hasNoRecipeYet && res && res.missing_inputs.length > 0 && (
                           <div style={{ fontSize: 11, color: 'var(--warn)', marginTop: 4 }}>
                             ⚠️ Falta precio:{' '}
                             {res.missing_inputs.map((m) => m.ingredient_name).join(', ')} (Parcial: {state.currency} {res.partial_batch_cost})
@@ -3264,7 +3294,7 @@ export function App({
                         {isComplete && matrixClass ? (
                           <span className={`badge badge--${matrixClass}`}>{matrixLabel}</span>
                         ) : (
-                          <span className="badge badge--warn">{t.statusIncomplete}</span>
+                          <span className="badge badge--warn">{hasNoRecipeYet ? 'SIN RECETA' : t.statusIncomplete}</span>
                         )}
                       </td>
                       <td>
@@ -3273,7 +3303,7 @@ export function App({
                             {state.currency} {res.unit_cost}
                           </strong>
                         ) : (
-                          <span style={{ color: 'var(--warn)', fontWeight: 700 }}>INCOMPLETO</span>
+                          <span style={{ color: 'var(--warn)', fontWeight: 700 }}>{hasNoRecipeYet ? 'SIN RECETA' : 'INCOMPLETO'}</span>
                         )}
                       </td>
                       <td>

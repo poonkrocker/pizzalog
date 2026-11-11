@@ -1,7 +1,80 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { Component, useEffect, useState, type ErrorInfo, type FormEvent, type ReactNode } from 'react';
 import { createInitialDemoWorkspace, normalizeWorkspace, type ToolsWorkspaceState } from './demoData';
 import { App } from './App';
 import { CommercialPlansModal } from './CommercialPlansModal';
+
+class ToolsErrorBoundary extends Component<
+  { children: ReactNode; workspace: ToolsWorkspaceState; onResetDemo: () => void; onLogout: () => void },
+  { error: Error | null }
+> {
+  override state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  override componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error('ToolsErrorBoundary caught error:', error, info);
+  }
+
+  override render() {
+    if (this.state.error) {
+      return (
+        <main className="tools-auth">
+          <section className="tools-auth-card" style={{ maxWidth: 580 }}>
+            <div className="tools-auth-kicker">PIZZALOG / TOOLS — RECUPERACIÓN</div>
+            <h1>Se detectó un problema al mostrar el espacio de trabajo</h1>
+            <p>Tus datos siguen guardados. Podés descargar un respaldo JSON, reintentar o cerrar sesión.</p>
+            <div className="alert-banner" style={{ wordBreak: 'break-word' }}>
+              {this.state.error.message || 'Error inesperado de renderizado'}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+              <button
+                className="btn btn--primary tools-auth-submit"
+                type="button"
+                onClick={() => {
+                  this.setState({ error: null });
+                  window.location.reload();
+                }}
+              >
+                🔄 Reintentar carga
+              </button>
+              <button
+                className="btn btn--secondary tools-auth-submit"
+                type="button"
+                onClick={() => {
+                  const blob = new Blob([JSON.stringify(this.props.workspace, null, 2)], { type: 'application/json' });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `pizzalog-tools-recovery-${new Date().toISOString().slice(0, 10)}.json`;
+                  a.click();
+                  URL.revokeObjectURL(url);
+                }}
+              >
+                💾 Descargar respaldo JSON
+              </button>
+              <button
+                className="btn btn--secondary tools-auth-submit"
+                type="button"
+                onClick={() => {
+                  this.setState({ error: null });
+                  this.props.onResetDemo();
+                }}
+              >
+                🧪 Restaurar espacio de trabajo base
+              </button>
+              <button className="btn tools-auth-submit" type="button" onClick={this.props.onLogout}>
+                Cerrar sesión
+              </button>
+            </div>
+          </section>
+        </main>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const API_URL = ((import.meta.env.VITE_API_URL as string | undefined) ?? 'https://api.pizzalog.net').replace(/\/+$/, '');
 const TOKEN_KEY = 'pizzalog_tools_session';
@@ -387,7 +460,15 @@ export function ToolsAuthGate() {
   }
 
   if (token && account && workspace) {
-    return <App token={token} account={account} initialWorkspace={workspace} initialUpdatedAt={workspaceUpdatedAt} onLogout={logout} />;
+    return (
+      <ToolsErrorBoundary
+        workspace={workspace}
+        onResetDemo={() => setWorkspace(createInitialDemoWorkspace())}
+        onLogout={logout}
+      >
+        <App token={token} account={account} initialWorkspace={workspace} initialUpdatedAt={workspaceUpdatedAt} onLogout={logout} />
+      </ToolsErrorBoundary>
+    );
   }
 
   if (mode === 'activate' || mode === 'reset') {
