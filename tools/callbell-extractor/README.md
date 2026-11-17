@@ -14,7 +14,7 @@ Herramienta independiente de Pizzalog. Esta primera etapa identifica las respues
 4. Abrí Callbell Shop e iniciá sesión normalmente con Google.
 5. Entrá al administrador y abrí la sección del catálogo.
 6. Ejecutá el marcador desde el menú de marcadores.
-7. Volvé a cargar el listado o navegá por sus páginas/categorías para que se produzcan nuevas llamadas de datos. El capturador solo ve respuestas cargadas después de activarlo.
+7. Usá la navegación interna de Callbell para volver a abrir el listado y recorrer sus páginas/categorías. El capturador solo ve respuestas cargadas después de activarlo. Si hacés una recarga completa del navegador, ejecutá el marcador otra vez.
 8. Tocá "Descargar diagnóstico JSON".
 
 ## Seguridad y privacidad
@@ -22,7 +22,7 @@ Herramienta independiente de Pizzalog. Esta primera etapa identifica las respues
 - El script corre en la pestaña de Callbell.
 - No lee ni exporta cookies, contraseñas, localStorage, sessionStorage ni encabezados de autenticación.
 - No envía los datos a ningún servidor.
-- Captura respuestas JSON de fetch y XMLHttpRequest de hasta 8 MiB cada una, con un máximo de 500 respuestas.
+- Captura respuestas JSON de fetch y XMLHttpRequest de hasta 8 MiB cada una, con un máximo de 500 respuestas. Omite URLs que parezcan corresponder a autenticación, sesiones, clientes, conversaciones, mensajes, pedidos, pagos o perfiles.
 - El archivo puede contener información comercial o datos de clientes; revisalo antes de compartirlo.
 - No captura archivos binarios ni respuestas HTML.
 - Si Callbell bloquea scripts externos mediante Content Security Policy, el marcador no podrá cargar el archivo remoto; en ese caso prepararemos una variante autocontenida.
