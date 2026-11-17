@@ -286,4 +286,222 @@ class SeasonalPizzaController
             ->execute([$bid,$variantId]);
         Response::ok(['success'=>true]);
     }
+
+    private static function normalizeKey(string $val): string
+    {
+        $v = mb_strtolower(trim($val), 'UTF-8');
+        $v = preg_replace('/\s*\[ingrediente\s*\d+\]\s*$/iu', '', $v) ?? $v;
+        $v = strtr($v, [
+            'á' => 'a', 'é' => 'e', 'í' => 'i', 'ó' => 'o', 'ú' => 'u',
+            'ä' => 'a', 'ë' => 'e', 'ï' => 'i', 'ö' => 'o', 'ü' => 'u',
+            'à' => 'a', 'è' => 'e', 'ì' => 'i', 'ò' => 'o', 'ù' => 'u',
+            'ñ' => 'n', 'ç' => 'c',
+        ]);
+        $v = preg_replace('/[^a-z0-9]+/u', ' ', $v) ?? $v;
+        return trim($v);
+    }
+
+    public function revertImport(Request $req): void
+    {
+        $bid = (int) $req->auth['business_id'];
+        $mode = trim((string) $req->input('mode', 'date'));
+        $date = trim((string) $req->input('date', '2026-11-17'));
+        $dryRun = (bool) $req->input('dry_run', false);
+        $pizzaNames = (array) ($req->input('pizza_names') ?? []);
+        $ingredientNames = (array) ($req->input('ingredient_names') ?? []);
+
+        $pdo = Database::pdo();
+        self::ensureTables($pdo);
+
+        $recipeRows = [];
+        if ($mode === 'csv' && count($pizzaNames) > 0) {
+            $targetPizzaKeys = [];
+            foreach ($pizzaNames as $pn) {
+                $k = self::normalizeKey((string) $pn);
+                if ($k !== '') {
+                    $targetPizzaKeys[$k] = true;
+                    $noPrefix = preg_replace('/^pizza\s+/u', '', $k) ?? $k;
+                    if ($noPrefix !== '') {
+                        $targetPizzaKeys[$noPrefix] = true;
+                    }
+                }
+            }
+
+            $stmt = $pdo->prepare("
+                SELECT id, name, price, created_at
+                  FROM recipe_studio_recipes
+                 WHERE business_id = ? AND linked_product_id IS NULL AND recipe_type = 'product'
+                 ORDER BY id ASC
+            ");
+            $stmt->execute([$bid]);
+            foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+                $fullKey = self::normalizeKey((string) $row['name']);
+                $baseName = explode('·', (string) $row['name'])[0] ?? (string) $row['name'];
+                $baseKey = self::normalizeKey($baseName);
+                $noPrefixKey = preg_replace('/^pizza\s+/u', '', $baseKey) ?? $baseKey;
+                if (isset($targetPizzaKeys[$fullKey]) || isset($targetPizzaKeys[$baseKey]) || isset($targetPizzaKeys[$noPrefixKey])) {
+                    $recipeRows[] = $row;
+                }
+            }
+        } else {
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+                Response::error('Indicá una fecha válida (YYYY-MM-DD).', 422);
+                return;
+            }
+            // Cubrir tanto la fecha en UTC como la madrugada hora Argentina (UTC-3 -> hasta +08:00 UTC del día siguiente)
+            $startTs = $date . ' 00:00:00';
+            $endTs = date('Y-m-d', strtotime($date . ' +1 day')) . ' 08:00:00';
+            $stmt = $pdo->prepare("
+                SELECT id, name, price, created_at
+                  FROM recipe_studio_recipes
+                 WHERE business_id = ?
+                   AND linked_product_id IS NULL
+                   AND recipe_type = 'product'
+                   AND created_at >= ?
+                   AND created_at <= ?
+                 ORDER BY id ASC
+            ");
+            $stmt->execute([$bid, $startTs, $endTs]);
+            $recipeRows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        }
+
+        $recipeIds = array_map(static fn(array $r): int => (int) $r['id'], $recipeRows);
+
+        // Contar vínculos en seasonal_pizza_variant_recipes y componentes en recipe_studio_components
+        $linksCount = 0;
+        $componentsCount = 0;
+        if (count($recipeIds) > 0) {
+            $placeholders = implode(',', array_fill(0, count($recipeIds), '?'));
+            $linkStmt = $pdo->prepare("SELECT COUNT(*) FROM seasonal_pizza_variant_recipes WHERE business_id = ? AND recipe_id IN ($placeholders)");
+            $linkStmt->execute(array_merge([$bid], $recipeIds));
+            $linksCount = (int) $linkStmt->fetchColumn();
+
+            $compStmt = $pdo->prepare("SELECT COUNT(*) FROM recipe_studio_components WHERE business_id = ? AND recipe_id IN ($placeholders)");
+            $compStmt->execute(array_merge([$bid], $recipeIds));
+            $componentsCount = (int) $compStmt->fetchColumn();
+        }
+
+        // Identificar insumos auto-creados por el importador CSV (category = 'Otros', cost IS NULL, stock = 0)
+        // que no estén usados por ninguna otra receta fuera del lote a eliminar ni tengan movimientos de stock
+        $excludeRecipeSql = '';
+        $supplyParams = [$bid];
+        if (count($recipeIds) > 0) {
+            $placeholders = implode(',', array_fill(0, count($recipeIds), '?'));
+            $excludeRecipeSql = " AND rsc.recipe_id NOT IN ($placeholders)";
+            $supplyParams = array_merge([$bid], $recipeIds);
+        }
+
+        if ($mode === 'csv' && count($ingredientNames) > 0) {
+            $targetIngKeys = [];
+            foreach ($ingredientNames as $in) {
+                $k = self::normalizeKey((string) $in);
+                if ($k !== '') {
+                    $targetIngKeys[$k] = true;
+                }
+            }
+            $supStmt = $pdo->prepare("
+                SELECT s.id, s.name, s.unit, s.created_at
+                  FROM supplies s
+                 WHERE s.business_id = ?
+                   AND COALESCE(s.category, 'Otros') = 'Otros'
+                   AND s.cost IS NULL
+                   AND COALESCE(s.stock, 0) = 0
+                   AND NOT EXISTS (
+                       SELECT 1 FROM recipe_studio_components rsc
+                        WHERE rsc.business_id = s.business_id
+                          AND rsc.supply_id = s.id
+                          $excludeRecipeSql
+                   )
+                   AND NOT EXISTS (
+                       SELECT 1 FROM supply_movements sm
+                        WHERE sm.business_id = s.business_id
+                          AND sm.supply_id = s.id
+                   )
+                 ORDER BY s.id ASC
+            ");
+            $supStmt->execute($supplyParams);
+            $supplyRows = [];
+            foreach ($supStmt->fetchAll(\PDO::FETCH_ASSOC) as $sRow) {
+                if (isset($targetIngKeys[self::normalizeKey((string) $sRow['name'])])) {
+                    $supplyRows[] = $sRow;
+                }
+            }
+        } else {
+            $startTs = $date . ' 00:00:00';
+            $endTs = date('Y-m-d', strtotime($date . ' +1 day')) . ' 08:00:00';
+            $supStmt = $pdo->prepare("
+                SELECT s.id, s.name, s.unit, s.created_at
+                  FROM supplies s
+                 WHERE s.business_id = ?
+                   AND COALESCE(s.category, 'Otros') = 'Otros'
+                   AND s.cost IS NULL
+                   AND COALESCE(s.stock, 0) = 0
+                   AND s.created_at >= ?
+                   AND s.created_at <= ?
+                   AND NOT EXISTS (
+                       SELECT 1 FROM recipe_studio_components rsc
+                        WHERE rsc.business_id = s.business_id
+                          AND rsc.supply_id = s.id
+                          $excludeRecipeSql
+                   )
+                   AND NOT EXISTS (
+                       SELECT 1 FROM supply_movements sm
+                        WHERE sm.business_id = s.business_id
+                          AND sm.supply_id = s.id
+                   )
+                 ORDER BY s.id ASC
+            ");
+            $supStmt->execute(array_merge([$bid, $startTs, $endTs], count($recipeIds) > 0 ? $recipeIds : []));
+            $supplyRows = $supStmt->fetchAll(\PDO::FETCH_ASSOC);
+        }
+
+        $supplyIds = array_map(static fn(array $s): int => (int) $s['id'], $supplyRows);
+
+        if ($dryRun) {
+            Response::ok([
+                'dry_run' => true,
+                'mode' => $mode,
+                'date' => $date,
+                'recipes_count' => count($recipeIds),
+                'links_count' => $linksCount,
+                'components_count' => $componentsCount,
+                'supplies_count' => count($supplyIds),
+                'recipes_sample' => array_slice(array_map(static fn(array $r): string => (string) $r['name'], $recipeRows), 0, 25),
+                'supplies_sample' => array_slice(array_map(static fn(array $s): string => (string) $s['name'], $supplyRows), 0, 25),
+            ]);
+            return;
+        }
+
+        $pdo->beginTransaction();
+        try {
+            if (count($recipeIds) > 0) {
+                $placeholders = implode(',', array_fill(0, count($recipeIds), '?'));
+                $params = array_merge([$bid], $recipeIds);
+                $pdo->prepare("DELETE FROM seasonal_pizza_variant_recipes WHERE business_id = ? AND recipe_id IN ($placeholders)")->execute($params);
+                $pdo->prepare("DELETE FROM recipe_studio_components WHERE business_id = ? AND recipe_id IN ($placeholders)")->execute($params);
+                $pdo->prepare("DELETE FROM recipe_studio_recipes WHERE business_id = ? AND linked_product_id IS NULL AND id IN ($placeholders)")->execute($params);
+            }
+            if (count($supplyIds) > 0) {
+                $sPlaceholders = implode(',', array_fill(0, count($supplyIds), '?'));
+                $sParams = array_merge([$bid], $supplyIds);
+                $pdo->prepare("DELETE FROM supplies WHERE business_id = ? AND id IN ($sPlaceholders)")->execute($sParams);
+            }
+            $pdo->commit();
+
+            Response::ok([
+                'dry_run' => false,
+                'mode' => $mode,
+                'date' => $date,
+                'deleted_recipes' => count($recipeIds),
+                'deleted_links' => $linksCount,
+                'deleted_components' => $componentsCount,
+                'deleted_supplies' => count($supplyIds),
+            ]);
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            Response::error('No se pudo revertir la importación: ' . $e->getMessage(), 422);
+        }
+    }
 }

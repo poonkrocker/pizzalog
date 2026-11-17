@@ -12,6 +12,22 @@ type DraftLine = {
 
 type ExistingVariant = { variant_id: number; label: string; recipe_id: number | null; recipe_name: string | null };
 
+type RevertResult = {
+  dry_run: boolean;
+  mode: string;
+  date: string;
+  recipes_count?: number;
+  links_count?: number;
+  components_count?: number;
+  supplies_count?: number;
+  recipes_sample?: string[];
+  supplies_sample?: string[];
+  deleted_recipes?: number;
+  deleted_links?: number;
+  deleted_components?: number;
+  deleted_supplies?: number;
+};
+
 type DraftPizza = {
   id: string;
   name: string;
@@ -37,10 +53,23 @@ type Props = {
     recipeId: number | null;
     components: Array<{ component_type: 'supply'; component_id: number; quantity: number; unit: string }>;
   }) => Promise<void>;
+  onRevertImport?: (payload: {
+    mode: 'date' | 'csv';
+    date?: string;
+    dry_run?: boolean;
+    pizza_names?: string[];
+    ingredient_names?: string[];
+  }) => Promise<RevertResult>;
 };
 
-const normalize = (value: string) => value.toLowerCase().normalize('NFD')
+const cleanPizzaName = (value: string) =>
+  value.replace(/\s*\[ingrediente\s*\d+\]\s*$/i, '').trim();
+
+const normalize = (value: string) => cleanPizzaName(value).toLowerCase().normalize('NFD')
   .replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+
+const normalizePizzaBase = (value: string) =>
+  normalize(value.replace(/\([^)]*\)/g, '')).replace(/^pizza\s+/, '').trim();
 
 const aliases: Record<string, string[]> = {
   pizza: ['pizza', 'producto', 'product', 'name', 'product name', 'pizza name', 'nombre', 'nombre pizza', 'nombre del producto', 'recipe', 'receta'],
@@ -103,11 +132,39 @@ function parsePrice(value: string): number {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
 }
 
+const SUPPLY_SYNONYMS: Record<string, string[]> = {
+  muzzarella: ['muzza', 'mozzarella'],
+  straciatella: ['stracciatella'],
+  albahaca: ['albahaca fresca'],
+  romero: ['romero fresco'],
+  anchoas: ['anchoa'],
+  'epice ahumado': ['queso epice'],
+  'queso morbier': ['morbier'],
+};
+
 function matchSupply(name: string, supplies: SupplyItem[]): SupplyItem | undefined {
   const target = normalize(name);
-  // Only exact normalized matches are preselected. Similar names remain unlinked
-  // so a substring coincidence cannot silently assign the wrong catalog supply.
-  return supplies.find((s) => normalize(s.name) === target);
+  const exact = supplies.find((s) => normalize(s.name) === target);
+  if (exact) return exact;
+  for (const [canonical, syns] of Object.entries(SUPPLY_SYNONYMS)) {
+    if (target === canonical || syns.includes(target)) {
+      const found = supplies.find((s) => {
+        const n = normalize(s.name);
+        return n === canonical || syns.includes(n);
+      });
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
+
+function matchVariant(originalName: string, variants: ExistingVariant[]): ExistingVariant | undefined {
+  const normFull = normalize(originalName);
+  const normBase = normalizePizzaBase(originalName);
+  return (
+    variants.find((v) => normalize(v.label) === normFull) ??
+    variants.find((v) => normalizePizzaBase(v.label) === normBase)
+  );
 }
 
 function buildPizzas(rows: string[][], supplies: SupplyItem[], recipes: StudioRecipe[], variants: ExistingVariant[]): DraftPizza[] {
@@ -128,29 +185,47 @@ function buildPizzas(rows: string[][], supplies: SupplyItem[], recipes: StudioRe
     throw new Error('No pude reconocer las columnas. Se necesitan pizza + ingrediente(s).');
   }
 
-  const normalizedNames = rows.slice(1).map(row => normalize(row[pizzaCol] ?? '')).filter(Boolean);
-  const duplicateNames = new Set(normalizedNames.filter((name, index) => normalizedNames.indexOf(name) !== index));
+  // Un CSV en formato largo repite el nombre de la pizza una vez por ingrediente.
+  // Solo es un duplicado histórico cuando el mismo nombre aparece con distintos IDs de origen (o etiqueta+período).
+  const publicationKeysByName = new Map<string, Set<string>>();
+  rows.slice(1).forEach((row) => {
+    const cleanName = cleanPizzaName(row[pizzaCol] ?? '');
+    const name = normalize(cleanName);
+    if (!name) return;
+    const sourceId = sourceIdCol >= 0 ? (row[sourceIdCol] ?? '').trim() : '';
+    const sourceLabel = labelCol >= 0 ? (row[labelCol] ?? '').trim() : '';
+    const sourcePeriod = [fromCol >= 0 ? row[fromCol] : '', toCol >= 0 ? row[toCol] : '']
+      .map((value) => (value ?? '').trim()).filter(Boolean).join(' → ');
+    const publicationKey = sourceId || `${normalize(sourceLabel)}::${sourcePeriod}`;
+    const keys = publicationKeysByName.get(name) ?? new Set<string>();
+    keys.add(publicationKey);
+    publicationKeysByName.set(name, keys);
+  });
+  const duplicateNames = new Set(
+    [...publicationKeysByName.entries()]
+      .filter(([, publicationKeys]) => publicationKeys.size > 1)
+      .map(([name]) => name),
+  );
 
   rows.slice(1).forEach((row, index) => {
-    const originalName = row[pizzaCol]?.trim();
+    const originalName = cleanPizzaName(row[pizzaCol] ?? '');
     if (!originalName) return;
     const normalizedName = normalize(originalName);
+    const normalizedBase = normalizePizzaBase(originalName);
     const sourceId = sourceIdCol >= 0 ? (row[sourceIdCol] ?? '').trim() : '';
     const sourceLabel = labelCol >= 0 ? (row[labelCol] ?? '').trim() : '';
     const sourcePeriod = [fromCol >= 0 ? row[fromCol] : '', toCol >= 0 ? row[toCol] : '']
       .map(value => (value ?? '').trim()).filter(Boolean).join(' → ');
     const isAmbiguousName = duplicateNames.has(normalizedName);
-    // A source product ID identifies a distinct publication; do not merge two
-    // historical versions just because their display names are equal.
     const key = sourceId || (isAmbiguousName
       ? `${normalizedName}::${normalize(sourceLabel)}::${sourcePeriod}`
       : normalizedName);
     let pizza = grouped.get(key);
     if (!pizza) {
-      const variant = isAmbiguousName ? undefined : variants.find(v => normalize(v.label) === normalizedName);
+      const variant = isAmbiguousName ? undefined : matchVariant(originalName, variants);
       const exact = isAmbiguousName ? undefined : (
         (variant?.recipe_id ? recipes.find(r => r.id === variant.recipe_id) : undefined)
-        ?? recipes.find(r => normalize(r.name) === normalizedName)
+        ?? recipes.find(r => normalize(r.name) === normalizedName || normalizePizzaBase(r.name) === normalizedBase)
       );
       const near = !exact && !variant && !isAmbiguousName ? recipes.find(r => {
         const candidate = normalize(r.name);
@@ -168,9 +243,9 @@ function buildPizzas(rows: string[][], supplies: SupplyItem[], recipes: StudioRe
         existing: isAmbiguousName
           ? 'Publicación histórica distinta con el mismo nombre; se importará como receta independiente'
           : exact
-            ? `Ya existe una receta «${exact.name}»; importar actualizará sus ingredientes`
+            ? `Ya existe una receta «${exact.name}»${variant ? ` vinculada a «${variant.label}»` : ''}; importar actualizará sus ingredientes`
             : variant
-              ? 'La pizza ya existe en el histórico; se vinculará la receta'
+              ? `Vinculada automáticamente a la variante histórica «${variant.label}»`
               : near ? `Posible coincidencia: ${near.name}` : null,
         variantId: variant?.variant_id ?? 0,
         recipeId: exact?.id ?? null,
@@ -201,13 +276,19 @@ function buildPizzas(rows: string[][], supplies: SupplyItem[], recipes: StudioRe
   return [...grouped.values()];
 }
 
-export function SeasonalPizzaCsvImport({ supplies, recipes, variants, onCreateSupply, onImport }: Props) {
+export function SeasonalPizzaCsvImport({ supplies, recipes, variants, onCreateSupply, onImport, onRevertImport }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [pizzas, setPizzas] = useState<DraftPizza[]>([]);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [fileName, setFileName] = useState('');
+  const [autoCreateSupplies, setAutoCreateSupplies] = useState(false);
+
+  // Estado del Desimportador / Revertir Lote
+  const [revertDate, setRevertDate] = useState('2026-11-17');
+  const [revertPreview, setRevertPreview] = useState<RevertResult | null>(null);
+  const [revertBusy, setRevertBusy] = useState(false);
 
   const summary = useMemo(() => ({
     total: pizzas.length,
@@ -224,7 +305,7 @@ export function SeasonalPizzaCsvImport({ supplies, recipes, variants, onCreateSu
 
   const readFile = async (file?: File) => {
     if (!file) return;
-    setError(''); setNotice(''); setFileName(file.name);
+    setError(''); setNotice(''); setFileName(file.name); setRevertPreview(null);
     try {
       const rows = parseCsv(await file.text());
       setPizzas(buildPizzas(rows, supplies, recipes, variants));
@@ -234,18 +315,67 @@ export function SeasonalPizzaCsvImport({ supplies, recipes, variants, onCreateSu
     }
   };
 
+  const handlePreviewRevert = async (mode: 'date' | 'csv') => {
+    if (!onRevertImport) return;
+    setRevertBusy(true); setError(''); setNotice('');
+    try {
+      const pizzaNames = mode === 'csv' ? [...new Set(pizzas.map((p) => p.name))] : undefined;
+      const ingredientNames = mode === 'csv' ? [...new Set(pizzas.flatMap((p) => p.lines.map((l) => l.ingredient)))] : undefined;
+      const res = await onRevertImport({
+        mode,
+        date: revertDate,
+        dry_run: true,
+        pizza_names: pizzaNames,
+        ingredient_names: ingredientNames,
+      });
+      setRevertPreview(res);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo previsualizar la reversión.');
+    } finally {
+      setRevertBusy(false);
+    }
+  };
+
+  const handleConfirmRevert = async () => {
+    if (!onRevertImport || !revertPreview) return;
+    const mode = revertPreview.mode === 'csv' ? 'csv' : 'date';
+    setRevertBusy(true); setError(''); setNotice('');
+    try {
+      const pizzaNames = mode === 'csv' ? [...new Set(pizzas.map((p) => p.name))] : undefined;
+      const ingredientNames = mode === 'csv' ? [...new Set(pizzas.flatMap((p) => p.lines.map((l) => l.ingredient)))] : undefined;
+      const res = await onRevertImport({
+        mode,
+        date: revertDate,
+        dry_run: false,
+        pizza_names: pizzaNames,
+        ingredient_names: ingredientNames,
+      });
+      setNotice(
+        `✅ Desimportación completada: se eliminaron ${res.deleted_recipes ?? 0} recetas, ${res.deleted_links ?? 0} asociaciones con variantes, ${res.deleted_components ?? 0} componentes y ${res.deleted_supplies ?? 0} insumos huérfanos.`
+      );
+      setRevertPreview(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo revertir la importación.');
+    } finally {
+      setRevertBusy(false);
+    }
+  };
+
   const importSelected = async () => {
     const selected = pizzas.filter((p) => p.include);
-    if (!selected.length) { setError('Seleccioná al menos una pizza nueva.'); return; }
+    if (!selected.length) { setError('Seleccioná al menos una pizza para importar.'); return; }
     const invalid = selected.find((p) => !p.lines.length || p.lines.some((l) => !l.ingredient.trim() || !l.unit));
     if (invalid) { setError(`Revisá que todos los ingredientes tengan nombre y unidad en «${invalid.name}».`); return; }
+    const hasUnmatched = selected.some((p) => p.lines.some((l) => l.supplyId === null));
+    if (hasUnmatched && !autoCreateSupplies) {
+      setError('Hay ingredientes sin vincular a un insumo existente. Vinculalos en los desplegables o activá la casilla «Crear automáticamente insumos faltantes en categoría "Otros"».');
+      return;
+    }
     setBusy(true); setError(''); setNotice('');
     let done = 0;
     let createdCount = 0;
     const createdByName = new Map<string, number>();
     try {
-      // Crear cada insumo faltante una sola vez para todo el lote. Si ya fue
-      // creado en un intento anterior, onCreateSupply lo recupera por nombre.
       for (const pizza of selected) {
         const components = [];
         for (const line of pizza.lines) {
@@ -261,7 +391,6 @@ export function SeasonalPizzaCsvImport({ supplies, recipes, variants, onCreateSu
           components.push({
             component_type: 'supply' as const,
             component_id: supplyId,
-            // 0 representa cantidad todavía no relevada; Cost Engine lo trata como incompleto.
             quantity: line.quantity.trim() === '' ? 0 : Number(line.quantity.replace(',', '.')),
             unit: line.unit,
           });
@@ -284,6 +413,96 @@ export function SeasonalPizzaCsvImport({ supplies, recipes, variants, onCreateSu
 
   return (
     <div style={{ display: 'grid', gap: '1rem' }}>
+      {onRevertImport && (
+        <div style={{ border: '1px solid #fecaca', borderRadius: 10, padding: '1rem', background: '#fef2f2', display: 'grid', gap: '.75rem' }}>
+          <div>
+            <h3 style={{ margin: 0, color: '#991b1b', fontSize: '1rem' }}>⏪ Desimportador / Revertir Lote de Importación CSV</h3>
+            <p style={{ margin: '.25rem 0 0', color: '#7f1d1d', fontSize: '.84rem' }}>
+              Revertí una importación de pizzas de temporada por fecha de carga (ej. 17/11/2026) o usando el archivo CSV cargado abajo. Elimina las asociaciones con variantes, las recetas de temporada creadas y los insumos «Otros» sin costo ni stock que hayan quedado huérfanos.
+            </p>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.6rem', alignItems: 'center' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '.4rem', fontSize: '.84rem', fontWeight: 600, color: '#7f1d1d' }}>
+              Fecha del lote:
+              <input
+                type="date"
+                value={revertDate}
+                onChange={(e) => { setRevertDate(e.target.value); setRevertPreview(null); }}
+                style={{ padding: '.4rem .6rem', borderRadius: 6, border: '1px solid #fca5a5', background: '#fff' }}
+              />
+            </label>
+            <button
+              type="button"
+              disabled={revertBusy}
+              onClick={() => void handlePreviewRevert('date')}
+              style={{ padding: '.48rem .85rem', borderRadius: 7, border: '1px solid #dc2626', background: '#fff', color: '#b91c1c', fontWeight: 700, fontSize: '.83rem', cursor: 'pointer' }}
+            >
+              {revertBusy ? 'Consultando…' : `🔍 Buscar lote del ${revertDate}`}
+            </button>
+            {pizzas.length > 0 && (
+              <button
+                type="button"
+                disabled={revertBusy}
+                onClick={() => void handlePreviewRevert('csv')}
+                style={{ padding: '.48rem .85rem', borderRadius: 7, border: '1px solid #991b1b', background: '#fee2e2', color: '#7f1d1d', fontWeight: 700, fontSize: '.83rem', cursor: 'pointer' }}
+              >
+                📄 Buscar registros que coincidan con este CSV ({pizzas.length} pizzas)
+              </button>
+            )}
+          </div>
+
+          {revertPreview && (
+            <div style={{ background: '#fff', border: '1px solid #f87171', borderRadius: 8, padding: '.85rem', display: 'grid', gap: '.6rem' }}>
+              <div style={{ fontWeight: 700, color: '#991b1b', fontSize: '.88rem' }}>
+                Resumen de registros detectados para eliminar ({revertPreview.mode === 'csv' ? 'según archivo CSV' : `lote del ${revertPreview.date}`}):
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.6rem', fontSize: '.82rem' }}>
+                <span style={{ padding: '.3rem .6rem', background: '#fef2f2', borderRadius: 6, border: '1px solid #fecaca' }}>
+                  🍕 <strong>{revertPreview.recipes_count ?? 0}</strong> recetas de temporada
+                </span>
+                <span style={{ padding: '.3rem .6rem', background: '#fef2f2', borderRadius: 6, border: '1px solid #fecaca' }}>
+                  🔗 <strong>{revertPreview.links_count ?? 0}</strong> asociaciones con variantes
+                </span>
+                <span style={{ padding: '.3rem .6rem', background: '#fef2f2', borderRadius: 6, border: '1px solid #fecaca' }}>
+                  📋 <strong>{revertPreview.components_count ?? 0}</strong> líneas de ingredientes
+                </span>
+                <span style={{ padding: '.3rem .6rem', background: '#fef2f2', borderRadius: 6, border: '1px solid #fecaca' }}>
+                  🧀 <strong>{revertPreview.supplies_count ?? 0}</strong> insumos «Otros» sin costo
+                </span>
+              </div>
+              {!!revertPreview.recipes_sample?.length && (
+                <div style={{ fontSize: '.78rem', color: '#475569' }}>
+                  <strong>Recetas:</strong> {revertPreview.recipes_sample.join(', ')}{(revertPreview.recipes_count ?? 0) > revertPreview.recipes_sample.length ? '…' : ''}
+                </div>
+              )}
+              {!!revertPreview.supplies_sample?.length && (
+                <div style={{ fontSize: '.78rem', color: '#475569' }}>
+                  <strong>Insumos a limpiar:</strong> {revertPreview.supplies_sample.join(', ')}{(revertPreview.supplies_count ?? 0) > revertPreview.supplies_sample.length ? '…' : ''}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: '.6rem', flexWrap: 'wrap', marginTop: '.25rem' }}>
+                <button
+                  type="button"
+                  disabled={revertBusy || ((revertPreview.recipes_count ?? 0) === 0 && (revertPreview.supplies_count ?? 0) === 0)}
+                  onClick={() => void handleConfirmRevert()}
+                  style={{ padding: '.55rem 1rem', borderRadius: 7, border: 0, background: '#dc2626', color: '#fff', fontWeight: 700, fontSize: '.84rem', cursor: 'pointer' }}
+                >
+                  {revertBusy ? 'Eliminando…' : '🗑️ Confirmar y eliminar estos registros ahora'}
+                </button>
+                <button
+                  type="button"
+                  disabled={revertBusy}
+                  onClick={() => setRevertPreview(null)}
+                  style={{ padding: '.5rem .85rem', borderRadius: 7, border: '1px solid #cbd5e1', background: '#fff', color: '#334155', fontSize: '.82rem', cursor: 'pointer' }}
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       <div style={{ border: '1px solid var(--c-border,#ddd)', borderRadius: 10, padding: '1rem', background: 'var(--c-surface,#fff)' }}>
         <h3 style={{ marginTop: 0 }}>Importar pizzas desde CSV</h3>
         <p style={{ color: 'var(--c-muted,#64748b)', fontSize: '.88rem' }}>
@@ -291,6 +510,16 @@ export function SeasonalPizzaCsvImport({ supplies, recipes, variants, onCreateSu
         </p>
         <input ref={inputRef} type="file" accept=".csv,text/csv" onChange={(e) => void readFile(e.target.files?.[0])} />
         {fileName && <p style={{ fontSize: '.8rem' }}>Archivo: <strong>{fileName}</strong></p>}
+        <div style={{ marginTop: '.75rem' }}>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: '.45rem', fontSize: '.84rem', fontWeight: 600, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={autoCreateSupplies}
+              onChange={(e) => setAutoCreateSupplies(e.target.checked)}
+            />
+            Crear automáticamente insumos faltantes en categoría «Otros» (si está desmarcado, exige vincular cada ingrediente a un insumo existente)
+          </label>
+        </div>
         <details style={{ marginTop: '.75rem' }}>
           <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Ver formatos admitidos</summary>
           <pre style={{ whiteSpace: 'pre-wrap', overflowX: 'auto', fontSize: '.78rem', background: '#f8fafc', padding: '.65rem', borderRadius: 6 }}>{'pizza,ingredientes\nPascuapizza,"Muzzarella, acelga, ricota"\n\n' + 'pizza,ingrediente,cantidad,unidad\nPascuapizza,Muzzarella,250,g\nPascuapizza,Ricota,80,g'}</pre>

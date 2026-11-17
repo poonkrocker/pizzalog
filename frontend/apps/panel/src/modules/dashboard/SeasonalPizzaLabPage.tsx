@@ -1912,7 +1912,7 @@ export function SeasonalPizzaLabPage() {
                                         >
                                           <div style={{ fontWeight: 600, fontSize: '.84rem' }}>{line.name}</div>
                                           <div style={muted}>
-                                            Cantidad: {line.quantity} {line.unit}
+                                            Cantidad: {line.quantity > 0 ? `${line.quantity} ${line.unit}` : 's/gramaje (pendiente)'}
                                           </div>
                                           <div style={{ fontSize: '.82rem', marginTop: '.2rem' }}>
                                             Costo:{' '}
@@ -2603,11 +2603,11 @@ export function SeasonalPizzaLabPage() {
                       style={btnPrimary}
                       disabled={link.isPending}
                       onClick={() => {
-                        const valid = builderComponents.filter((c) => c.component_id > 0 && c.quantity > 0);
+                        const valid = builderComponents.filter((c) => c.component_id > 0 && c.quantity >= 0);
                         if (valid.length === 0) {
                           setBuilderFeedback({
                             type: 'err',
-                            msg: 'Seleccioná al menos un insumo o subreceta con cantidad válida.',
+                            msg: 'Seleccioná al menos un insumo o subreceta para la receta.',
                           });
                           return;
                         }
@@ -3075,7 +3075,7 @@ export function SeasonalPizzaLabPage() {
             // anterior alcanzó a crear el insumo pero falló al guardar la receta.
             const current = await api.supplies.list();
             const normalize = (value: string) => value.toLowerCase().normalize('NFD')
-              .replace(/[\\u0300-\\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+              .replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
             const existing = current.supplies.find((supply) => normalize(supply.name) === normalize(name));
             if (existing) {
               await qc.invalidateQueries({ queryKey: ['production', 'recipe-studio'] });
@@ -3104,6 +3104,14 @@ export function SeasonalPizzaLabPage() {
                 components: recipe.components,
               },
             });
+          }}
+          onRevertImport={async (payload) => {
+            const res = await api.analytics.revertSeasonalPizzaImport(payload);
+            if (!payload.dry_run) {
+              await qc.invalidateQueries({ queryKey: ['analytics', 'seasonal-pizzas'] });
+              await qc.invalidateQueries({ queryKey: ['production', 'recipe-studio'] });
+            }
+            return res;
           }}
         />
       )}

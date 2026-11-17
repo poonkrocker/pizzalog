@@ -130,6 +130,28 @@ export function analyticsApi(client: ApiClient) {
       client.delete<{ success: boolean }>(`/analytics/seasonal-pizzas/${variantId}/recipe`),
     addSeasonalPizzaAvailability: (variantId: number, startDate: string, endDate: string) =>
       client.post<{ success: boolean }>(`/analytics/seasonal-pizzas/${variantId}/availability`, { start_date: startDate, end_date: endDate }),
+    revertSeasonalPizzaImport: (payload: {
+      mode: 'date' | 'csv';
+      date?: string;
+      dry_run?: boolean;
+      pizza_names?: string[];
+      ingredient_names?: string[];
+    }) =>
+      client.post<{
+        dry_run: boolean;
+        mode: string;
+        date: string;
+        recipes_count?: number;
+        links_count?: number;
+        components_count?: number;
+        supplies_count?: number;
+        recipes_sample?: string[];
+        supplies_sample?: string[];
+        deleted_recipes?: number;
+        deleted_links?: number;
+        deleted_components?: number;
+        deleted_supplies?: number;
+      }>('/analytics/seasonal-pizzas/revert-import', payload),
     productMargins: (params?: AnalyticsQuery) =>
       client.get<{ products: any[] }>(`/analytics/product-margins${queryStr(params)}`),
     ingredients: (params?: AnalyticsQuery) =>
