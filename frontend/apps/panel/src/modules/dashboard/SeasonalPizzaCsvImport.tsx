@@ -21,6 +21,8 @@ type DraftPizza = {
   existing: string | null;
   variantId: number;
   recipeId: number | null;
+  sourceLabel: string;
+  sourcePeriod: string;
 };
 
 type Props = {
@@ -46,6 +48,10 @@ const aliases: Record<string, string[]> = {
   quantity: ['cantidad', 'quantity', 'cant', 'peso', 'gramos', 'cantidad ingrediente'],
   unit: ['unidad', 'unit', 'medida'],
   price: ['precio', 'price', 'importe'],
+  from: ['desde', 'from', 'fecha desde', 'vigencia desde'],
+  to: ['hasta', 'to', 'fecha hasta', 'vigencia hasta'],
+  label: ['tipo', 'etiqueta', 'label', 'tag'],
+  sourceId: ['id', 'product id', 'producto id'],
 };
 
 function parseCsv(text: string): string[][] {
@@ -88,6 +94,14 @@ function column(headers: string[], kind: keyof typeof aliases): number {
   return headers.findIndex((header) => aliases[kind].includes(normalize(header)));
 }
 
+function parsePrice(value: string): number {
+  const raw = value.trim().replace(/[^0-9,.-]/g, '');
+  if (!raw) return 0;
+  const normalized = raw.includes(',') ? raw.replace(/\\./g, '').replace(',', '.') : raw.replace(/\\.(?=\\d{3}(?:\\D|$))/g, '');
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+}
+
 function matchSupply(name: string, supplies: SupplyItem[]): SupplyItem | undefined {
   const target = normalize(name);
   return supplies.find((s) => normalize(s.name) === target)
@@ -102,47 +116,70 @@ function buildPizzas(rows: string[][], supplies: SupplyItem[], recipes: StudioRe
   const quantityCol = column(headers, 'quantity');
   const unitCol = column(headers, 'unit');
   const priceCol = column(headers, 'price');
+  const fromCol = column(headers, 'from');
+  const toCol = column(headers, 'to');
+  const labelCol = column(headers, 'label');
+  const sourceIdCol = column(headers, 'sourceId');
   const grouped = new Map<string, DraftPizza>();
 
   if (pizzaCol < 0 || (ingredientCol < 0 && ingredientsCol < 0)) {
     throw new Error('No pude reconocer las columnas. Se necesitan pizza + ingrediente(s).');
   }
 
+  const normalizedNames = rows.slice(1).map(row => normalize(row[pizzaCol] ?? '')).filter(Boolean);
+  const duplicateNames = new Set(normalizedNames.filter((name, index) => normalizedNames.indexOf(name) !== index));
+
   rows.slice(1).forEach((row, index) => {
-    const name = row[pizzaCol]?.trim();
-    if (!name) return;
-    const key = normalize(name);
+    const originalName = row[pizzaCol]?.trim();
+    if (!originalName) return;
+    const normalizedName = normalize(originalName);
+    const sourceId = sourceIdCol >= 0 ? (row[sourceIdCol] ?? '').trim() : '';
+    const sourceLabel = labelCol >= 0 ? (row[labelCol] ?? '').trim() : '';
+    const sourcePeriod = [fromCol >= 0 ? row[fromCol] : '', toCol >= 0 ? row[toCol] : '']
+      .map(value => (value ?? '').trim()).filter(Boolean).join(' → ');
+    const isAmbiguousName = duplicateNames.has(normalizedName);
+    // A source product ID identifies a distinct publication; do not merge two
+    // historical versions just because their display names are equal.
+    const key = sourceId || (isAmbiguousName
+      ? `${normalizedName}::${normalize(sourceLabel)}::${sourcePeriod}`
+      : normalizedName);
     let pizza = grouped.get(key);
     if (!pizza) {
-      const variant = variants.find((v) => normalize(v.label) === key);
-      const exact = (variant?.recipe_id ? recipes.find((r) => r.id === variant.recipe_id) : undefined)
-        ?? recipes.find((r) => normalize(r.name) === key);
-      const near = !exact && !variant ? recipes.find((r) => {
+      const variant = isAmbiguousName ? undefined : variants.find(v => normalize(v.label) === normalizedName);
+      const exact = isAmbiguousName ? undefined : (
+        (variant?.recipe_id ? recipes.find(r => r.id === variant.recipe_id) : undefined)
+        ?? recipes.find(r => normalize(r.name) === normalizedName)
+      );
+      const near = !exact && !variant && !isAmbiguousName ? recipes.find(r => {
         const candidate = normalize(r.name);
-        return candidate && (candidate.includes(key) || key.includes(candidate));
+        return candidate && (candidate.includes(normalizedName) || normalizedName.includes(candidate));
       }) : undefined;
+      const displayName = isAmbiguousName && sourceLabel
+        ? `${originalName} · ${sourceLabel.replace(/[¡!]/g, '').trim()}`
+        : originalName;
       pizza = {
         id: key,
-        name,
-        price: priceCol >= 0 ? Number((row[priceCol] ?? '').replace(',', '.')) || 0 : 0,
+        name: displayName,
+        price: priceCol >= 0 ? parsePrice(row[priceCol] ?? '') : 0,
         lines: [],
         include: !exact && !near,
-        existing: exact
-          ? `Ya existe una receta «${exact.name}»; importar actualizará sus ingredientes`
-          : variant
-            ? 'La pizza ya existe en el histórico; se vinculará la receta'
-            : near ? `Posible coincidencia: ${near.name}` : null,
+        existing: isAmbiguousName
+          ? 'Publicación histórica distinta con el mismo nombre; se importará como receta independiente'
+          : exact
+            ? `Ya existe una receta «${exact.name}»; importar actualizará sus ingredientes`
+            : variant
+              ? 'La pizza ya existe en el histórico; se vinculará la receta'
+              : near ? `Posible coincidencia: ${near.name}` : null,
         variantId: variant?.variant_id ?? 0,
         recipeId: exact?.id ?? null,
+        sourceLabel,
+        sourcePeriod,
       };
       grouped.set(key, pizza);
     }
 
     const ingredientText = ingredientCol >= 0 ? row[ingredientCol] : row[ingredientsCol];
-    const names = ingredientCol >= 0
-      ? [ingredientText]
-      : ingredientText.split(/[;,|]/).map((v) => v.trim()).filter(Boolean);
-
+    const names = ingredientCol >= 0 ? [ingredientText] : ingredientText.split(/[;,|]/).map(value => value.trim()).filter(Boolean);
     names.forEach((ingredient, part) => {
       if (!ingredient) return;
       const supply = matchSupply(ingredient, supplies);
@@ -150,8 +187,8 @@ function buildPizzas(rows: string[][], supplies: SupplyItem[], recipes: StudioRe
       const quantity = Number(rawQuantity.replace(',', '.'));
       const unit = unitCol >= 0 && row[unitCol] ? row[unitCol] : supply?.unit ?? 'g';
       pizza!.lines.push({
-        id: `${index}-${part}-${normalize(ingredient)}`,
-        name,
+        id: `${key}-${index}-${part}-${normalize(ingredient)}`,
+        name: pizza!.name,
         ingredient,
         quantity: Number.isFinite(quantity) && quantity > 0 ? String(quantity) : '',
         unit,
@@ -159,7 +196,6 @@ function buildPizzas(rows: string[][], supplies: SupplyItem[], recipes: StudioRe
       });
     });
   });
-
   return [...grouped.values()];
 }
 
@@ -256,6 +292,7 @@ export function SeasonalPizzaCsvImport({ supplies, recipes, variants, onImport }
                 <div>
                   <strong>{pizza.name}</strong>
                   <div style={{ fontSize: '.78rem', color: pizza.existing ? '#92400e' : '#64748b' }}>{pizza.existing ?? 'Pizza nueva'}</div>
+                  {(pizza.sourceLabel || pizza.sourcePeriod) && <div style={{ fontSize: '.75rem', color: '#64748b' }}>{[pizza.sourceLabel, pizza.sourcePeriod].filter(Boolean).join(' · ')}</div>}
                 </div>
                 <label style={{ display: 'flex', alignItems: 'center', gap: '.4rem', fontSize: '.82rem' }}>
                   <input type="checkbox" checked={pizza.include} onChange={(e) => setPizzas((current) => current.map((p) => p.id === pizza.id ? { ...p, include: e.target.checked } : p))} />
