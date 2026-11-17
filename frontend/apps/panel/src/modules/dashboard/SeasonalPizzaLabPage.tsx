@@ -3070,7 +3070,7 @@ export function SeasonalPizzaLabPage() {
             recipe_id: variant.recipe_id,
             recipe_name: variant.recipe_name,
           }))}
-          onCreateSupply={async (name, unit) => {
+          onCreateSupply={async (name, unit, category) => {
             // Reconsultar antes de crear para evitar duplicados si un intento
             // anterior alcanzó a crear el insumo pero falló al guardar la receta.
             const current = await api.supplies.list();
@@ -3083,7 +3083,7 @@ export function SeasonalPizzaLabPage() {
             }
             const created = await api.supplies.create({
               name,
-              category: 'Otros',
+              category: category || 'Otros',
               unit,
               cost: null,
               initial_stock: 0,

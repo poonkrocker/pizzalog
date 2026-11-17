@@ -5,6 +5,7 @@ type DraftLine = {
   id: string;
   name: string;
   ingredient: string;
+  category: string;
   quantity: string;
   unit: string;
   supplyId: number | null;
@@ -45,7 +46,7 @@ type Props = {
   supplies: SupplyItem[];
   recipes: StudioRecipe[];
   variants: ExistingVariant[];
-  onCreateSupply: (name: string, unit: string) => Promise<number>;
+  onCreateSupply: (name: string, unit: string, category: string) => Promise<number>;
   onImport: (recipe: {
     name: string;
     price: number;
@@ -75,6 +76,7 @@ const aliases: Record<string, string[]> = {
   pizza: ['pizza', 'producto', 'product', 'name', 'product name', 'pizza name', 'nombre', 'nombre pizza', 'nombre del producto', 'recipe', 'receta'],
   ingredient: ['ingrediente', 'ingredient', 'insumo', 'nombre ingrediente', 'nombre del ingrediente', 'ingredient name', 'supply', 'supply name'],
   ingredients: ['ingredientes', 'ingredients', 'lista ingredientes', 'ingredient list', 'composicion', 'composición'],
+  category: ['categoria', 'category', 'rubro', 'familia', 'grupo', 'tipo insumo'],
   quantity: ['cantidad', 'quantity', 'cant', 'peso', 'gramos', 'cantidad ingrediente'],
   unit: ['unidad', 'unit', 'medida'],
   price: ['precio', 'price', 'importe'],
@@ -83,6 +85,118 @@ const aliases: Record<string, string[]> = {
   label: ['tipo', 'etiqueta', 'label', 'tag'],
   sourceId: ['id', 'product id', 'producto id'],
 };
+
+export const SUPPLY_CATEGORIES = [
+  'Lácteos / Quesos',
+  'Fiambres',
+  'Carnes / Pescados',
+  'Verdulería',
+  'Salsas',
+  'Despensa Secos',
+  'Despensa',
+  'Conservas',
+  'Aceites y Grasas',
+  'Masa / Harinas',
+  'Otros',
+] as const;
+
+export function inferSupplyCategory(rawName: string): string {
+  const n = normalize(rawName);
+  if (!n) return 'Otros';
+
+  // 1. Masa / Harinas
+  if (/\b(masa|harina|semola|levadura|faina|hojaldre|filo)\b/.test(n)) {
+    return 'Masa / Harinas';
+  }
+
+  // 2. Aceites y Grasas
+  if (/\b(aceite|grasa)\b/.test(n)) {
+    return 'Aceites y Grasas';
+  }
+
+  // 3. Conservas (encurtidos, confitados, almíbar, aceitunas, alcaparras, chucrut)
+  if (
+    /\b(confitad|confitado|confitada|confitados|almibar|relish|alcaparra|alcaparras|alcaucil|alcauciles|pepinillo|pepinillos|chucrut|aceituna|aceitunas|oliva|olivas)\b/.test(n) &&
+    !/\btierra de\b/.test(n) &&
+    !/\baceite\b/.test(n) &&
+    !/\balmibar de naranja\b/.test(n)
+  ) {
+    return 'Conservas';
+  }
+  if (
+    n === 'anchoas' ||
+    n === 'anchoa' ||
+    n === 'papa confitada' ||
+    n === 'cebolla confitada' ||
+    n === 'cebolla caramelizada' ||
+    n === 'zapallo en almibar' ||
+    n === 'alcauciles confitados' ||
+    n === 'alcaparras fritas' ||
+    n === 'aceituna asada' ||
+    n === 'aceitunas negras' ||
+    n.includes('cherry') && n.includes('confitad')
+  ) {
+    return 'Conservas';
+  }
+
+  // 4. Salsas, cremas saladas/vegetales, pestos, reducciones, purés, geles y pastas untables
+  if (
+    /\b(salsa|pesto|cremoso de papa|cremoso de papas|reduccion|vinagreta|glace|guacamole|pico de gallo|muhammara|sriracha|ketchup|mayo|chimichurri|almibar de naranja|ajo sofrito|gel de)\b/.test(n) ||
+    /^pure de\b/.test(n) ||
+    /^pasta de berenjena\b/.test(n) ||
+    (/^crema de\b/.test(n) && !/\b(leche|camembert|provolone|queso)\b/.test(n))
+  ) {
+    return 'Salsas';
+  }
+
+  // 5. Lácteos / Quesos (excluyendo vegetales salteados en manteca o manteca de maní)
+  if (
+    /\b(muzzarella|mozzarella|muzza|queso|provolone|provoleta|provoletita|provoletas|provoletitas|ricota|ricotta|straciatella|stracciatella|morbier|reggianito|parmesano|camembert|fontina|fonduta|pepato|raclette|cheddar|catupiry|gruyere|brie|romanito|manteca|crema|yogurt|sour cream|epice)\b/.test(n) &&
+    !/\bmanteca de mani\b/.test(n) &&
+    !/\bsaltead[oa]s? en manteca\b/.test(n)
+  ) {
+    return 'Lácteos / Quesos';
+  }
+
+  // 6. Fiambres y embutidos
+  if (
+    /\b(jamon|salame|bondiola|cantimpalo|panceta|bacon|salchicha|mortadela|mortadella|pastron|pepperoni|chorizo|lomo|prosciutto|speck|nduja|longaniza)\b/.test(n)
+  ) {
+    return 'Fiambres';
+  }
+
+  // 7. Carnes / Pescados / Mariscos
+  if (
+    /\b(albondig|albondigas|albondiguitas|camaron|camarones|langostino|milanesa|anchoas fritas|pollo|hamburgues|hamburguesitas|mejillon|mejillones|peceto|chinchulin|atun|katsuobushi|ternera|cordero|carne|pescado)\b/.test(n)
+  ) {
+    return 'Carnes / Pescados';
+  }
+
+  // 8. Despensa Secos (frutos secos, semillas, hongos secos, crocante, chips, totopos, polvos)
+  if (
+    /\b(nuez|nueces|almendra|almendras|avellana|avellanas|pistacho|pistachos|castana|castanas|mani tostado|garrapinada|praline|semilla|semillas|sesamo|hongos de pino|tomates secos|chips|totopo|totopos|crocante de pasta|socarrat|polvo de|tierra de|petalos de rosa|carbon vegetal)\b/.test(n) &&
+    !/\bnuez moscada\b/.test(n)
+  ) {
+    return 'Despensa Secos';
+  }
+
+  // 9. Despensa (especias, condimentos secos, mieles, huevos, aceto, sal)
+  if (
+    /\b(miel|honey comb|cebolla crispy|oregano|provenzal|pimenton|paprika|ajo frito|caviar de ajo|tomillo|pasta de mani|manteca de mani|pimienta|merken|aceto|azafran|nuez moscada|huevo|huevos|yema|yemas|ositos de goma|sal|azucar|mayonesa)\b/.test(n) &&
+    !/\boregano fresco\b/.test(n)
+  ) {
+    return 'Despensa';
+  }
+
+  // 10. Verdulería (vegetales frescos/asados, frutas, hierbas frescas, ralladuras/zest)
+  if (
+    /\b(albahaca|cebolla|romero|papa|papin|papines|papita|papitas|morron|ciboulette|pera|tomate|tomates|tomatillo|tomatillos|acelga|espinaca|espinacas|naranja|hinojo|arandano|arandanos|perejil|champignon|champignones|champi|portobello|portobellos|choclo|ajo|verdeo|esparrago|esparragos|apio|brocoli|zucchini|zuccini|menta|arveja|arvejas|berenjena|aji|jalapeno|manzana|uva|uvas|frutilla|frutillas|frambuesa|frambuesas|mora|moras|ciruela|rucula|durazno|melon|palta|coliflor|remolacha|calabaza|zapallo|puerro|zest|ralladura|cilantro|limon|lima|boniato|batata|oregano fresco)\b/.test(n)
+  ) {
+    return 'Verdulería';
+  }
+
+  return 'Despensa';
+}
 
 function parseCsv(text: string): string[][] {
   const first = text.split(/\r?\n/, 1)[0] ?? '';
@@ -172,6 +286,7 @@ function buildPizzas(rows: string[][], supplies: SupplyItem[], recipes: StudioRe
   const pizzaCol = column(headers, 'pizza');
   const ingredientCol = column(headers, 'ingredient');
   const ingredientsCol = column(headers, 'ingredients');
+  const categoryCol = column(headers, 'category');
   const quantityCol = column(headers, 'quantity');
   const unitCol = column(headers, 'unit');
   const priceCol = column(headers, 'price');
@@ -257,16 +372,19 @@ function buildPizzas(rows: string[][], supplies: SupplyItem[], recipes: StudioRe
 
     const ingredientText = (ingredientCol >= 0 ? row[ingredientCol] : row[ingredientsCol]) ?? '';
     const names = ingredientCol >= 0 ? [ingredientText] : ingredientText.split(/[;,|]/).map(value => value.trim()).filter(Boolean);
+    const csvCategory = categoryCol >= 0 ? (row[categoryCol] ?? '').trim() : '';
     names.forEach((ingredient, part) => {
       if (!ingredient) return;
       const supply = matchSupply(ingredient, supplies);
       const rawQuantity = quantityCol >= 0 ? (row[quantityCol] ?? '') : '';
       const quantity = Number(rawQuantity.replace(',', '.'));
       const unit = unitCol >= 0 && row[unitCol] ? row[unitCol] : supply?.unit ?? 'g';
+      const category = supply?.category || csvCategory || inferSupplyCategory(ingredient);
       pizza!.lines.push({
         id: `${key}-${index}-${part}-${normalize(ingredient)}`,
         name: pizza!.name,
         ingredient,
+        category,
         quantity: Number.isFinite(quantity) && quantity > 0 ? String(quantity) : '',
         unit,
         supplyId: supply?.id ?? null,
@@ -283,7 +401,7 @@ export function SeasonalPizzaCsvImport({ supplies, recipes, variants, onCreateSu
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [fileName, setFileName] = useState('');
-  const [autoCreateSupplies, setAutoCreateSupplies] = useState(false);
+  const [autoCreateSupplies, setAutoCreateSupplies] = useState(true);
 
   // Estado del Desimportador / Revertir Lote
   const [revertDate, setRevertDate] = useState('2026-11-17');
@@ -368,7 +486,7 @@ export function SeasonalPizzaCsvImport({ supplies, recipes, variants, onCreateSu
     if (invalid) { setError(`Revisá que todos los ingredientes tengan nombre y unidad en «${invalid.name}».`); return; }
     const hasUnmatched = selected.some((p) => p.lines.some((l) => l.supplyId === null));
     if (hasUnmatched && !autoCreateSupplies) {
-      setError('Hay ingredientes sin vincular a un insumo existente. Vinculalos en los desplegables o activá la casilla «Crear automáticamente insumos faltantes en categoría "Otros"».');
+      setError('Hay ingredientes sin vincular a un insumo existente. Vinculalos en los desplegables o activá la casilla «Crear automáticamente insumos faltantes con su categoría detectada».');
       return;
     }
     setBusy(true); setError(''); setNotice('');
@@ -382,7 +500,7 @@ export function SeasonalPizzaCsvImport({ supplies, recipes, variants, onCreateSu
           let supplyId = line.supplyId;
           if (supplyId === null) {
             const key = normalize(line.ingredient);
-            supplyId = createdByName.get(key) ?? await onCreateSupply(line.ingredient.trim(), line.unit);
+            supplyId = createdByName.get(key) ?? await onCreateSupply(line.ingredient.trim(), line.unit, line.category || inferSupplyCategory(line.ingredient));
             if (!createdByName.has(key)) {
               createdByName.set(key, supplyId);
               createdCount += 1;
@@ -404,7 +522,7 @@ export function SeasonalPizzaCsvImport({ supplies, recipes, variants, onCreateSu
         });
         done += 1;
       }
-      setNotice(`Se importaron ${done} recetas y se agregaron ${createdCount} insumos nuevos. Las cantidades vacías siguen pendientes de completar.`);
+      setNotice(`Se importaron ${done} recetas y se agregaron ${createdCount} insumos nuevos clasificados en su categoría. Las cantidades vacías siguen pendientes de completar.`);
       setPizzas((current) => current.map((p) => ({ ...p, include: false })));
     } catch (err) {
       setError(`Se importaron ${done} recetas antes del error. ${err instanceof Error ? err.message : 'Revisá el catálogo e intentá nuevamente.'}`);
@@ -418,7 +536,7 @@ export function SeasonalPizzaCsvImport({ supplies, recipes, variants, onCreateSu
           <div>
             <h3 style={{ margin: 0, color: '#991b1b', fontSize: '1rem' }}>⏪ Desimportador / Revertir Lote de Importación CSV</h3>
             <p style={{ margin: '.25rem 0 0', color: '#7f1d1d', fontSize: '.84rem' }}>
-              Revertí una importación de pizzas de temporada por fecha de carga (ej. 17/11/2026) o usando el archivo CSV cargado abajo. Elimina las asociaciones con variantes, las recetas de temporada creadas y los insumos «Otros» sin costo ni stock que hayan quedado huérfanos.
+              Revertí una importación de pizzas de temporada por fecha de carga (ej. 17/11/2026) o usando el archivo CSV cargado abajo. Elimina las asociaciones con variantes, las recetas de temporada creadas y los insumos auto-creados sin costo ni stock que hayan quedado huérfanos.
             </p>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.6rem', alignItems: 'center' }}>
@@ -467,7 +585,7 @@ export function SeasonalPizzaCsvImport({ supplies, recipes, variants, onCreateSu
                   📋 <strong>{revertPreview.components_count ?? 0}</strong> líneas de ingredientes
                 </span>
                 <span style={{ padding: '.3rem .6rem', background: '#fef2f2', borderRadius: 6, border: '1px solid #fecaca' }}>
-                  🧀 <strong>{revertPreview.supplies_count ?? 0}</strong> insumos «Otros» sin costo
+                  🧀 <strong>{revertPreview.supplies_count ?? 0}</strong> insumos huérfanos sin costo
                 </span>
               </div>
               {!!revertPreview.recipes_sample?.length && (
@@ -506,7 +624,7 @@ export function SeasonalPizzaCsvImport({ supplies, recipes, variants, onCreateSu
       <div style={{ border: '1px solid var(--c-border,#ddd)', borderRadius: 10, padding: '1rem', background: 'var(--c-surface,#fff)' }}>
         <h3 style={{ marginTop: 0 }}>Importar pizzas desde CSV</h3>
         <p style={{ color: 'var(--c-muted,#64748b)', fontSize: '.88rem' }}>
-          Importá un CSV con columnas de pizza e ingredientes. Podés usar una fila por pizza con una lista de ingredientes, o una fila por ingrediente con cantidad y unidad.
+          Importá un CSV con columnas de pizza, ingrediente y categoría (si no viene la columna <code>categoria</code>, se detecta automáticamente según el ingrediente).
         </p>
         <input ref={inputRef} type="file" accept=".csv,text/csv" onChange={(e) => void readFile(e.target.files?.[0])} />
         {fileName && <p style={{ fontSize: '.8rem' }}>Archivo: <strong>{fileName}</strong></p>}
@@ -517,19 +635,19 @@ export function SeasonalPizzaCsvImport({ supplies, recipes, variants, onCreateSu
               checked={autoCreateSupplies}
               onChange={(e) => setAutoCreateSupplies(e.target.checked)}
             />
-            Crear automáticamente insumos faltantes en categoría «Otros» (si está desmarcado, exige vincular cada ingrediente a un insumo existente)
+            Crear automáticamente insumos faltantes con su categoría detectada (si está desmarcado, exige vincular cada ingrediente a un insumo existente)
           </label>
         </div>
         <details style={{ marginTop: '.75rem' }}>
           <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Ver formatos admitidos</summary>
-          <pre style={{ whiteSpace: 'pre-wrap', overflowX: 'auto', fontSize: '.78rem', background: '#f8fafc', padding: '.65rem', borderRadius: 6 }}>{'pizza,ingredientes\nPascuapizza,"Muzzarella, acelga, ricota"\n\n' + 'pizza,ingrediente,cantidad,unidad\nPascuapizza,Muzzarella,250,g\nPascuapizza,Ricota,80,g'}</pre>
+          <pre style={{ whiteSpace: 'pre-wrap', overflowX: 'auto', fontSize: '.78rem', background: '#f8fafc', padding: '.65rem', borderRadius: 6 }}>{'pizza,ingrediente,categoria,cantidad,unidad,precio\nPascuapizza,Muzzarella,Lácteos / Quesos,0.1,kg,17000\nPascuapizza,Ricota,Lácteos / Quesos,0.08,kg,17000\nPascuapizza,Acelga,Verdulería,0.08,kg,17000'}</pre>
         </details>
       </div>
 
       {!!pizzas.length && (
         <>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '.5rem' }}>
-            {[['Pizzas', summary.total], ['Seleccionadas', summary.selected], ['Insumos vinculados', summary.matched], ['Pendientes de vincular', summary.unmatched]].map(([label, value]) => (
+            {[['Pizzas', summary.total], ['Seleccionadas', summary.selected], ['Insumos vinculados', summary.matched], ['Nuevos a crear con categoría', summary.unmatched]].map(([label, value]) => (
               <div key={label} style={{ border: '1px solid var(--c-border,#ddd)', borderRadius: 8, padding: '.55rem .75rem', fontSize: '.82rem' }}>
                 <strong>{value}</strong> <span style={{ color: '#64748b' }}>{label}</span>
               </div>
@@ -554,10 +672,24 @@ export function SeasonalPizzaCsvImport({ supplies, recipes, variants, onCreateSu
                 </div>
               )}
               {pizza.lines.map((line) => (
-                <div key={line.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(120px,1fr) minmax(90px,.65fr) minmax(65px,.45fr)', gap: '.4rem', alignItems: 'center' }}>
+                <div key={line.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(140px,1.2fr) minmax(130px,.9fr) minmax(85px,.55fr) minmax(60px,.4fr)', gap: '.4rem', alignItems: 'center' }}>
                   <select aria-label={`Insumo para ${line.ingredient}`} value={line.supplyId ?? '__create__'} onChange={(e) => updateLine(pizza.id, line.id, { supplyId: e.target.value === '__create__' ? null : Number(e.target.value) })} style={{ minWidth: 0, padding: '.5rem', border: '1px solid #cbd5e1', borderRadius: 6 }}>
                     <option value="__create__">Agregar: {line.ingredient}</option>
                     {supplies.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                  <select
+                    aria-label={`Categoría para ${line.ingredient}`}
+                    disabled={line.supplyId !== null}
+                    value={line.category}
+                    onChange={(e) => updateLine(pizza.id, line.id, { category: e.target.value })}
+                    style={{ minWidth: 0, padding: '.5rem', border: '1px solid #cbd5e1', borderRadius: 6, background: line.supplyId !== null ? '#f8fafc' : '#fff', color: line.supplyId !== null ? '#64748b' : '#0f172a' }}
+                  >
+                    {!SUPPLY_CATEGORIES.includes(line.category as (typeof SUPPLY_CATEGORIES)[number]) && line.category && (
+                      <option value={line.category}>{line.category}</option>
+                    )}
+                    {SUPPLY_CATEGORIES.map((cat) => (
+                      <option key={cat} value={cat}>{cat}</option>
+                    ))}
                   </select>
                   <input aria-label={`Cantidad de ${line.ingredient}`} inputMode="decimal" placeholder="Cantidad" value={line.quantity} onChange={(e) => updateLine(pizza.id, line.id, { quantity: e.target.value })} style={{ minWidth: 0, padding: '.5rem', border: '1px solid #cbd5e1', borderRadius: 6 }} />
                   <input aria-label={`Unidad de ${line.ingredient}`} value={line.unit} onChange={(e) => updateLine(pizza.id, line.id, { unit: e.target.value })} style={{ minWidth: 0, padding: '.5rem', border: '1px solid #cbd5e1', borderRadius: 6 }} />

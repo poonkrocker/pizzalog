@@ -403,7 +403,6 @@ class SeasonalPizzaController
                 SELECT s.id, s.name, s.unit, s.created_at
                   FROM supplies s
                  WHERE s.business_id = ?
-                   AND COALESCE(s.category, 'Otros') = 'Otros'
                    AND s.cost IS NULL
                    AND COALESCE(s.stock, 0) = 0
                    AND NOT EXISTS (
@@ -433,7 +432,6 @@ class SeasonalPizzaController
                 SELECT s.id, s.name, s.unit, s.created_at
                   FROM supplies s
                  WHERE s.business_id = ?
-                   AND COALESCE(s.category, 'Otros') = 'Otros'
                    AND s.cost IS NULL
                    AND COALESCE(s.stock, 0) = 0
                    AND s.created_at >= ?
