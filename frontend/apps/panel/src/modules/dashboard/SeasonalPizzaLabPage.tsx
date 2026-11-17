@@ -3064,10 +3064,17 @@ export function SeasonalPizzaLabPage() {
         <SeasonalPizzaCsvImport
           supplies={studio.data.supplies}
           recipes={studio.data.recipes}
+          variants={(report.data?.variants ?? []).map((variant) => ({
+            variant_id: variant.variant_id,
+            label: variant.label,
+            recipe_id: variant.recipe_id,
+            recipe_name: variant.recipe_name,
+          }))}
           onImport={async (recipe) => {
             await link.mutateAsync({
-              variantId: 0,
+              variantId: recipe.variantId,
               payload: {
+                recipe_id: recipe.recipeId ?? undefined,
                 name: recipe.name,
                 yield_quantity: 1,
                 yield_unit: 'u',
