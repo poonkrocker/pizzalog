@@ -46,3 +46,10 @@ Flujo Android:
 5. Descargá JSON al terminar.
 
 Esta estrategia captura únicamente la información visible en las tarjetas. No garantiza todavía descripciones completas ni ingredientes del detalle del producto, y no puede asegurar por sí sola que se hayan recorrido todos los productos. La siguiente iteración debe incorporar lectura del detalle y verificación de cobertura.
+
+
+## Extractor DOM v0.3
+
+La versión 0.3 lee nodos de texto individuales porque el identificador, el separador y el nombre pueden estar repartidos en elementos HTML diferentes. Busca el patrón de identificador y reconstruye el nombre a partir de los siguientes nodos. Intenta asociar imágenes/precio/categoría buscando el contenedor ancestro correspondiente.
+
+Para usarla: reemplazá el marcador por bookmarklet.txt, ejecutalo, tocá "Analizar catálogo visible", cambiá de categoría y repetí. Descargá "callbell-products-dom.json". El campo cardFound permite detectar si pudo localizar el contenedor de la tarjeta; las imágenes y el precio pueden quedar vacíos si el HTML no los agrupa con el nombre.
