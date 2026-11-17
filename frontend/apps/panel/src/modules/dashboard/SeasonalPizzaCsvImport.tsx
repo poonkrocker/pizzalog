@@ -104,8 +104,9 @@ function parsePrice(value: string): number {
 
 function matchSupply(name: string, supplies: SupplyItem[]): SupplyItem | undefined {
   const target = normalize(name);
-  return supplies.find((s) => normalize(s.name) === target)
-    ?? supplies.find((s) => normalize(s.name).includes(target) || target.includes(normalize(s.name)));
+  // Only exact normalized matches are preselected. Similar names remain unlinked
+  // so a substring coincidence cannot silently assign the wrong catalog supply.
+  return supplies.find((s) => normalize(s.name) === target);
 }
 
 function buildPizzas(rows: string[][], supplies: SupplyItem[], recipes: StudioRecipe[], variants: ExistingVariant[]): DraftPizza[] {
