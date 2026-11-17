@@ -29,6 +29,7 @@ type Props = {
   supplies: SupplyItem[];
   recipes: StudioRecipe[];
   variants: ExistingVariant[];
+  onCreateSupply: (name: string, unit: string) => Promise<number>;
   onImport: (recipe: {
     name: string;
     price: number;
@@ -200,7 +201,7 @@ function buildPizzas(rows: string[][], supplies: SupplyItem[], recipes: StudioRe
   return [...grouped.values()];
 }
 
-export function SeasonalPizzaCsvImport({ supplies, recipes, variants, onImport }: Props) {
+export function SeasonalPizzaCsvImport({ supplies, recipes, variants, onCreateSupply, onImport }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [pizzas, setPizzas] = useState<DraftPizza[]>([]);
   const [error, setError] = useState('');
@@ -236,29 +237,45 @@ export function SeasonalPizzaCsvImport({ supplies, recipes, variants, onImport }
   const importSelected = async () => {
     const selected = pizzas.filter((p) => p.include);
     if (!selected.length) { setError('Seleccioná al menos una pizza nueva.'); return; }
-    const invalid = selected.find((p) => !p.lines.length || p.lines.some((l) => !l.supplyId || !l.unit));
-    if (invalid) { setError(`Vinculá todos los ingredientes con un insumo del catálogo en «${invalid.name}». Las cantidades pueden quedar vacías y completarse después.`); return; }
+    const invalid = selected.find((p) => !p.lines.length || p.lines.some((l) => !l.ingredient.trim() || !l.unit));
+    if (invalid) { setError(`Revisá que todos los ingredientes tengan nombre y unidad en «${invalid.name}».`); return; }
     setBusy(true); setError(''); setNotice('');
     let done = 0;
+    let createdCount = 0;
+    const createdByName = new Map<string, number>();
     try {
+      // Crear cada insumo faltante una sola vez para todo el lote. Si ya fue
+      // creado en un intento anterior, onCreateSupply lo recupera por nombre.
       for (const pizza of selected) {
+        const components = [];
+        for (const line of pizza.lines) {
+          let supplyId = line.supplyId;
+          if (supplyId === null) {
+            const key = normalize(line.ingredient);
+            supplyId = createdByName.get(key) ?? await onCreateSupply(line.ingredient.trim(), line.unit);
+            if (!createdByName.has(key)) {
+              createdByName.set(key, supplyId);
+              createdCount += 1;
+            }
+          }
+          components.push({
+            component_type: 'supply' as const,
+            component_id: supplyId,
+            // 0 representa cantidad todavía no relevada; Cost Engine lo trata como incompleto.
+            quantity: line.quantity.trim() === '' ? 0 : Number(line.quantity.replace(',', '.')),
+            unit: line.unit,
+          });
+        }
         await onImport({
           name: pizza.name,
           price: pizza.price,
           variantId: pizza.variantId,
           recipeId: pizza.recipeId,
-          components: pizza.lines.map((line) => ({
-            component_type: 'supply',
-            component_id: line.supplyId!,
-            // 0 representa cantidad todavía no relevada: se conserva el ingrediente
-            // en la receta, pero Cost Engine lo considera incompleto y no calcula costo.
-            quantity: line.quantity.trim() === '' ? 0 : Number(line.quantity.replace(',', '.')),
-            unit: line.unit,
-          })),
+          components,
         });
         done += 1;
       }
-      setNotice(`Se importaron ${done} recetas. Las recetas existentes y las no seleccionadas se conservaron.`);
+      setNotice(`Se importaron ${done} recetas y se agregaron ${createdCount} insumos nuevos. Las cantidades vacías siguen pendientes de completar.`);
       setPizzas((current) => current.map((p) => ({ ...p, include: false })));
     } catch (err) {
       setError(`Se importaron ${done} recetas antes del error. ${err instanceof Error ? err.message : 'Revisá el catálogo e intentá nuevamente.'}`);
@@ -309,8 +326,8 @@ export function SeasonalPizzaCsvImport({ supplies, recipes, variants, onImport }
               )}
               {pizza.lines.map((line) => (
                 <div key={line.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(120px,1fr) minmax(90px,.65fr) minmax(65px,.45fr)', gap: '.4rem', alignItems: 'center' }}>
-                  <select aria-label={`Insumo para ${line.ingredient}`} value={line.supplyId ?? ''} onChange={(e) => updateLine(pizza.id, line.id, { supplyId: e.target.value ? Number(e.target.value) : null })} style={{ minWidth: 0, padding: '.5rem', border: '1px solid #cbd5e1', borderRadius: 6 }}>
-                    <option value="">Vincular: {line.ingredient}</option>
+                  <select aria-label={`Insumo para ${line.ingredient}`} value={line.supplyId ?? '__create__'} onChange={(e) => updateLine(pizza.id, line.id, { supplyId: e.target.value === '__create__' ? null : Number(e.target.value) })} style={{ minWidth: 0, padding: '.5rem', border: '1px solid #cbd5e1', borderRadius: 6 }}>
+                    <option value="__create__">Agregar: {line.ingredient}</option>
                     {supplies.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
                   <input aria-label={`Cantidad de ${line.ingredient}`} inputMode="decimal" placeholder="Cantidad" value={line.quantity} onChange={(e) => updateLine(pizza.id, line.id, { quantity: e.target.value })} style={{ minWidth: 0, padding: '.5rem', border: '1px solid #cbd5e1', borderRadius: 6 }} />
