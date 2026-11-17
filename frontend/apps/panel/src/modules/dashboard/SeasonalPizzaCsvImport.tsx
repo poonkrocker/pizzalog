@@ -97,7 +97,7 @@ function column(headers: string[], kind: keyof typeof aliases): number {
 function parsePrice(value: string): number {
   const raw = value.trim().replace(/[^0-9,.-]/g, '');
   if (!raw) return 0;
-  const normalized = raw.includes(',') ? raw.replace(/\\./g, '').replace(',', '.') : raw.replace(/\\.(?=\\d{3}(?:\\D|$))/g, '');
+  const normalized = raw.includes(',') ? raw.replace(/\./g, '').replace(',', '.') : raw.replace(/\.(?=\d{3}(?:\D|$))/g, '');
   const parsed = Number(normalized);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
 }
