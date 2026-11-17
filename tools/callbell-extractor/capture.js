@@ -10,8 +10,12 @@
   };
   var MAX_BODY = 8 * 1024 * 1024, MAX_RECORDS = 500;
   function isJson(type) { return /json/i.test(type || ""); }
+  function isRelevantUrl(url) {
+    var value = String(url || "").toLowerCase();
+    return !/(auth|login|logout|session|customer|contact|conversation|message|chat|order|checkout|payment|invoice|profile|account)/i.test(value);
+  }
   function save(url, status, type, body, source) {
-    if (!state.active || !body || body.length > MAX_BODY || !isJson(type)) return;
+    if (!state.active || !body || body.length > MAX_BODY || !isJson(type) || !isRelevantUrl(url)) return;
     try {
       var data = JSON.parse(body);
       if (!data || typeof data !== "object") return;
@@ -43,9 +47,12 @@
   XMLHttpRequest.prototype.send = function () {
     this.addEventListener("load", function () {
       try {
-        var type = this.getResponseHeader("content-type") || "";
-        if (isJson(type)) save(this.responseURL || this.__cbUrl, this.status, type,
-          typeof this.responseText === "string" ? this.responseText : "", "xhr");
+        var type = this.getResponseHeader("content-type") || "", body = "";
+        if (isJson(type)) {
+          if (this.responseType === "json" && this.response && typeof this.response === "object") body = JSON.stringify(this.response);
+          else if (this.responseType === "" || this.responseType === "text") body = this.responseText || "";
+          save(this.responseURL || this.__cbUrl, this.status, type, body, "xhr");
+        }
       } catch (_) {}
     });
     return originalSend.apply(this, arguments);
