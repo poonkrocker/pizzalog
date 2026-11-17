@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - feat/main-pizza-lab-csv-import
       - feat/tools-cost-engine-importer-v1
       - feat/seasonal-pizza-lab
     paths:
