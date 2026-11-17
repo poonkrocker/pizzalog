@@ -6,11 +6,11 @@ Herramienta independiente de Pizzalog. Esta primera etapa identifica las respues
 
 **Etapa 1 — descubrimiento del API, no exportador final.** El formato interno de los productos y los endpoints todavía deben confirmarse con una captura real del administrador. No se deben presentar estos datos como una exportación completa hasta verificar paginación, productos ocultos y campos.
 
-## Instalación del marcador en Chrome Android
+## Instalación del marcador en Chrome/Brave Android
 
 1. Abrí este archivo en el repositorio y copiá el contenido de bookmarklet.txt.
 2. En Chrome, agregá cualquier página a marcadores.
-3. Editá ese marcador: nombre "Callbell - Capturar catálogo"; reemplazá la URL por el contenido de bookmarklet.txt.
+3. Editá ese marcador: nombre "Callbell - Capturar catálogo"; reemplazá la URL por el contenido completo de bookmarklet.txt. Esta versión ejecuta el código dentro del propio marcador; no depende de GitHub en tiempo de ejecución.
 4. Abrí Callbell Shop e iniciá sesión normalmente con Google.
 5. Entrá al administrador y abrí la sección del catálogo.
 6. Ejecutá el marcador desde el menú de marcadores.
@@ -25,7 +25,7 @@ Herramienta independiente de Pizzalog. Esta primera etapa identifica las respues
 - Captura respuestas JSON de fetch y XMLHttpRequest de hasta 8 MiB cada una, con un máximo de 500 respuestas. Omite URLs que parezcan corresponder a autenticación, sesiones, clientes, conversaciones, mensajes, pedidos, pagos o perfiles.
 - El archivo puede contener información comercial o datos de clientes; revisalo antes de compartirlo.
 - No captura archivos binarios ni respuestas HTML.
-- Si Callbell bloquea scripts externos mediante Content Security Policy, el marcador no podrá cargar el archivo remoto; en ese caso prepararemos una variante autocontenida.
+- El marcador actual es autocontenido: no carga JavaScript remoto y evita el bloqueo de Content Security Policy que afectaba a la primera versión.
 
 ## Qué valida esta etapa
 
