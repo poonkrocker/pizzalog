@@ -32,3 +32,17 @@ Herramienta independiente de Pizzalog. Esta primera etapa identifica las respues
 Con el JSON podremos identificar endpoints de listado y detalle, estructura de productos/categorías/variantes/fotos/visibilidad, paginación o carga incremental, y si los productos ocultos aparecen en las respuestas del administrador.
 
 La etapa siguiente será un adaptador que normalice esos datos y genere CSV + JSON completos, con un resumen de registros y controles de integridad.
+
+
+## Fallback de captura por DOM (versión 0.2.0)
+
+La versión actual del bookmarklet ya no depende de observar respuestas de red. Lee las tarjetas de productos que están renderizadas en la pantalla del catálogo, acumula resultados sin duplicarlos y descarga un JSON local.
+
+Flujo Android:
+1. Reemplazá el marcador por el contenido actualizado de bookmarklet.txt.
+2. Ejecutalo en el administrador.
+3. Tocá "Capturar productos visibles".
+4. Cambiá de categoría y repetí la captura; desplazate por el listado para mostrar más tarjetas y volvé a capturar.
+5. Descargá JSON al terminar.
+
+Esta estrategia captura únicamente la información visible en las tarjetas. No garantiza todavía descripciones completas ni ingredientes del detalle del producto, y no puede asegurar por sí sola que se hayan recorrido todos los productos. La siguiente iteración debe incorporar lectura del detalle y verificación de cobertura.
