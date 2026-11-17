@@ -54,6 +54,7 @@ type Props = {
     recipeId: number | null;
     components: Array<{ component_type: 'supply'; component_id: number; quantity: number; unit: string }>;
   }) => Promise<void>;
+  onAfterBatchImport?: () => Promise<void>;
   onRevertImport?: (payload: {
     mode: 'date' | 'csv';
     date?: string;
@@ -394,7 +395,7 @@ function buildPizzas(rows: string[][], supplies: SupplyItem[], recipes: StudioRe
   return [...grouped.values()];
 }
 
-export function SeasonalPizzaCsvImport({ supplies, recipes, variants, onCreateSupply, onImport, onRevertImport }: Props) {
+export function SeasonalPizzaCsvImport({ supplies, recipes, variants, onCreateSupply, onImport, onAfterBatchImport, onRevertImport }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [pizzas, setPizzas] = useState<DraftPizza[]>([]);
   const [error, setError] = useState('');
@@ -402,6 +403,14 @@ export function SeasonalPizzaCsvImport({ supplies, recipes, variants, onCreateSu
   const [busy, setBusy] = useState(false);
   const [fileName, setFileName] = useState('');
   const [autoCreateSupplies, setAutoCreateSupplies] = useState(true);
+  const [progress, setProgress] = useState<{
+    donePizzas: number;
+    totalPizzas: number;
+    currentPizza: string;
+    currentStep: string;
+    createdSupplies: number;
+    totalNewSupplies: number;
+  } | null>(null);
 
   // Estado del Desimportador / Revertir Lote
   const [revertDate, setRevertDate] = useState('2026-11-17');
@@ -493,17 +502,51 @@ export function SeasonalPizzaCsvImport({ supplies, recipes, variants, onCreateSu
     let done = 0;
     let createdCount = 0;
     const createdByName = new Map<string, number>();
+    const uniqueMissingKeys = new Set<string>();
+    for (const p of selected) {
+      for (const l of p.lines) {
+        if (l.supplyId === null) uniqueMissingKeys.add(normalize(l.ingredient));
+      }
+    }
+    const totalNewSupplies = uniqueMissingKeys.size;
+    setProgress({
+      donePizzas: 0,
+      totalPizzas: selected.length,
+      currentPizza: selected[0]?.name ?? '',
+      currentStep: 'Iniciando importación…',
+      createdSupplies: 0,
+      totalNewSupplies,
+    });
     try {
       for (const pizza of selected) {
+        setProgress({
+          donePizzas: done,
+          totalPizzas: selected.length,
+          currentPizza: pizza.name,
+          currentStep: `Verificando ingredientes de «${pizza.name}»…`,
+          createdSupplies: createdCount,
+          totalNewSupplies,
+        });
         const components = [];
         for (const line of pizza.lines) {
           let supplyId = line.supplyId;
           if (supplyId === null) {
             const key = normalize(line.ingredient);
-            supplyId = createdByName.get(key) ?? await onCreateSupply(line.ingredient.trim(), line.unit, line.category || inferSupplyCategory(line.ingredient));
             if (!createdByName.has(key)) {
+              const cat = line.category || inferSupplyCategory(line.ingredient);
+              setProgress({
+                donePizzas: done,
+                totalPizzas: selected.length,
+                currentPizza: pizza.name,
+                currentStep: `Creando insumo «${line.ingredient.trim()}» (${cat})…`,
+                createdSupplies: createdCount,
+                totalNewSupplies,
+              });
+              supplyId = await onCreateSupply(line.ingredient.trim(), line.unit, cat);
               createdByName.set(key, supplyId);
               createdCount += 1;
+            } else {
+              supplyId = createdByName.get(key)!;
             }
           }
           components.push({
@@ -513,6 +556,14 @@ export function SeasonalPizzaCsvImport({ supplies, recipes, variants, onCreateSu
             unit: line.unit,
           });
         }
+        setProgress({
+          donePizzas: done,
+          totalPizzas: selected.length,
+          currentPizza: pizza.name,
+          currentStep: `Guardando receta «${pizza.name}» (${done + 1} de ${selected.length})…`,
+          createdSupplies: createdCount,
+          totalNewSupplies,
+        });
         await onImport({
           name: pizza.name,
           price: pizza.price,
@@ -521,12 +572,36 @@ export function SeasonalPizzaCsvImport({ supplies, recipes, variants, onCreateSu
           components,
         });
         done += 1;
+        setProgress({
+          donePizzas: done,
+          totalPizzas: selected.length,
+          currentPizza: pizza.name,
+          currentStep: `Receta «${pizza.name}» guardada (${done} de ${selected.length})`,
+          createdSupplies: createdCount,
+          totalNewSupplies,
+        });
       }
-      setNotice(`Se importaron ${done} recetas y se agregaron ${createdCount} insumos nuevos clasificados en su categoría. Las cantidades vacías siguen pendientes de completar.`);
+      if (onAfterBatchImport) {
+        setProgress({
+          donePizzas: done,
+          totalPizzas: selected.length,
+          currentPizza: '',
+          currentStep: 'Actualizando catálogo y laboratorio…',
+          createdSupplies: createdCount,
+          totalNewSupplies,
+        });
+        await onAfterBatchImport();
+      }
+      setNotice(`✅ Se importaron ${done} recetas y se agregaron ${createdCount} insumos nuevos clasificados en su categoría. Las cantidades vacías siguen pendientes de completar.`);
       setPizzas((current) => current.map((p) => ({ ...p, include: false })));
     } catch (err) {
-      setError(`Se importaron ${done} recetas antes del error. ${err instanceof Error ? err.message : 'Revisá el catálogo e intentá nuevamente.'}`);
-    } finally { setBusy(false); }
+      if (onAfterBatchImport) {
+        await onAfterBatchImport().catch(() => {});
+      }
+      setError(`Se importaron ${done} de ${selected.length} recetas antes del error. ${err instanceof Error ? err.message : 'Revisá el catálogo e intentá nuevamente.'}`);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -697,9 +772,34 @@ export function SeasonalPizzaCsvImport({ supplies, recipes, variants, onCreateSu
               ))}
             </section>
           ))}
-          <button type="button" disabled={busy || summary.selected === 0} onClick={() => void importSelected()} style={{ padding: '.7rem 1rem', border: 0, borderRadius: 8, background: 'var(--c-accent,#c7101b)', color: '#fff', fontWeight: 700, opacity: busy ? .65 : 1 }}>
-            {busy ? 'Importando recetas…' : `Importar / actualizar ${summary.selected} pizzas seleccionadas`}
-          </button>
+          <div style={{ position: 'sticky', bottom: 12, zIndex: 20, background: 'rgba(255,255,255,0.96)', backdropFilter: 'blur(6px)', border: '1px solid #cbd5e1', borderRadius: 10, padding: '.85rem', boxShadow: '0 8px 24px rgba(15,23,42,0.12)', display: 'grid', gap: '.65rem' }}>
+            {busy && progress && (
+              <div style={{ display: 'grid', gap: '.45rem' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '.84rem', fontWeight: 700, color: '#0f172a', gap: '.5rem', flexWrap: 'wrap' }}>
+                  <span>⏳ {progress.currentStep}</span>
+                  <span>
+                    🍕 {progress.donePizzas}/{progress.totalPizzas} pizzas ({Math.round((progress.donePizzas / Math.max(1, progress.totalPizzas)) * 100)}%)
+                    {progress.totalNewSupplies > 0 && ` · 🧀 ${progress.createdSupplies}/${progress.totalNewSupplies} insumos nuevos`}
+                  </span>
+                </div>
+                <div style={{ height: 10, background: '#e2e8f0', borderRadius: 999, overflow: 'hidden' }}>
+                  <div
+                    style={{
+                      height: '100%',
+                      width: `${Math.max(3, Math.round((progress.donePizzas / Math.max(1, progress.totalPizzas)) * 100))}%`,
+                      background: 'linear-gradient(90deg, #dc2626, #ea580c)',
+                      transition: 'width .2s ease',
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+            <button type="button" disabled={busy || summary.selected === 0} onClick={() => void importSelected()} style={{ padding: '.75rem 1rem', border: 0, borderRadius: 8, background: 'var(--c-accent,#c7101b)', color: '#fff', fontWeight: 700, opacity: busy ? .75 : 1, cursor: busy ? 'wait' : 'pointer' }}>
+              {busy && progress
+                ? `Importando… (${progress.donePizzas}/${progress.totalPizzas} pizzas · ${progress.createdSupplies} insumos creados)`
+                : `Importar / actualizar ${summary.selected} pizzas seleccionadas`}
+            </button>
+          </div>
         </>
       )}
       {error && <div role="alert" style={{ padding: '.7rem', borderRadius: 7, background: '#fee2e2', color: '#991b1b' }}>{error}</div>}

@@ -3071,15 +3071,11 @@ export function SeasonalPizzaLabPage() {
             recipe_name: variant.recipe_name,
           }))}
           onCreateSupply={async (name, unit, category) => {
-            // Reconsultar antes de crear para evitar duplicados si un intento
-            // anterior alcanzó a crear el insumo pero falló al guardar la receta.
-            const current = await api.supplies.list();
             const normalize = (value: string) => value.toLowerCase().normalize('NFD')
               .replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
-            const existing = current.supplies.find((supply) => normalize(supply.name) === normalize(name));
-            if (existing) {
-              await qc.invalidateQueries({ queryKey: ['production', 'recipe-studio'] });
-              return existing.id;
+            const existingInProps = (studio.data?.supplies ?? []).find((supply) => normalize(supply.name) === normalize(name));
+            if (existingInProps) {
+              return existingInProps.id;
             }
             const created = await api.supplies.create({
               name,
@@ -3088,22 +3084,24 @@ export function SeasonalPizzaLabPage() {
               cost: null,
               initial_stock: 0,
             });
-            await qc.invalidateQueries({ queryKey: ['production', 'recipe-studio'] });
             return created.supply.id;
           }}
           onImport={async (recipe) => {
-            await link.mutateAsync({
-              variantId: recipe.variantId,
-              payload: {
-                recipe_id: recipe.recipeId ?? undefined,
-                name: recipe.name,
-                yield_quantity: 1,
-                yield_unit: 'u',
-                price: recipe.price,
-                target_food_cost_pct: 30,
-                components: recipe.components,
-              },
+            await api.analytics.linkSeasonalPizzaRecipe(recipe.variantId, {
+              recipe_id: recipe.recipeId ?? undefined,
+              name: recipe.name,
+              yield_quantity: 1,
+              yield_unit: 'u',
+              price: recipe.price,
+              target_food_cost_pct: 30,
+              components: recipe.components,
             });
+          }}
+          onAfterBatchImport={async () => {
+            await Promise.all([
+              qc.invalidateQueries({ queryKey: ['analytics', 'seasonal-pizzas'] }),
+              qc.invalidateQueries({ queryKey: ['production', 'recipe-studio'] }),
+            ]);
           }}
           onRevertImport={async (payload) => {
             const res = await api.analytics.revertSeasonalPizzaImport(payload);
