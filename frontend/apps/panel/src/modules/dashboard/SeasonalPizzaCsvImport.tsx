@@ -10,6 +10,8 @@ type DraftLine = {
   supplyId: number | null;
 };
 
+type ExistingVariant = { variant_id: number; label: string; recipe_id: number | null; recipe_name: string | null };
+
 type DraftPizza = {
   id: string;
   name: string;
@@ -17,14 +19,19 @@ type DraftPizza = {
   lines: DraftLine[];
   include: boolean;
   existing: string | null;
+  variantId: number;
+  recipeId: number | null;
 };
 
 type Props = {
   supplies: SupplyItem[];
   recipes: StudioRecipe[];
+  variants: ExistingVariant[];
   onImport: (recipe: {
     name: string;
     price: number;
+    variantId: number;
+    recipeId: number | null;
     components: Array<{ component_type: 'supply'; component_id: number; quantity: number; unit: string }>;
   }) => Promise<void>;
 };
@@ -87,7 +94,7 @@ function matchSupply(name: string, supplies: SupplyItem[]): SupplyItem | undefin
     ?? supplies.find((s) => normalize(s.name).includes(target) || target.includes(normalize(s.name)));
 }
 
-function buildPizzas(rows: string[][], supplies: SupplyItem[], recipes: StudioRecipe[]): DraftPizza[] {
+function buildPizzas(rows: string[][], supplies: SupplyItem[], recipes: StudioRecipe[], variants: ExistingVariant[]): DraftPizza[] {
   const headers = rows[0].map(normalize);
   const pizzaCol = column(headers, 'pizza');
   const ingredientCol = column(headers, 'ingredient');
@@ -107,8 +114,10 @@ function buildPizzas(rows: string[][], supplies: SupplyItem[], recipes: StudioRe
     const key = normalize(name);
     let pizza = grouped.get(key);
     if (!pizza) {
-      const exact = recipes.find((r) => normalize(r.name) === key);
-      const near = !exact ? recipes.find((r) => {
+      const variant = variants.find((v) => normalize(v.label) === key);
+      const exact = (variant?.recipe_id ? recipes.find((r) => r.id === variant.recipe_id) : undefined)
+        ?? recipes.find((r) => normalize(r.name) === key);
+      const near = !exact && !variant ? recipes.find((r) => {
         const candidate = normalize(r.name);
         return candidate && (candidate.includes(key) || key.includes(candidate));
       }) : undefined;
@@ -118,7 +127,13 @@ function buildPizzas(rows: string[][], supplies: SupplyItem[], recipes: StudioRe
         price: priceCol >= 0 ? Number((row[priceCol] ?? '').replace(',', '.')) || 0 : 0,
         lines: [],
         include: !exact && !near,
-        existing: exact ? 'Ya existe una receta con este nombre' : near ? `Posible coincidencia: ${near.name}` : null,
+        existing: exact
+          ? `Ya existe una receta «${exact.name}»; importar actualizará sus ingredientes`
+          : variant
+            ? 'La pizza ya existe en el histórico; se vinculará la receta'
+            : near ? `Posible coincidencia: ${near.name}` : null,
+        variantId: variant?.variant_id ?? 0,
+        recipeId: exact?.id ?? null,
       };
       grouped.set(key, pizza);
     }
@@ -148,7 +163,7 @@ function buildPizzas(rows: string[][], supplies: SupplyItem[], recipes: StudioRe
   return [...grouped.values()];
 }
 
-export function SeasonalPizzaCsvImport({ supplies, recipes, onImport }: Props) {
+export function SeasonalPizzaCsvImport({ supplies, recipes, variants, onImport }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [pizzas, setPizzas] = useState<DraftPizza[]>([]);
   const [error, setError] = useState('');
@@ -174,7 +189,7 @@ export function SeasonalPizzaCsvImport({ supplies, recipes, onImport }: Props) {
     setError(''); setNotice(''); setFileName(file.name);
     try {
       const rows = parseCsv(await file.text());
-      setPizzas(buildPizzas(rows, supplies, recipes));
+      setPizzas(buildPizzas(rows, supplies, recipes, variants));
     } catch (err) {
       setPizzas([]);
       setError(err instanceof Error ? err.message : 'No se pudo leer el CSV.');
@@ -193,6 +208,8 @@ export function SeasonalPizzaCsvImport({ supplies, recipes, onImport }: Props) {
         await onImport({
           name: pizza.name,
           price: pizza.price,
+          variantId: pizza.variantId,
+          recipeId: pizza.recipeId,
           components: pizza.lines.map((line) => ({
             component_type: 'supply',
             component_id: line.supplyId!,
@@ -245,6 +262,11 @@ export function SeasonalPizzaCsvImport({ supplies, recipes, onImport }: Props) {
                   Importar
                 </label>
               </div>
+              {pizza.recipeId !== null && recipes.find((r) => r.id === pizza.recipeId) && (
+                <div style={{ fontSize: '.78rem', color: '#64748b', background: '#f8fafc', padding: '.55rem', borderRadius: 6 }}>
+                  Receta actual: {recipes.find((r) => r.id === pizza.recipeId)!.components.map((component) => component.name).join(', ') || 'sin ingredientes'}
+                </div>
+              )}
               {pizza.lines.map((line) => (
                 <div key={line.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(120px,1fr) minmax(90px,.65fr) minmax(65px,.45fr)', gap: '.4rem', alignItems: 'center' }}>
                   <select aria-label={`Insumo para ${line.ingredient}`} value={line.supplyId ?? ''} onChange={(e) => updateLine(pizza.id, line.id, { supplyId: e.target.value ? Number(e.target.value) : null })} style={{ minWidth: 0, padding: '.5rem', border: '1px solid #cbd5e1', borderRadius: 6 }}>
@@ -258,7 +280,7 @@ export function SeasonalPizzaCsvImport({ supplies, recipes, onImport }: Props) {
             </section>
           ))}
           <button type="button" disabled={busy || summary.selected === 0} onClick={() => void importSelected()} style={{ padding: '.7rem 1rem', border: 0, borderRadius: 8, background: 'var(--c-accent,#c7101b)', color: '#fff', fontWeight: 700, opacity: busy ? .65 : 1 }}>
-            {busy ? 'Importando recetas…' : `Importar ${summary.selected} pizzas seleccionadas`}
+            {busy ? 'Importando recetas…' : `Importar / actualizar ${summary.selected} pizzas seleccionadas`}
           </button>
         </>
       )}
