@@ -3070,6 +3070,27 @@ export function SeasonalPizzaLabPage() {
             recipe_id: variant.recipe_id,
             recipe_name: variant.recipe_name,
           }))}
+          onCreateSupply={async (name, unit) => {
+            // Reconsultar antes de crear para evitar duplicados si un intento
+            // anterior alcanzó a crear el insumo pero falló al guardar la receta.
+            const current = await api.supplies.list();
+            const normalize = (value: string) => value.toLowerCase().normalize('NFD')
+              .replace(/[\\u0300-\\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+            const existing = current.supplies.find((supply) => normalize(supply.name) === normalize(name));
+            if (existing) {
+              await qc.invalidateQueries({ queryKey: ['production', 'recipe-studio'] });
+              return existing.id;
+            }
+            const created = await api.supplies.create({
+              name,
+              category: 'Otros',
+              unit,
+              cost: null,
+              initial_stock: 0,
+            });
+            await qc.invalidateQueries({ queryKey: ['production', 'recipe-studio'] });
+            return created.supply.id;
+          }}
           onImport={async (recipe) => {
             await link.mutateAsync({
               variantId: recipe.variantId,
