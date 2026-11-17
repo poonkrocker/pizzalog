@@ -2,8 +2,8 @@
   const KEY = '__callbell_history_capture_v1';
   const read = () => { try { return JSON.parse(localStorage.getItem(KEY) || '{"products":{},"links":[]}'); } catch { return {products:{},links:[]}; } };
   const save = x => localStorage.setItem(KEY, JSON.stringify(x));
-  const clean = s => (s || '').replace(/\\s+/g, ' ').trim();
-  const idFromUrl = location.pathname.match(/\\/administrar\\/productos\\/([^/?#]+)/)?.[1] || null;
+  const clean = s => (s || '').replace(/\s+/g, ' ').trim();
+  const idFromUrl = location.pathname.match(/\/administrar\/productos\/([^/?#]+)/)?.[1] || null;
   const isUiImage = (img) => {
     const s = ((img.src || '') + ' ' + (img.alt || '')).toLowerCase();
     return !img.src || img.src.startsWith('data:') || /mostrar|ocultar|visibility|eye|logo|placeholder|avatar|icon/.test(s);
@@ -34,7 +34,7 @@
   const collectLinks = () => {
     const urls = [...document.querySelectorAll('a[href]')]
       .map(a => a.href)
-      .filter(h => /\\/administrar\\/productos\\/[^/?#]+/.test(h));
+      .filter(h => /\/administrar\/productos\/[^/?#]+/.test(h));
     const data = read();
     data.links = [...new Set([...(data.links || []), ...urls])];
     save(data);
@@ -49,7 +49,7 @@
   const data = read();
   if (idFromUrl) {
     const p = collectDetail();
-    alert('Ficha capturada: ' + (p.id || p.url) + '\\nProductos acumulados: ' + Object.keys(read().products).length);
+    alert('Ficha capturada: ' + (p.id || p.url) + '\nProductos acumulados: ' + Object.keys(read().products).length);
   } else {
     const n = collectLinks();
     const d = read();
