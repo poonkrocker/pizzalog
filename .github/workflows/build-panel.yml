@@ -6,6 +6,7 @@ on:
       - main
       - feat/tools-cost-engine-importer-v1
       - feat/seasonal-pizza-lab
+      - feat/pizza-lab-csv-import
     paths:
       - "frontend/apps/panel/**"
       - "frontend/packages/shared/**"
