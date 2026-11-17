@@ -180,9 +180,12 @@ class SeasonalPizzaController
                 $order=0;
                 foreach($components as $c){
                     if(!is_array($c)) continue;
+                    // La cantidad 0 significa "ingrediente identificado, gramaje pendiente".
+                    // Se conserva en la receta; Cost Engine ya trata cantidades <= 0 como incompletas
+                    // y no genera un costo ficticio hasta que el usuario complete el dato.
                     $qty=max(0,(float)($c['quantity']??0));
                     $cid=(int)($c['component_id']??0);
-                    if($qty<=0||$cid<=0) continue;
+                    if($cid<=0) continue;
                     $ct=($c['component_type']??'supply')==='recipe'?'recipe':'supply';
                     $unit=trim((string)($c['unit']??'kg'))?:'kg';
                     $insC->execute([$bid,$recipeId,$ct,$ct==='supply'?$cid:null,$ct==='recipe'?$cid:null,$qty,$unit,$order++]);

@@ -236,8 +236,8 @@ export function SeasonalPizzaCsvImport({ supplies, recipes, variants, onImport }
   const importSelected = async () => {
     const selected = pizzas.filter((p) => p.include);
     if (!selected.length) { setError('Seleccioná al menos una pizza nueva.'); return; }
-    const invalid = selected.find((p) => !p.lines.length || p.lines.some((l) => !l.supplyId || !Number.isFinite(Number(l.quantity)) || Number(l.quantity) <= 0 || !l.unit));
-    if (invalid) { setError(`Completá la relación con insumos, cantidad y unidad de «${invalid.name}» antes de importar.`); return; }
+    const invalid = selected.find((p) => !p.lines.length || p.lines.some((l) => !l.supplyId || !l.unit));
+    if (invalid) { setError(`Vinculá todos los ingredientes con un insumo del catálogo en «${invalid.name}». Las cantidades pueden quedar vacías y completarse después.`); return; }
     setBusy(true); setError(''); setNotice('');
     let done = 0;
     try {
@@ -250,7 +250,9 @@ export function SeasonalPizzaCsvImport({ supplies, recipes, variants, onImport }
           components: pizza.lines.map((line) => ({
             component_type: 'supply',
             component_id: line.supplyId!,
-            quantity: Number(line.quantity),
+            // 0 representa cantidad todavía no relevada: se conserva el ingrediente
+            // en la receta, pero Cost Engine lo considera incompleto y no calcula costo.
+            quantity: line.quantity.trim() === '' ? 0 : Number(line.quantity.replace(',', '.')),
             unit: line.unit,
           })),
         });
