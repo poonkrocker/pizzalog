@@ -14,7 +14,7 @@ Herramienta independiente de Pizzalog. Esta primera etapa identifica las respues
 4. Abrí Callbell Shop e iniciá sesión normalmente con Google.
 5. Entrá al administrador y abrí la sección del catálogo.
 6. Ejecutá el marcador desde el menú de marcadores.
-7. Usá la navegación interna de Callbell para volver a abrir el listado y recorrer sus páginas/categorías. El capturador solo ve respuestas cargadas después de activarlo. Si hacés una recarga completa del navegador, ejecutá el marcador otra vez.
+7. Usá la navegación interna de Callbell para volver a abrir el listado y recorrer sus páginas/categorías. El capturador solo ve respuestas cargadas después de activarlo. Como el listado inicial ya puede estar cargado, después de activar el marcador tocá las pestañas de categorías (Bebidas, Panchos, Pizzas), usá la búsqueda y abrí algunos productos para provocar nuevas consultas. No recargues la página completa: eso elimina el capturador y habría que ejecutarlo otra vez.
 8. Tocá "Descargar diagnóstico JSON".
 
 ## Seguridad y privacidad
@@ -22,7 +22,7 @@ Herramienta independiente de Pizzalog. Esta primera etapa identifica las respues
 - El script corre en la pestaña de Callbell.
 - No lee ni exporta cookies, contraseñas, localStorage, sessionStorage ni encabezados de autenticación.
 - No envía los datos a ningún servidor.
-- Captura respuestas JSON de fetch y XMLHttpRequest de hasta 8 MiB cada una, con un máximo de 500 respuestas. Omite URLs que parezcan corresponder a autenticación, sesiones, clientes, conversaciones, mensajes, pedidos, pagos o perfiles.
+- Captura respuestas JSON de fetch y XMLHttpRequest de hasta 8 MiB cada una, con un máximo de 500 respuestas; intenta reconocer JSON incluso si Callbell usa un content-type no estándar. Omite URLs que parezcan corresponder a autenticación, sesiones, clientes, conversaciones, mensajes, pedidos, pagos o perfiles.
 - El archivo puede contener información comercial o datos de clientes; revisalo antes de compartirlo.
 - No captura archivos binarios ni respuestas HTML.
 - El marcador actual es autocontenido: no carga JavaScript remoto y evita el bloqueo de Content Security Policy que afectaba a la primera versión.
