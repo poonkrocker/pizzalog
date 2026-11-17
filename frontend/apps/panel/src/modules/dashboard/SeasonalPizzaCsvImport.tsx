@@ -91,7 +91,7 @@ function parseCsv(text: string): string[][] {
 }
 
 function column(headers: string[], kind: keyof typeof aliases): number {
-  return headers.findIndex((header) => aliases[kind].includes(normalize(header)));
+  return headers.findIndex((header) => (aliases[kind] ?? []).includes(normalize(header)));
 }
 
 function parsePrice(value: string): number {
@@ -110,7 +110,7 @@ function matchSupply(name: string, supplies: SupplyItem[]): SupplyItem | undefin
 }
 
 function buildPizzas(rows: string[][], supplies: SupplyItem[], recipes: StudioRecipe[], variants: ExistingVariant[]): DraftPizza[] {
-  const headers = rows[0].map(normalize);
+  const headers = (rows[0] ?? []).map(normalize);
   const pizzaCol = column(headers, 'pizza');
   const ingredientCol = column(headers, 'ingredient');
   const ingredientsCol = column(headers, 'ingredients');
@@ -179,7 +179,7 @@ function buildPizzas(rows: string[][], supplies: SupplyItem[], recipes: StudioRe
       grouped.set(key, pizza);
     }
 
-    const ingredientText = ingredientCol >= 0 ? row[ingredientCol] : row[ingredientsCol];
+    const ingredientText = (ingredientCol >= 0 ? row[ingredientCol] : row[ingredientsCol]) ?? '';
     const names = ingredientCol >= 0 ? [ingredientText] : ingredientText.split(/[;,|]/).map(value => value.trim()).filter(Boolean);
     names.forEach((ingredient, part) => {
       if (!ingredient) return;
