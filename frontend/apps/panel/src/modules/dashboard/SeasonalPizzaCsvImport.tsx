@@ -33,9 +33,9 @@ const normalize = (value: string) => value.toLowerCase().normalize('NFD')
   .replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
 
 const aliases: Record<string, string[]> = {
-  pizza: ['pizza', 'producto', 'product', 'nombre', 'nombre pizza', 'nombre del producto'],
-  ingredient: ['ingrediente', 'ingredient', 'insumo', 'nombre ingrediente', 'nombre del ingrediente'],
-  ingredients: ['ingredientes', 'ingredients', 'lista ingredientes', 'composicion', 'composición'],
+  pizza: ['pizza', 'producto', 'product', 'name', 'product name', 'pizza name', 'nombre', 'nombre pizza', 'nombre del producto', 'recipe', 'receta'],
+  ingredient: ['ingrediente', 'ingredient', 'insumo', 'nombre ingrediente', 'nombre del ingrediente', 'ingredient name', 'supply', 'supply name'],
+  ingredients: ['ingredientes', 'ingredients', 'lista ingredientes', 'ingredient list', 'composicion', 'composición'],
   quantity: ['cantidad', 'quantity', 'cant', 'peso', 'gramos', 'cantidad ingrediente'],
   unit: ['unidad', 'unit', 'medida'],
   price: ['precio', 'price', 'importe'],
@@ -117,7 +117,7 @@ function buildPizzas(rows: string[][], supplies: SupplyItem[], recipes: StudioRe
         name,
         price: priceCol >= 0 ? Number((row[priceCol] ?? '').replace(',', '.')) || 0 : 0,
         lines: [],
-        include: !exact,
+        include: !exact && !near,
         existing: exact ? 'Ya existe una receta con este nombre' : near ? `Posible coincidencia: ${near.name}` : null,
       };
       grouped.set(key, pizza);
