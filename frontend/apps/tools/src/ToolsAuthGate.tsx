@@ -92,6 +92,24 @@ function canUseSameOriginToolsProxy(): boolean {
   return (proto === 'https:' || proto === 'http:') && host.endsWith('pizzalog.net');
 }
 
+export async function parseToolsJsonResponse<T = any>(response: Response): Promise<T> {
+  const rawText = await response.text();
+  const trimmed = rawText.trim();
+  if (!trimmed || trimmed.startsWith('<')) {
+    throw new ToolsApiError(
+      response.status >= 400
+        ? `El servidor rechazó o interrumpió la solicitud (HTTP ${response.status})`
+        : 'El servidor devolvió una respuesta HTML inesperada en lugar de JSON',
+      response.status || 502
+    );
+  }
+  try {
+    return JSON.parse(trimmed) as T;
+  } catch {
+    throw new ToolsApiError('El servidor devolvió una respuesta inválida', response.status || 502);
+  }
+}
+
 export async function toolsFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
   const auth = headers.get('Authorization');
@@ -99,23 +117,46 @@ export async function toolsFetch(path: string, init: RequestInit = {}): Promise<
     headers.set('X-Pizzalog-Authorization', auth);
   }
 
+  // En producción/staging sobre *.pizzalog.net, si ya se activó el proxy same-origin, usarlo primero
   if (preferSameOriginToolsProxy && canUseSameOriginToolsProxy()) {
     try {
-      return await fetch(`/api-proxy.php?endpoint=${encodeURIComponent(path)}`, {
+      const proxyRes = await fetch(`/api-proxy.php?endpoint=${encodeURIComponent(path)}`, {
         ...init,
         headers,
       });
+      const ct = (proxyRes.headers.get('content-type') || '').toLowerCase();
+      if (ct.includes('application/json')) {
+        return proxyRes;
+      }
     } catch {
       // Si fallara el proxy local, reintentar vía URL directa
     }
   }
 
   try {
-    return await fetch(`${API_URL}${path}`, init);
+    const directRes = await fetch(`${API_URL}${path}`, { ...init, headers });
+    const ct = (directRes.headers.get('content-type') || '').toLowerCase();
+    // Si el servidor devolvió una página HTML de error (ej. ModSecurity/Apache <!DOCTYPE html>), intentar por proxy same-origin
+    if (!ct.includes('application/json') && canUseSameOriginToolsProxy()) {
+      try {
+        const proxyRes = await fetch(`/api-proxy.php?endpoint=${encodeURIComponent(path)}`, {
+          ...init,
+          headers,
+        });
+        const proxyCt = (proxyRes.headers.get('content-type') || '').toLowerCase();
+        if (proxyCt.includes('application/json')) {
+          preferSameOriginToolsProxy = true;
+          return proxyRes;
+        }
+      } catch {
+        // continuar con directRes
+      }
+    }
+    return directRes;
   } catch {
     try {
       await fetch(`${API_URL}/`, { method: 'GET', cache: 'no-store', mode: 'cors' });
-      return await fetch(`${API_URL}${path}`, init);
+      return await fetch(`${API_URL}${path}`, { ...init, headers });
     } catch {
       if (canUseSameOriginToolsProxy()) {
         const proxyRes = await fetch(`/api-proxy.php?endpoint=${encodeURIComponent(path)}`, {
@@ -161,7 +202,7 @@ async function restoreOrMigrateWorkspace(token: string): Promise<{ workspace: To
 
   const normalizedLegacy = normalizeWorkspace(legacy);
   const saved = await api<{ saved: boolean; updated_at?: string | null }>('/tools/workspace', token, {
-    method: 'PUT',
+    method: 'POST',
     body: JSON.stringify({ workspace: normalizedLegacy }),
   });
   removeLegacyWorkspace();
@@ -198,12 +239,7 @@ async function api<T>(path: string, token?: string, init: RequestInit = {}): Pro
   } catch {
     throw new ToolsApiError('No se pudo conectar con el servidor', 0);
   }
-  let payload: ApiResponse<T>;
-  try {
-    payload = (await response.json()) as ApiResponse<T>;
-  } catch {
-    throw new ToolsApiError('El servidor devolvió una respuesta inválida', response.status);
-  }
+  const payload = await parseToolsJsonResponse<ApiResponse<T>>(response);
   if (!response.ok || !payload.ok || payload.data === undefined) {
     throw new ToolsApiError(payload.error ?? 'No se pudo completar la solicitud', response.status);
   }

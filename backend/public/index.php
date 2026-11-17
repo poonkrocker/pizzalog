@@ -74,6 +74,7 @@ $router->post('/billing/webhook/lemonsqueezy', [BillingWebhookController::class,
 $router->post('/billing/webhook/mercadopago', [BillingWebhookController::class, 'mercadoPago']);
 $router->get('/tools/workspace', [ToolsWorkspaceController::class, 'show'], [$toolsAuth]);
 $router->put('/tools/workspace', [ToolsWorkspaceController::class, 'save'], [$toolsAuth]);
+$router->post('/tools/workspace', [ToolsWorkspaceController::class, 'save'], [$toolsAuth]);
 $router->post('/tools/import/preview', [ToolsImportController::class, 'preview'], [$toolsAuth]);
 $router->get('/tools/sync/status', [ToolsSyncController::class, 'status'], [$toolsAuth]);
 $router->post('/tools/sync/link-app', [ToolsSyncController::class, 'linkApp'], [$toolsAuth]);
@@ -322,7 +323,7 @@ $contentLength = (int)($_SERVER['CONTENT_LENGTH'] ?? 0);
 if ($toolsPath === '/tools/import/preview' && $contentLength > 25 * 1024 * 1024) {
     \Pizzalog\Core\Response::error('La solicitud de importación supera el límite de 20 MB', 413);
 }
-if ($toolsPath === '/tools/workspace' && strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) === 'PUT' && $contentLength > 25 * 1024 * 1024) {
+if ($toolsPath === '/tools/workspace' && in_array(strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')), ['PUT', 'POST'], true) && $contentLength > 25 * 1024 * 1024) {
     \Pizzalog\Core\Response::error('El espacio de trabajo supera el límite de solicitud de 20 MB', 413);
 }
 

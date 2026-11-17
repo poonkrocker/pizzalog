@@ -43,7 +43,7 @@ import {
   type CatalogEntry,
 } from '@pizzalog/price-list';
 import { applyImportMappings, findUnmatchedComponents, type ImportSheetMapping } from './importNormalization';
-import { toolsFetch } from './ToolsAuthGate';
+import { parseToolsJsonResponse, toolsFetch } from './ToolsAuthGate';
 
 const ALL_UNITS: UnitCode[] = ['g', 'kg', 'mg', 'lb', 'oz', 'ml', 'cc', 'L', 'fl_oz_us', 'gal_us', 'unit', 'dozen'];
 
@@ -126,6 +126,8 @@ export function App({
   const [workspaceSaveError, setWorkspaceSaveError] = useState<string | null>(null);
   const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
   const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const isInitialMountRef = useRef<boolean>(true);
+  const lastSavedJsonRef = useRef<string>('');
   const [smartImportPreview, setSmartImportPreview] = useState<{
     fileName: string;
     sheets: ParsedImportSheet[];
@@ -171,12 +173,23 @@ export function App({
 
   useEffect(() => {
     const workspaceSnapshot = state;
+    const serialized = JSON.stringify(workspaceSnapshot);
     if (account.id === 0 || token === 'guest-demo-token') {
       try {
-        localStorage.setItem('pizzalog_tools_guest_workspace', JSON.stringify(workspaceSnapshot));
+        localStorage.setItem('pizzalog_tools_guest_workspace', serialized);
       } catch {
         // Ignorar si el storage local está lleno
       }
+      return;
+    }
+
+    // No disparar un guardado redundante apenas se monta el componente con los mismos datos que vinieron del servidor
+    if (isInitialMountRef.current) {
+      isInitialMountRef.current = false;
+      lastSavedJsonRef.current = serialized;
+      return;
+    }
+    if (serialized === lastSavedJsonRef.current) {
       return;
     }
 
@@ -187,7 +200,7 @@ export function App({
           setIsSavingWorkspace(true);
           try {
             const response = await toolsFetch(`/tools/workspace`, {
-              method: 'PUT',
+              method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
                 Authorization: `Bearer ${token}`,
@@ -197,7 +210,7 @@ export function App({
                 updated_at: workspaceUpdatedAtRef.current,
               }),
             });
-            const payload = (await response.json()) as { ok?: boolean; error?: string; data?: { updated_at?: string } };
+            const payload = await parseToolsJsonResponse<{ ok?: boolean; error?: string; data?: { updated_at?: string } }>(response);
             if (response.status === 409) {
               setWorkspaceConflict(
                 'El espacio de trabajo fue modificado en otra sesión o pestaña. Para evitar sobreescribir datos ajenos, recargá la versión más reciente del servidor o descargá una copia de seguridad.'
@@ -210,6 +223,7 @@ export function App({
             if (payload.data?.updated_at) {
               workspaceUpdatedAtRef.current = payload.data.updated_at;
             }
+            lastSavedJsonRef.current = serialized;
             setWorkspaceSaveError(null);
             setWorkspaceConflict(null);
           } catch (err) {

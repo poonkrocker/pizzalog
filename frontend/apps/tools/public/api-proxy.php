@@ -1,8 +1,9 @@
 <?php
 /**
- * Proxy same-origin liviano hacia https://api.pizzalog.net.
- * Evita bloqueos de CORS / renegociación TLS de antivirus o firewalls en el navegador
- * ejecutando la llamada internamente desde el propio servidor de hosting.
+ * Proxy same-origin hacia la API de Pizzalog.
+ * - Si el directorio backend/ está presente en el mismo servidor, despacha la solicitud
+ *   directamente en el mismo proceso PHP (sin llamadas de red externas ni límites de ModSecurity sobre PUT).
+ * - Si no, reenvía vía cURL / stream convirtiendo respuestas HTML de error del servidor en JSON limpio.
  */
 declare(strict_types=1);
 
@@ -20,6 +21,38 @@ if ($method === 'OPTIONS') {
     exit;
 }
 
+// Permitir override de método para evitar bloqueos de ModSecurity/WAF sobre PUT en hostings compartidos
+$overrideMethod = strtoupper((string) ($_SERVER['HTTP_X_HTTP_METHOD_OVERRIDE'] ?? ''));
+if ($method === 'POST' && in_array($overrideMethod, ['PUT', 'DELETE'], true)) {
+    $method = $overrideMethod;
+    $_SERVER['REQUEST_METHOD'] = $method;
+}
+
+// 1. Intentar despacho local directo si backend/public/index.php existe en el mismo servidor
+$candidateBackends = [
+    dirname(__DIR__) . '/backend/public/index.php',
+    dirname(__DIR__, 2) . '/backend/public/index.php',
+    dirname(__DIR__) . '/api/index.php',
+];
+
+foreach ($candidateBackends as $backendIndex) {
+    if (is_file($backendIndex)) {
+        $parsedEndpoint = parse_url($endpoint);
+        $cleanPath = $parsedEndpoint['path'] ?? '/';
+        $queryStr = $parsedEndpoint['query'] ?? '';
+        $_SERVER['REQUEST_URI'] = $cleanPath . ($queryStr !== '' ? '?' . $queryStr : '');
+        $_SERVER['REQUEST_METHOD'] = $method;
+        if ($queryStr !== '') {
+            parse_str($queryStr, $extraQuery);
+            $_GET = array_merge($_GET, $extraQuery);
+        }
+        unset($_GET['endpoint']);
+        require $backendIndex;
+        exit;
+    }
+}
+
+// 2. Fallback HTTP hacia https://api.pizzalog.net
 $targetUrl = 'https://api.pizzalog.net' . $endpoint;
 $rawBody = file_get_contents('php://input');
 
@@ -39,6 +72,34 @@ $forwardHeaders = [
 ];
 if ($authHeader !== '') {
     $forwardHeaders[] = 'Authorization: ' . $authHeader;
+    $forwardHeaders[] = 'X-Pizzalog-Authorization: ' . $authHeader;
+}
+
+function emitProxyResponse(int $statusCode, string $body): never
+{
+    $trimmed = ltrim($body);
+    // Si el servidor web / WAF devolvió una página HTML de error (<!DOCTYPE o <html), convertirla a JSON válido
+    if ($trimmed === '' || str_starts_with($trimmed, '<')) {
+        $safeCode = $statusCode >= 400 ? $statusCode : 502;
+        http_response_code($safeCode);
+        header('Content-Type: application/json; charset=utf-8');
+        header('Cache-Control: no-store, no-cache, must-revalidate');
+        $msg = match ($safeCode) {
+            403 => 'El firewall del servidor bloqueó temporalmente la solicitud (403)',
+            405 => 'Método HTTP no permitido por el servidor web (405)',
+            413 => 'El tamaño de los datos supera el límite configurado en el servidor web (413)',
+            500, 502, 503, 504 => "El servidor está ocupado o reiniciando la conexión (HTTP $safeCode)",
+            default => "Respuesta no válida del servidor (HTTP $safeCode)",
+        };
+        echo json_encode(['ok' => false, 'error' => $msg], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    http_response_code($statusCode > 0 ? $statusCode : 200);
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store, no-cache, must-revalidate');
+    echo $body;
+    exit;
 }
 
 if (function_exists('curl_init')) {
@@ -68,15 +129,11 @@ if (function_exists('curl_init')) {
     if ($responseBody === false || $httpCode === 0) {
         http_response_code(502);
         header('Content-Type: application/json; charset=utf-8');
-        echo json_encode(['ok' => false, 'error' => 'Error de enlace interno con API: ' . $curlErr]);
+        echo json_encode(['ok' => false, 'error' => 'Error de enlace interno con API: ' . $curlErr], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
-    http_response_code($httpCode);
-    header('Content-Type: application/json; charset=utf-8');
-    header('Cache-Control: no-store, no-cache, must-revalidate');
-    echo $responseBody;
-    exit;
+    emitProxyResponse($httpCode, (string) $responseBody);
 }
 
 $opts = [
@@ -105,10 +162,7 @@ if (isset($http_response_header) && is_array($http_response_header)) {
 if ($responseBody === false) {
     http_response_code(502);
     header('Content-Type: application/json; charset=utf-8');
-    echo json_encode(['ok' => false, 'error' => 'No se pudo contactar a api.pizzalog.net desde el servidor']);
+    echo json_encode(['ok' => false, 'error' => 'No se pudo contactar a api.pizzalog.net desde el servidor'], JSON_UNESCAPED_UNICODE);
     exit;
 }
-http_response_code($statusCode);
-header('Content-Type: application/json; charset=utf-8');
-header('Cache-Control: no-store, no-cache, must-revalidate');
-echo $responseBody;
+emitProxyResponse($statusCode, (string) $responseBody);
