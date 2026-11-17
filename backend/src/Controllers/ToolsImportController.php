@@ -57,8 +57,8 @@ class ToolsImportController
             ];
         }, $sheets);
         $inputJson = json_encode($aiSample, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
-        if ($inputJson === false || strlen($inputJson) > 512 * 1024) {
-            Response::error('La muestra de encabezados supera el límite de 512 KB', 413);
+        if ($inputJson === false || strlen($inputJson) > 2 * 1024 * 1024) {
+            Response::error('La muestra de encabezados supera el límite de 2 MB', 413);
         }
 
         $deepseek = Config::get('deepseek', []);
@@ -261,7 +261,7 @@ PROMPT;
                 'columns' => $columns,
                 'confidence' => max(0, min(1, $confidence)),
                 'warnings' => array_slice($warnings, 0, 12),
-                'row_count' => max(0, count($source['rows']) - $headerIndex - 1),
+                'row_count' => max(0, (int)($source['total_rows'] ?? count($source['rows'])) - $headerIndex - 1),
             ];
         }
 
@@ -279,7 +279,7 @@ PROMPT;
                 'columns' => $emptyColumns,
                 'confidence' => 0,
                 'warnings' => ['La IA no devolvió un mapeo para esta hoja. Revisala manualmente antes de importar.'],
-                'row_count' => max(0, count($source['rows']) - 1),
+                'row_count' => max(0, (int)($source['total_rows'] ?? count($source['rows'])) - 1),
             ];
         }
         usort($safeSheets, static fn(array $a, array $b): int => $a['sheet_index'] <=> $b['sheet_index']);
@@ -401,7 +401,7 @@ PROMPT;
                 'warnings' => $kind === 'unknown'
                     ? ['No se reconoció automáticamente la estructura. Podés asignar el tipo de hoja y las columnas manualmente.']
                     : ['Mapeo automático local; revisá encabezados y unidades antes de confirmar.'],
-                'row_count' => max(0, count($rows) - $bestIndex - 1),
+                'row_count' => max(0, (int)($sheet['total_rows'] ?? count($rows)) - $bestIndex - 1),
             ];
         }
         return $result;

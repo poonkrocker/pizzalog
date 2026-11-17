@@ -33,7 +33,7 @@ class ToolsAuth
 
             $pdo = Database::pdo();
             $stmt = $pdo->prepare(
-                'SELECT ta.id, ta.email, ta.name, ta.is_active, ta.expires_at, ta.environment,
+                'SELECT ta.id, ta.email, ta.name, ta.password_hash, ta.is_active, ta.expires_at, ta.environment,
                         ta.app_user_id, ta.business_id,
                         u.is_active AS app_user_active, u.role AS app_user_role,
                         u.email AS app_user_email, u.business_id AS app_user_business_id
@@ -52,15 +52,15 @@ class ToolsAuth
                 Response::error('El acceso a Pizzalog Tools ha vencido', 403);
             }
 
-            // Si está vinculada a un usuario de Pizzalog App, verificar consistencia y permisos
-            if ($account['app_user_id'] !== null) {
-                if (
-                    $account['app_user_active'] === null
-                    || (int)$account['app_user_active'] !== 1
-                    || $account['app_user_role'] !== 'admin'
-                ) {
-                    Response::error('El usuario vinculado de Pizzalog App ya no tiene permisos para acceder a Tools', 403);
-                }
+            // Si la cuenta está vinculada a App, validar que ese usuario siga siendo admin activo para operaciones de Sync;
+            // si la cuenta tiene contraseña propia de Tools, nunca bloquear su uso autónomo de Tools aunque el usuario de App cambie.
+            $validAppLink = $account['app_user_id'] !== null
+                && $account['app_user_active'] !== null
+                && (int)$account['app_user_active'] === 1
+                && $account['app_user_role'] === 'admin';
+
+            if ($account['app_user_id'] !== null && !$validAppLink && empty($account['password_hash'])) {
+                Response::error('El usuario vinculado de Pizzalog App ya no tiene permisos para acceder a Tools', 403);
             }
 
             $req->auth = [
@@ -68,8 +68,10 @@ class ToolsAuth
                 'tools_email' => (string) $account['email'],
                 'tools_name' => (string) $account['name'],
                 'tools_environment' => (string) $account['environment'],
-                'business_id' => !empty($account['business_id']) ? (int) $account['business_id'] : (!empty($account['app_user_business_id']) ? (int) $account['app_user_business_id'] : null),
-                'app_user_id' => !empty($account['app_user_id']) ? (int) $account['app_user_id'] : null,
+                'business_id' => $validAppLink
+                    ? (!empty($account['business_id']) ? (int) $account['business_id'] : (!empty($account['app_user_business_id']) ? (int) $account['app_user_business_id'] : null))
+                    : null,
+                'app_user_id' => $validAppLink ? (int) $account['app_user_id'] : null,
             ];
         };
     }

@@ -83,17 +83,17 @@ class ToolsWorkspaceController
         }
 
         $json = json_encode($workspace, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
-        if ($json === false || strlen($json) > 5 * 1024 * 1024) {
-            Response::error('El espacio de trabajo supera el tamaño permitido (5 MB)', 413);
+        if ($json === false || strlen($json) > 20 * 1024 * 1024) {
+            Response::error('El espacio de trabajo supera el tamaño permitido (20 MB)', 413);
         }
 
         $pdo = Database::pdo();
         $pdo->beginTransaction();
 
         try {
-            // Bloqueo de fila para concurrencia optimista
+            // Bloqueo de fila para concurrencia optimista (sin depender de columna id)
             $checkStmt = $pdo->prepare(
-                'SELECT id, updated_at FROM tools_workspaces WHERE account_id = ? FOR UPDATE'
+                'SELECT account_id, updated_at FROM tools_workspaces WHERE account_id = ? FOR UPDATE'
             );
             $checkStmt->execute([$accountId]);
             $existing = $checkStmt->fetch(\PDO::FETCH_ASSOC);

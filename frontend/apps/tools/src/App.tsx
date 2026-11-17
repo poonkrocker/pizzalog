@@ -3,8 +3,12 @@ import {
   CostEngine,
   CostEngineValidationError,
   calculatePricingScenario,
+  classifyIngredientCategory,
   computeUsableIngredientCost,
+  convertQuantity,
   createCostSnapshot,
+  decomposeRecipeCategoryCosts,
+  expandBakersDoughSpec,
   formatDecimal,
   selectEffectivePurchasePrice,
   type Dimension,
@@ -26,7 +30,8 @@ import {
 import { CommercialPlansModal } from './CommercialPlansModal';
 import { ContextualHelpModal, type HelpTopic } from './ContextualHelpModal';
 import { ExecutiveReportModal } from './ExecutiveReportModal';
-import { downloadCustomProfitKitXlsx } from './xlsxExporter';
+import { downloadCustomProfitKitXlsx, downloadTemplateProfitKitXlsx } from './xlsxExporter';
+import { TOOLS_I18N } from './i18n';
 import { parseImportFile, type ParsedImportSheet } from '@pizzalog/price-list/file';
 import {
   detectPriceListColumns,
@@ -162,7 +167,7 @@ export function App({
   const [simPriceDelta, setSimPriceDelta] = useState<number>(0);
   const [simCostDelta, setSimCostDelta] = useState<number>(0);
   const [simVolumeDelta, setSimVolumeDelta] = useState<number>(0);
-  const [simCategoryFilter, setSimCategoryFilter] = useState<'all' | 'flour' | 'dairy' | 'meat'>('all');
+  const [simCategoryFilter, setSimCategoryFilter] = useState<'all' | 'flour' | 'dairy' | 'meat' | 'vegetables'>('all');
 
   useEffect(() => {
     const workspaceSnapshot = state;
@@ -217,7 +222,7 @@ export function App({
     return () => window.clearTimeout(timer);
   }, [state, token, account.id]);
 
-  const t = I18N[state.locale] ?? I18N['es-AR'];
+  const t = TOOLS_I18N[state.locale] ?? TOOLS_I18N['es-AR'];
   const canChangeCurrency =
     state.catalog.recipes.length === 0 &&
     !state.catalog.purchase_prices.some((p) => Number(p.purchase_price) > 0) &&
@@ -514,13 +519,18 @@ export function App({
     setIsSmartImporting(true);
     try {
       const sheets = await parseImportFile(file);
+      const previewSampleSheets = sheets.map((s) => ({
+        name: s.name,
+        rows: s.rows.slice(0, 60),
+        total_rows: s.rows.length,
+      }));
       const response = await toolsFetch(`/tools/import/preview`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ sheets }),
+        body: JSON.stringify({ sheets: previewSampleSheets }),
       });
       const payload = (await response.json()) as {
         ok?: boolean;
@@ -670,11 +680,24 @@ export function App({
           state.catalog.purchase_prices,
           state.catalog.as_of_date
         );
+        let grossInBase: number | null = null;
+        try {
+          const info = computeUsableIngredientCost(
+            ing,
+            priceRec,
+            state.currency,
+            state.catalog.exchange_rates,
+            state.catalog.as_of_date
+          );
+          grossInBase = info.grossUnitCostInBase;
+        } catch {
+          grossInBase = null;
+        }
         return {
           id: ing.id,
           name: ing.name,
           unit: ing.base_unit,
-          current_price_per_unit: priceRec?.purchase_price != null ? Number(priceRec.purchase_price) : null,
+          current_price_per_unit: grossInBase,
         };
       });
 
@@ -704,11 +727,24 @@ export function App({
         state.catalog.purchase_prices,
         state.catalog.as_of_date
       );
+      let grossInBase: number | null = null;
+      try {
+        const info = computeUsableIngredientCost(
+          ing,
+          priceRec,
+          state.currency,
+          state.catalog.exchange_rates,
+          state.catalog.as_of_date
+        );
+        grossInBase = info.grossUnitCostInBase;
+      } catch {
+        grossInBase = null;
+      }
       return {
         id: ing.id,
         name: ing.name,
         unit: ing.base_unit,
-        current_price_per_unit: priceRec?.purchase_price != null ? Number(priceRec.purchase_price) : null,
+        current_price_per_unit: grossInBase,
       };
     });
     const updated = rematch(priceListMatches[index]!, catalog, { target_id: newTargetId || null });
@@ -733,14 +769,19 @@ export function App({
       toApply.forEach((m) => {
         const ing = prev.catalog.ingredients.find((i) => i.id === m.target_id);
         if (!ing) return;
+        const existingPriceRec = selectEffectivePurchasePrice(
+          m.target_id!,
+          prev.catalog.purchase_prices,
+          prev.catalog.as_of_date
+        );
         newPrices.push({
           ingredient_id: m.target_id!,
           purchase_date: today,
           purchase_price: m.item.price,
           currency: prev.currency,
-          pack_quantity: m.presentation?.quantity ?? 1,
-          pack_unit: (m.presentation?.unit as UnitCode) ?? ing.base_unit,
-          yield_pct: 100,
+          pack_quantity: m.presentation?.quantity ?? existingPriceRec?.pack_quantity ?? 1,
+          pack_unit: (m.presentation?.unit as UnitCode) ?? existingPriceRec?.pack_unit ?? ing.base_unit,
+          yield_pct: existingPriceRec?.yield_pct ?? 100,
           supplier: priceListFileName ? `Lista: ${priceListFileName}` : undefined,
         });
       });
@@ -1100,14 +1141,17 @@ export function App({
     );
   }, [state, recipeResults, menuCompareMode, menuComparePeriod, menuChannelFilter]);
 
-  // Cálculos de Simulación Estratégica de Negocio (Escenarios Pesimista, Base, Optimista y Personalizado)
+  // Cálculos de Simulación Estratégica de Negocio impulsados por CostEngine (desglose real por ingrediente y subreceta)
   const simulatedBusinessResult = useMemo(() => {
     const completeRows = monthlySummary.rows.filter((r) => r.isComplete);
-    const isFlour = (name: string) => /harina|masa|dough|poolish|biga/i.test(name);
-    const isDairy = (name: string) => /mozzarella|queso|cheese|leche|crema/i.test(name);
-    const isMeat = (name: string) => /pollo|carne|jamon|panceta|peperoni|salame/i.test(name);
+    const ingMap = new Map(state.catalog.ingredients.map((i) => [i.id, i]));
 
-    const computeScenario = (volDeltaPct: number, priceDeltaPct: number, costDeltaPct: number) => {
+    const computeScenario = (
+      volDeltaPct: number,
+      priceDeltaPct: number,
+      costDeltaPct: number,
+      categoryFilter: 'all' | 'flour' | 'dairy' | 'meat' | 'vegetables'
+    ) => {
       let totRev = 0;
       let totCogs = 0;
       let totVarCosts = 0;
@@ -1119,21 +1163,60 @@ export function App({
         0
       );
 
+      // Modificar únicamente los precios de compra de los insumos que pertenecen a la categoría seleccionada
+      // y ejecutar CostEngine real para propagar el cambio a masas, subrecetas y productos finales.
+      const simPrices = state.catalog.purchase_prices.map((pp) => {
+        if (costDeltaPct === 0 || pp.purchase_price === null || pp.purchase_price === undefined || pp.purchase_price === '') {
+          return pp;
+        }
+        const ing = ingMap.get(pp.ingredient_id);
+        const cat = classifyIngredientCategory(ing?.name ?? pp.ingredient_id);
+        const matches = categoryFilter === 'all' || cat === categoryFilter;
+        if (!matches) return pp;
+        return {
+          ...pp,
+          purchase_price: Math.max(0, Number(pp.purchase_price) * (1 + costDeltaPct / 100)),
+        };
+      });
+
+      const simEngine = new CostEngine({
+        ...state.catalog,
+        purchase_prices: simPrices,
+      });
+
       const simulatedRows = completeRows.map((r) => {
         const baseUnits = r.units ?? 0;
         const simUnits = Math.max(0, Math.round(baseUnits * (1 + volDeltaPct / 100)));
         const basePrice = r.evaluatedPrice;
         const simPrice = Math.max(0, Math.round(basePrice * (1 + priceDeltaPct / 100)));
 
-        let itemCostDelta = costDeltaPct;
-        if (simCategoryFilter === 'flour' && !isFlour(r.prod.name)) itemCostDelta = 0;
-        if (simCategoryFilter === 'dairy' && !isDairy(r.prod.name)) itemCostDelta = 0;
-        if (simCategoryFilter === 'meat' && !isMeat(r.prod.name)) itemCostDelta = 0;
+        const decomp = decomposeRecipeCategoryCosts(state.catalog, r.prod.id, state.currency);
+        const affectedCostShare =
+          categoryFilter === 'all'
+            ? r.unitCost
+            : categoryFilter === 'flour'
+            ? decomp.flourCost
+            : categoryFilter === 'dairy'
+            ? decomp.dairyCost
+            : categoryFilter === 'meat'
+            ? decomp.meatCost
+            : decomp.vegetablesCost;
+        const affectedSharePct = r.unitCost > 0 ? (affectedCostShare / r.unitCost) * 100 : 0;
 
-        const simCost = r.unitCost * (1 + itemCostDelta / 100);
+        let simCost = r.unitCost;
+        try {
+          const simRes = simEngine.calculateRecipeCost(r.prod.id);
+          if (simRes.status === 'complete' && simRes.raw_unit_cost !== null) {
+            simCost = simRes.raw_unit_cost;
+          }
+        } catch {
+          simCost = r.unitCost + affectedCostShare * (costDeltaPct / 100);
+        }
+
         const packaging = state.defaultPackagingCost;
         const channelFee = simPrice * (state.defaultChannelFeePct / 100);
-        const simUnitGrossProfit = simPrice - simCost - packaging - channelFee;
+        const simUnitGrossProfit = simPrice - simCost;
+        const simUnitNetContribution = simPrice - simCost - packaging - channelFee;
         const simRev = simPrice * simUnits;
         const simCogs = simCost * simUnits;
         const simVar = (packaging + channelFee) * simUnits;
@@ -1152,14 +1235,17 @@ export function App({
           simPrice,
           baseCost: r.unitCost,
           simCost,
+          affectedCostShare,
+          affectedSharePct,
           baseProfit: r.unitGrossProfit,
           simProfit: simUnitGrossProfit,
+          simNetUnitContribution: simUnitNetContribution,
           simRev,
           simContribution,
         };
       });
 
-      const totContribution = totRev - totCogs - totVarCosts;
+      const totContribution = totRev - totCogs;
       const marginPct = totRev > 0 ? (totContribution / totRev) * 100 : 0;
       const netProfit = totContribution - currentExpenses;
       const breakEven = marginPct > 0 ? currentExpenses / (marginPct / 100) : 0;
@@ -1182,10 +1268,10 @@ export function App({
       };
     };
 
-    const baseScenario = computeScenario(0, 0, 0);
-    const pessimisticScenario = computeScenario(-15, 0, 12);
-    const optimisticScenario = computeScenario(15, 5, 0);
-    const customScenario = computeScenario(simVolumeDelta, simPriceDelta, simCostDelta);
+    const baseScenario = computeScenario(0, 0, 0, 'all');
+    const pessimisticScenario = computeScenario(-15, 0, 12, 'all');
+    const optimisticScenario = computeScenario(15, 5, 0, 'all');
+    const customScenario = computeScenario(simVolumeDelta, simPriceDelta, simCostDelta, simCategoryFilter);
 
     return {
       base: baseScenario,
@@ -1193,7 +1279,7 @@ export function App({
       optimistic: optimisticScenario,
       custom: customScenario,
     };
-  }, [monthlySummary, simCategoryFilter, state.defaultPackagingCost, state.defaultChannelFeePct, state.operatingExpenses, simVolumeDelta, simPriceDelta, simCostDelta]);
+  }, [monthlySummary, simCategoryFilter, state.catalog, state.currency, state.defaultPackagingCost, state.defaultChannelFeePct, state.operatingExpenses, simVolumeDelta, simPriceDelta, simCostDelta]);
 
   const totalMonthlyExpenses = useMemo(() => {
     const factor: Record<string, number> = { monthly: 1, weekly: 52 / 12, yearly: 1 / 12 };
@@ -1254,9 +1340,9 @@ export function App({
         <div className="tools-actions">
           <span className="tools-account-label">{account.name}</span>
           <span className="tools-save-status" role="status">
-            {workspaceSaveError ? 'Error de guardado' : isSavingWorkspace ? 'Guardando…' : 'Guardado automático'}
+            {workspaceSaveError ? t.saveError : isSavingWorkspace ? t.saving : t.autoSaved}
           </span>
-          <button type="button" className="btn" onClick={onLogout}>Cerrar sesión</button>
+          <button type="button" className="btn" onClick={onLogout}>{t.logout}</button>
           <button type="button" className="btn btn--primary" onClick={captureAllSnapshots}>
             📸 {t.saveSnapshot}
           </button>
@@ -1269,7 +1355,7 @@ export function App({
             {t.exportCustomExcel}
           </button>
           <label className="btn btn--ocre" style={{ margin: 0, opacity: isSmartImporting ? 0.65 : 1 }}>
-            {isSmartImporting ? 'Analizando planilla…' : 'Importar XLSX / CSV'}
+            {isSmartImporting ? t.analyzingSheet : t.importXlsxCsv}
             <input
               type="file"
               accept=".xlsx,.csv"
@@ -1310,14 +1396,14 @@ export function App({
               >
                 ❓ Ayuda Contextual
               </button>
-              <a
+              <button
+                type="button"
                 className="btn"
-                href="/Restaurant_Profit_Kit_v1.xlsx"
-                download="Restaurant_Profit_Kit_v1.xlsx"
-                title="Descargar planilla Excel base modelo"
+                onClick={() => downloadTemplateProfitKitXlsx(state.locale)}
+                title="Descargar planilla Excel v2 base autónoma (14 hojas con fórmulas en tu idioma)"
               >
                 {t.downloadTemplateExcel}
-              </a>
+              </button>
               <button type="button" className="btn" onClick={exportWorkspaceJson}>
                 {t.exportJson}
               </button>
@@ -1441,7 +1527,7 @@ export function App({
           style={{ justifyContent: 'center', padding: '8px 10px', fontSize: '0.82rem' }}
           onClick={() => setActiveTab('ingredients')}
         >
-          1️⃣ Insumos & Mermas
+          {t.stepIngredients}
         </button>
         <button
           type="button"
@@ -1449,7 +1535,7 @@ export function App({
           style={{ justifyContent: 'center', padding: '8px 10px', fontSize: '0.82rem' }}
           onClick={() => setActiveTab('subrecipes')}
         >
-          2️⃣ Masas & Subrecetas
+          {t.stepSubrecipes}
         </button>
         <button
           type="button"
@@ -1457,7 +1543,7 @@ export function App({
           style={{ justifyContent: 'center', padding: '8px 10px', fontSize: '0.82rem' }}
           onClick={() => setActiveTab('recipes')}
         >
-          3️⃣ Recetas de Carta
+          {t.stepRecipes}
         </button>
         <button
           type="button"
@@ -1465,7 +1551,7 @@ export function App({
           style={{ justifyContent: 'center', padding: '8px 10px', fontSize: '0.82rem' }}
           onClick={() => setActiveTab('expenses')}
         >
-          4️⃣ Gastos Operativos Fijos
+          {t.stepExpenses}
         </button>
         <button
           type="button"
@@ -1473,7 +1559,7 @@ export function App({
           style={{ justifyContent: 'center', padding: '8px 10px', fontSize: '0.82rem' }}
           onClick={() => setActiveTab('menu-engineering')}
         >
-          5️⃣ Ingeniería de Menú
+          {t.stepMenuEngineering}
         </button>
         <button
           type="button"
@@ -1481,7 +1567,7 @@ export function App({
           style={{ justifyContent: 'center', padding: '8px 10px', fontSize: '0.82rem' }}
           onClick={() => setActiveTab('profit-simulator')}
         >
-          6️⃣ Simulador de Negocio
+          {t.stepProfitSimulator}
         </button>
       </div>
 
@@ -1622,7 +1708,7 @@ export function App({
           className={`tab-btn ${activeTab === 'sales' ? 'tab-btn--active' : ''}`}
           onClick={() => setActiveTab('sales')}
         >
-          Ventas importadas ({state.salesHistory?.length ?? 0})
+          {t.tabSales} ({state.salesHistory?.length ?? 0})
         </button>
         <button
           type="button"
@@ -1631,12 +1717,12 @@ export function App({
         >
           {t.tabSnapshots}
         </button>
-        <button type="button" className={`tab-btn ${activeTab === 'simulator' ? 'tab-btn--active' : ''}`} onClick={() => setActiveTab('simulator')}>Simulador de recetas</button>
-        <button type="button" className={`tab-btn ${activeTab === 'cost-history' ? 'tab-btn--active' : ''}`} onClick={() => setActiveTab('cost-history')}>Evolución de costos</button>
-        <button type="button" className={`tab-btn ${activeTab === 'menu-engineering' ? 'tab-btn--active' : ''}`} onClick={() => setActiveTab('menu-engineering')}>Ingeniería de menú</button>
-        <button type="button" className={`tab-btn ${activeTab === 'production' ? 'tab-btn--active' : ''}`} onClick={() => setActiveTab('production')}>Calculadora de producción</button>
-        <button type="button" className={`tab-btn ${activeTab === 'profit-simulator' ? 'tab-btn--active' : ''}`} onClick={() => setActiveTab('profit-simulator')}>Simulador de rentabilidad</button>
-        <button type="button" className={`tab-btn ${activeTab === 'sync' ? 'tab-btn--active' : ''}`} onClick={() => { setActiveTab('sync'); void loadSyncStatus(); }}>🔄 Sync Pizzalog App</button>
+        <button type="button" className={`tab-btn ${activeTab === 'simulator' ? 'tab-btn--active' : ''}`} onClick={() => setActiveTab('simulator')}>{t.tabSimulator}</button>
+        <button type="button" className={`tab-btn ${activeTab === 'cost-history' ? 'tab-btn--active' : ''}`} onClick={() => setActiveTab('cost-history')}>{t.tabCostHistory}</button>
+        <button type="button" className={`tab-btn ${activeTab === 'menu-engineering' ? 'tab-btn--active' : ''}`} onClick={() => setActiveTab('menu-engineering')}>{t.tabMenuEngineering}</button>
+        <button type="button" className={`tab-btn ${activeTab === 'production' ? 'tab-btn--active' : ''}`} onClick={() => setActiveTab('production')}>{t.tabProduction}</button>
+        <button type="button" className={`tab-btn ${activeTab === 'profit-simulator' ? 'tab-btn--active' : ''}`} onClick={() => setActiveTab('profit-simulator')}>{t.tabProfitSimulator}</button>
+        <button type="button" className={`tab-btn ${activeTab === 'sync' ? 'tab-btn--active' : ''}`} onClick={() => { setActiveTab('sync'); void loadSyncStatus(); }}>{t.tabSync}</button>
       </nav>
 
       {activeTab === 'simulator' && (
@@ -2244,11 +2330,12 @@ export function App({
                 }
                 const recipe = state.catalog.recipes.find((item) => item.id === recipeId);
                 const result = recipeResults.get(recipeId);
-                if (!recipe || !result || result.status !== 'complete' || !(recipe.yield_quantity > 0)) {
+                const effectiveYield = result?.raw_yield_quantity && result.raw_yield_quantity > 0 ? result.raw_yield_quantity : (recipe?.yield_quantity ?? 0);
+                if (!recipe || !result || result.status !== 'complete' || !(effectiveYield > 0)) {
                   warnings.add(`No se pudo explotar ${recipe?.name ?? recipeId}: receta o costo incompleto.`);
                   return;
                 }
-                const batches = requestedYield / recipe.yield_quantity;
+                const batches = requestedYield / effectiveYield;
                 for (const component of result.components) {
                   if (component.status !== 'complete' || component.normalized_quantity == null) {
                     warnings.add(`Componente incompleto en ${recipe.name}.`);
@@ -2287,10 +2374,8 @@ export function App({
         <section className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
             <div>
-              <h2>Simulador Estratégico de Rentabilidad y Decisiones</h2>
-              <p className="lead">
-                Herramienta para proyectar el impacto de aumentos de insumos, variaciones de precios y volumen de ventas sobre el punto de equilibrio y la ganancia neta.
-              </p>
+              <h2>{t.simTitle}</h2>
+              <p className="lead">{t.simLead}</p>
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
               <button
@@ -2299,7 +2384,7 @@ export function App({
                 style={{ fontSize: '0.82rem' }}
                 onClick={() => setSimMode('business')}
               >
-                🏢 Simulación Global del Negocio
+                {t.simGlobalModeBtn}
               </button>
               <button
                 type="button"
@@ -2307,7 +2392,7 @@ export function App({
                 style={{ fontSize: '0.82rem' }}
                 onClick={() => setSimMode('single')}
               >
-                🧮 Calculadora Unitaria
+                {t.simUnitModeBtn}
               </button>
             </div>
           </div>
@@ -2450,16 +2535,17 @@ export function App({
                   {/* Filtro de Categoría de Insumos para Aumento Focalizado */}
                   <div style={{ background: 'var(--surface-alt)', padding: 14, borderRadius: 8 }}>
                     <label className="field" style={{ margin: 0 }}>
-                      <span style={{ fontSize: '0.86rem', fontWeight: 600 }}>Insumos Afectados por el Aumento</span>
+                      <span style={{ fontSize: '0.86rem', fontWeight: 600 }}>{t.simAffectedSuppliesLabel}</span>
                       <select value={simCategoryFilter} onChange={(e) => setSimCategoryFilter(e.target.value as any)}>
-                        <option value="all">Todos los insumos del restaurante</option>
-                        <option value="flour">Solo Harinas y Masas</option>
-                        <option value="dairy">Solo Lácteos / Mozzarella</option>
-                        <option value="meat">Solo Carnes / Proteínas</option>
+                        <option value="all">{t.simAffectedAll}</option>
+                        <option value="flour">{t.simAffectedFlour}</option>
+                        <option value="dairy">{t.simAffectedDairy}</option>
+                        <option value="meat">{t.simAffectedMeat}</option>
+                        <option value="vegetables">{t.simAffectedVegetables}</option>
                       </select>
                     </label>
                     <small style={{ display: 'block', marginTop: 8, color: 'var(--muted)', fontSize: '0.76rem' }}>
-                      Permite simular una suba específica del queso o de la harina sin alterar el resto de las compras.
+                      {t.simAffectedHint}
                     </small>
                   </div>
 
@@ -2634,12 +2720,13 @@ export function App({
                 <table className="kit-table">
                   <thead>
                     <tr>
-                      <th>Producto</th>
-                      <th style={{ textAlign: 'right' }}>Unidades proyectadas</th>
-                      <th style={{ textAlign: 'right' }}>Precio actual $\to$ simulado</th>
-                      <th style={{ textAlign: 'right' }}>Costo actual $\to$ simulado</th>
-                      <th style={{ textAlign: 'right' }}>Margen unitario proyectado</th>
-                      <th style={{ textAlign: 'right' }}>Contribución total simulada</th>
+                      <th>{t.simColProduct}</th>
+                      <th style={{ textAlign: 'right' }}>{t.simColProjectedUnits}</th>
+                      <th style={{ textAlign: 'right' }}>{t.simColPriceTransition}</th>
+                      <th style={{ textAlign: 'right' }}>{t.simColAffectedShare}</th>
+                      <th style={{ textAlign: 'right' }}>{t.simColCostTransition}</th>
+                      <th style={{ textAlign: 'right' }}>{t.simColUnitMargin}</th>
+                      <th style={{ textAlign: 'right' }}>{t.simColTotalContribution}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2663,10 +2750,16 @@ export function App({
                           )}
                         </td>
                         <td style={{ textAlign: 'right' }}>
+                          {state.currency} {formatDecimal(row.affectedCostShare, 2)}
+                          <small style={{ display: 'block', color: 'var(--muted)' }}>
+                            ({formatDecimal(row.affectedSharePct, 1)}% del costo)
+                          </small>
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
                           {state.currency} {formatDecimal(row.simCost, 2)}
-                          {row.simCost !== row.baseCost && (
+                          {Math.abs(row.simCost - row.baseCost) > 0.005 && (
                             <small style={{ display: 'block', color: '#b91c1c' }}>
-                              (Base: {state.currency} {formatDecimal(row.baseCost, 2)})
+                              (Base: {state.currency} {formatDecimal(row.baseCost, 2)} · +{state.currency} {formatDecimal(row.simCost - row.baseCost, 2)})
                             </small>
                           )}
                         </td>
@@ -2960,7 +3053,13 @@ export function App({
                     calcError = error instanceof Error ? error.message : 'No se pudo validar la moneda o unidad.';
                   }
                   const isComplete = calcInfo?.status === 'complete';
-                  const factor1000 = ing.base_unit === 'g' || ing.base_unit === 'ml' ? 1000 : 1;
+                  let refUnitFactor = 1;
+                  try {
+                    const targetRefUnit = ing.base_dimension === 'mass' ? 'kg' : ing.base_dimension === 'volume' ? 'L' : 'unit';
+                    refUnitFactor = convertQuantity(1, targetRefUnit, ing.base_unit, ing);
+                  } catch {
+                    refUnitFactor = ing.base_unit === 'g' || ing.base_unit === 'ml' ? 1000 : 1;
+                  }
 
                   return (
                     <tr key={ing.id}>
@@ -3099,7 +3198,7 @@ export function App({
                       </td>
                       <td>
                         {isComplete && calcInfo?.usableUnitCostInBase !== null
-                          ? `${state.currency} ${formatDecimal(calcInfo!.usableUnitCostInBase * factor1000, 2)}`
+                          ? `${state.currency} ${formatDecimal(calcInfo!.usableUnitCostInBase * refUnitFactor, 2)}`
                           : '—'}
                       </td>
                       <td>
@@ -3782,35 +3881,104 @@ export function App({
           </div>
 
           <div className="card">
-            <h2>Verificación en Vivo — Batería de 8 Casos Golden (Cost Engine v{goldenCases.version})</h2>
-            <p className="lead">
-              Los 8 casos Golden definidos en la especificación se evalúan en tiempo real sobre el motor puro `@pizzalog/cost-engine`.
-            </p>
+            <h2>{t.goldenTitle} (Cost Engine v{goldenCases.version})</h2>
+            <p className="lead">{t.goldenLead}</p>
             <div className="table-wrap">
               <table className="kit-table">
                 <thead>
                   <tr>
-                    <th>ID Caso</th>
-                    <th>Descripción</th>
-                    <th>Valor Golden Esperado</th>
-                    <th>Estado Motor</th>
+                    <th>{t.goldenColId}</th>
+                    <th>{t.goldenColDesc}</th>
+                    <th>{t.goldenColCalculated}</th>
+                    <th>{t.goldenColExpected}</th>
+                    <th>{t.goldenColStatus}</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {Object.values(goldenCases.cases).map((c) => (
-                    <tr key={c.id}>
-                      <td>
-                        <strong>{c.id}</strong>
-                      </td>
-                      <td>{c.title}</td>
-                      <td>
-                        <code>{JSON.stringify(c.expected)}</code>
-                      </td>
-                      <td>
-                        <span className="badge badge--ok">PASS ✓</span>
-                      </td>
-                    </tr>
-                  ))}
+                  {Object.values(goldenCases.cases).map((c: any) => {
+                    let liveSummary = '';
+                    let passed = false;
+                    try {
+                      if (c.id === 'CE-001' || c.id === 'CE-002') {
+                        const rec = {
+                          id: 'test_dough',
+                          name: c.title,
+                          recipe_type: 'subrecipe' as const,
+                          yield_quantity: c.dough_profile.measured_yield_g ?? c.dough_profile.unit_weight_g ?? 220,
+                          yield_unit: 'g' as const,
+                          currency: c.currency,
+                          bakers_dough: c.dough_profile,
+                        };
+                        const res = new CostEngine({
+                          ingredients: c.ingredients,
+                          purchase_prices: c.purchase_prices,
+                          recipes: [rec],
+                        }).calculateRecipeCost('test_dough');
+                        const actualKg = res.cost_per_kg ?? 0;
+                        passed = Math.abs(actualKg - c.expected.cost_per_kg) <= (c.tolerance ?? 0.01);
+                        liveSummary = `cost_per_kg: ${formatDecimal(actualKg, 4)}`;
+                      } else if (c.id === 'CE-003' || c.id === 'CE-004' || c.id === 'CE-006') {
+                        const res = new CostEngine({
+                          ingredients: c.ingredients,
+                          purchase_prices: c.purchase_prices,
+                          recipes: [c.recipe],
+                        }).calculateRecipeCost(c.recipe.id);
+                        const expectedVal = c.expected.cost_per_kg ?? c.expected.unit_cost ?? c.expected.recipe_cost;
+                        const actualVal = c.expected.cost_per_kg ? (res.cost_per_kg ?? 0) : (res.raw_unit_cost ?? 0);
+                        passed = Math.abs(actualVal - expectedVal) <= (c.tolerance ?? 0.01);
+                        liveSummary = `${formatDecimal(actualVal, 2)} ${c.currency}`;
+                      } else if (c.id === 'CE-005') {
+                        const eng = new CostEngine({
+                          ingredients: c.ingredients,
+                          purchase_prices: c.purchase_prices,
+                          recipes: c.recipes,
+                        });
+                        const rA = eng.calculateRecipeCost('prod_a');
+                        const rB = eng.calculateRecipeCost('prod_b');
+                        passed =
+                          Math.abs((rA.raw_unit_cost ?? 0) - c.expected.prod_a_cost) <= 0.01 &&
+                          Math.abs((rB.raw_unit_cost ?? 0) - c.expected.prod_b_cost) <= 0.01;
+                        liveSummary = `prod_a: ${rA.unit_cost} | prod_b: ${rB.unit_cost}`;
+                      } else if (c.id === 'CE-007') {
+                        const res = new CostEngine({
+                          ingredients: c.ingredients,
+                          purchase_prices: c.purchase_prices,
+                          recipes: [c.recipe],
+                        }).calculateRecipeCost(c.recipe.id);
+                        passed = res.status === 'incomplete' && res.unit_cost === null;
+                        liveSummary = `status: ${res.status}, unit_cost: null`;
+                      } else if (c.id === 'CE-008') {
+                        const pr = calculatePricingScenario({
+                          unit_cost: c.inputs.unit_cost,
+                          status: 'complete',
+                          currency: c.currency,
+                          target_food_cost_pct: c.inputs.target_food_cost_pct,
+                          rounding_increment: c.inputs.rounding_increment,
+                          rounding_mode: c.inputs.rounding_mode,
+                        });
+                        passed =
+                          Math.abs((pr.raw_suggested_price ?? 0) - c.expected.suggested_price) <= 0.01 &&
+                          Math.abs((pr.gross_margin_pct ?? 0) - c.expected.gross_margin_pct) <= 0.01;
+                        liveSummary = `suggested: ${pr.suggested_price} (${formatDecimal(pr.gross_margin_pct ?? 0, 1)}%)`;
+                      }
+                    } catch (err) {
+                      passed = false;
+                      liveSummary = err instanceof Error ? err.message : 'Error';
+                    }
+                    return (
+                      <tr key={c.id}>
+                        <td><strong>{c.id}</strong></td>
+                        <td>{c.title}</td>
+                        <td><code>{liveSummary}</code></td>
+                        <td><code>{JSON.stringify(c.expected)}</code></td>
+                        <td>
+                          <span className={`badge ${passed ? 'badge--ok' : 'badge--warn'}`}>
+                            {passed ? 'PASS ✓' : 'FAIL ✕'}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -4612,6 +4780,31 @@ export function App({
                 </div>
               </div>
 
+              {(() => {
+                try {
+                  const exp = expandBakersDoughSpec(editingRecipe.bakers_dough!);
+                  return (
+                    <div className="card" style={{ marginTop: 12, background: '#f8fafc', borderColor: '#cbd5e1' }}>
+                      <strong>⚖️ Desglose en vivo del Cost Engine (expandBakersDoughSpec)</strong>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginTop: 8, fontSize: '0.84rem' }}>
+                        <span>Harina Total: <strong>{formatDecimal(exp.flourTotalG, 1)} g</strong></span>
+                        <span>Agua Total: <strong>{formatDecimal(exp.waterTotalG, 1)} g</strong></span>
+                        {exp.biga.totalG > 0 && (
+                          <span>Biga: <strong>{formatDecimal(exp.biga.totalG, 1)} g</strong> ({formatDecimal(exp.biga.flourG, 0)}g harina + {formatDecimal(exp.biga.waterG, 0)}g agua + {formatDecimal(exp.biga.yeastG, 2)}g lev.)</span>
+                        )}
+                        {exp.poolish.totalG > 0 && (
+                          <span>Poolish: <strong>{formatDecimal(exp.poolish.totalG, 1)} g</strong> ({formatDecimal(exp.poolish.flourG, 0)}g harina + {formatDecimal(exp.poolish.waterG, 0)}g agua + {formatDecimal(exp.poolish.yeastG, 2)}g lev.)</span>
+                        )}
+                        <span>Amasado final: <strong>{formatDecimal(exp.final.flourG, 1)}g harina + {formatDecimal(exp.final.waterG, 1)}g agua</strong></span>
+                        <span>Rendimiento Batch: <strong>{formatDecimal(exp.yieldQuantityG, 1)} g</strong></span>
+                      </div>
+                    </div>
+                  );
+                } catch {
+                  return null;
+                }
+              })()}
+
               <div className="card" style={{ marginTop: 12 }}>
                 <strong>Otros ingredientes de la masa</strong>
                 <div className="builder-grid">
@@ -4858,6 +5051,7 @@ export function App({
       {showHelpModal && (
         <ContextualHelpModal
           initialTopic={helpTopic}
+          locale={state.locale}
           onClose={() => setShowHelpModal(false)}
         />
       )}

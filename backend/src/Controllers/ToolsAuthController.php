@@ -114,7 +114,9 @@ class ToolsAuthController
         $account = $accountQuery->fetch();
         $effectiveEnv = $account && !empty($account['environment']) ? (string)$account['environment'] : $environment;
 
-        // Las cuentas vinculadas validan contra la contraseña de App o la contraseña propia de Tools.
+        // Aislamiento estricto: si la cuenta de Tools tiene su propia contraseña y NO fue vinculada explícitamente,
+        // valida de forma 100% autónoma sin tocar ni consultar la tabla users de Pizzalog App.
+        $hasStandalonePassword = $account && !empty($account['password_hash']) && password_verify($password, (string)$account['password_hash']);
         $appUser = null;
         if ($account && !empty($account['app_user_id'])) {
             $userQuery = $pdo->prepare(
@@ -123,8 +125,8 @@ class ToolsAuthController
             );
             $userQuery->execute([(int)$account['app_user_id']]);
             $appUser = $userQuery->fetch() ?: null;
-        } else {
-            // La vinculación inicial está reservada a usuarios administradores activos (por email o username).
+        } elseif (!$hasStandalonePassword) {
+            // Solo si no ingresó con contraseña propia de Tools se permite SSO con credenciales de admin de App.
             $userQuery = $pdo->prepare(
                 "SELECT id, business_id, name, email, username, password_hash, role, is_active
                    FROM users
@@ -139,7 +141,7 @@ class ToolsAuthController
             $appUser = $matches[0] ?? null;
         }
 
-        $linkedToApp = $appUser !== null;
+        $linkedToApp = $appUser !== null && !$hasStandalonePassword;
         if ($linkedToApp) {
             $validAppPassword = !empty($appUser['password_hash']) && password_verify($password, (string)$appUser['password_hash']);
             $validToolsPassword = $account && !empty($account['password_hash']) && password_verify($password, (string)$account['password_hash']);

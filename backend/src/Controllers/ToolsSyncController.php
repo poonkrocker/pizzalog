@@ -369,6 +369,13 @@ class ToolsSyncController
         } else {
             // from_app: Sincronizar catálogo, productos, recetas, precios de venta e historial desde App hacia Tools
             $today = date('Y-m-d');
+            $wsRowPre = $pdo->prepare('SELECT workspace_json FROM tools_workspaces WHERE account_id = ? LIMIT 1');
+            $wsRowPre->execute([(int) $req->auth['tools_account_id']]);
+            $wsJsonPre = $wsRowPre->fetchColumn();
+            $existingWsPre = $wsJsonPre ? json_decode((string) $wsJsonPre, true) : [];
+            $targetCurrency = is_string($existingWsPre['currency'] ?? null) && trim($existingWsPre['currency']) !== ''
+                ? trim($existingWsPre['currency'])
+                : 'ARS';
 
             // 1. Insumos y precios de compra
             $suppliesStmt = $pdo->prepare('SELECT id, name, unit, cost FROM supplies WHERE business_id = ? AND is_active = 1 ORDER BY name ASC');
@@ -403,7 +410,7 @@ class ToolsSyncController
                         'ingredient_id' => $ingId,
                         'purchase_date' => $today,
                         'purchase_price' => (float) $s['cost'],
-                        'currency' => 'ARS',
+                        'currency' => $targetCurrency,
                         'pack_quantity' => 1,
                         'pack_unit' => $unit,
                         'yield_pct' => 100,
@@ -463,7 +470,7 @@ class ToolsSyncController
                         'recipe_type' => 'subrecipe',
                         'yield_quantity' => (float) ($sub['yield_quantity'] > 0 ? $sub['yield_quantity'] : 1),
                         'yield_unit' => self::normalizeCostEngineUnit((string) ($sub['yield_unit'] ?? 'kg'), 'kg'),
-                        'currency' => 'ARS',
+                        'currency' => $targetCurrency,
                         'components' => $components,
                     ];
                 }
@@ -623,7 +630,7 @@ class ToolsSyncController
                     'yield_quantity' => $yieldQty,
                     'yield_unit' => $yieldUnit,
                     'target_food_cost_pct' => $targetFoodCost,
-                    'currency' => 'ARS',
+                    'currency' => $targetCurrency,
                     'components' => $components,
                 ];
 
