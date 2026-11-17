@@ -127,8 +127,28 @@ function buildPizzas(rows: string[][], supplies: SupplyItem[], recipes: StudioRe
     throw new Error('No pude reconocer las columnas. Se necesitan pizza + ingrediente(s).');
   }
 
-  const normalizedNames = rows.slice(1).map(row => normalize(row[pizzaCol] ?? '')).filter(Boolean);
-  const duplicateNames = new Set(normalizedNames.filter((name, index) => normalizedNames.indexOf(name) !== index));
+  // A long-format CSV repeats the pizza name once per ingredient row.
+  // Repetition alone is NOT evidence of another historical publication.
+  // A name is ambiguous only when it belongs to multiple distinct publication
+  // identities (Callbell source ID, or label + period when no source ID exists).
+  const publicationKeysByName = new Map<string, Set<string>>();
+  rows.slice(1).forEach((row) => {
+    const name = normalize(row[pizzaCol] ?? '');
+    if (!name) return;
+    const sourceId = sourceIdCol >= 0 ? (row[sourceIdCol] ?? '').trim() : '';
+    const sourceLabel = labelCol >= 0 ? (row[labelCol] ?? '').trim() : '';
+    const sourcePeriod = [fromCol >= 0 ? row[fromCol] : '', toCol >= 0 ? row[toCol] : '']
+      .map(value => (value ?? '').trim()).filter(Boolean).join(' → ');
+    const publicationKey = sourceId || `${normalize(sourceLabel)}::${sourcePeriod}`;
+    const keys = publicationKeysByName.get(name) ?? new Set<string>();
+    keys.add(publicationKey);
+    publicationKeysByName.set(name, keys);
+  });
+  const duplicateNames = new Set(
+    [...publicationKeysByName.entries()]
+      .filter(([, publicationKeys]) => publicationKeys.size > 1)
+      .map(([name]) => name),
+  );
 
   rows.slice(1).forEach((row, index) => {
     const originalName = row[pizzaCol]?.trim();
