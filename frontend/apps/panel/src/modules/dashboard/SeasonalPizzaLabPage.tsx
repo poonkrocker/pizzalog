@@ -10,8 +10,9 @@ import {
 } from '@pizzalog/cost-engine';
 import { useApi } from '@/lib/auth';
 import { Loading, PageHeader } from '@/ui';
+import { SeasonalPizzaCsvImport } from './SeasonalPizzaCsvImport';
 
-type LabTab = 'ranking' | 'ingredientes' | 'armador' | 'simulador';
+type LabTab = 'ranking' | 'ingredientes' | 'armador' | 'simulador' | 'importar';
 type SortKey =
   | 'units'
   | 'units_per_sale_day'
@@ -1186,6 +1187,12 @@ export function SeasonalPizzaLabPage() {
         description="Inteligencia de ingredientes, velocidad de venta diaria, recetario integrado y simulador de nuevas Pizzas de la Semana impulsado por Cost Engine."
       />
 
+      <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '0 0 1rem' }}>
+        <button type="button" style={btnSecondary} onClick={() => setTab('importar')}>
+          📥 Importar pizzas desde CSV
+        </button>
+      </div>
+
       {/* Barra global de período + pestañas de trabajo */}
       <div
         style={{
@@ -1261,6 +1268,7 @@ export function SeasonalPizzaLabPage() {
                 label: `⚡ Armador de Recetas (${globalStats.costedCount}/${enrichedVariants.length})`,
               },
               { id: 'simulador', label: '🧪 Simulador Nueva Pizza' },
+              { id: 'importar', label: '📥 Importar CSV' },
             ] as Array<{ id: LabTab; label: string }>
           ).map((t) => (
             <button
@@ -3050,6 +3058,26 @@ export function SeasonalPizzaLabPage() {
             </div>
           )}
         </>
+      )}
+
+      {tab === 'importar' && studio.data && (
+        <SeasonalPizzaCsvImport
+          supplies={studio.data.supplies}
+          recipes={studio.data.recipes}
+          onImport={async (recipe) => {
+            await link.mutateAsync({
+              variantId: 0,
+              payload: {
+                name: recipe.name,
+                yield_quantity: 1,
+                yield_unit: 'u',
+                price: recipe.price,
+                target_food_cost_pct: 30,
+                components: recipe.components,
+              },
+            });
+          }}
+        />
       )}
     </section>
   );
