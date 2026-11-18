@@ -612,7 +612,150 @@ function buildStylesXml(): string {
 </styleSheet>`;
 }
 
-function buildWorksheetXml(rows: RowSpec[], colWidths: number[] = []): string {
+export function formatWorkbookDate(dateStr: string | undefined | null, locale: WorkbookLocale = 'es-AR'): string {
+  const raw = String(dateStr ?? '').trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw);
+  if (!m) return raw || (locale === 'en' ? '11/01/2026' : '01/11/2026');
+  const [, yyyy, mm, dd] = m;
+  if (locale === 'en') {
+    return `${mm}/${dd}/${yyyy}`;
+  }
+  return `${dd}/${mm}/${yyyy}`;
+}
+
+const WORKBOOK_CELL_TRANSLATIONS: Record<'pt-BR' | 'en', Record<string, string>> = {
+  'pt-BR': {
+    'Nombre del Restaurante / Proyecto': 'Nome do Restaurante / Projeto',
+    'Moneda Base': 'Moeda Base',
+    'Food Cost Objetivo General (%)': 'CMV Objetivo Geral (%)',
+    'Incremento de Redondeo Comercial': 'Incremento de Arredondamento Comercial',
+    'Costo Packaging Delivery por Unidad': 'Custo de Embalagem Delivery por Unidade',
+    'Comisión Canal App Delivery (%)': 'Comissão Canal App Delivery (%)',
+    'Sistema de Unidades': 'Sistema de Unidades',
+    'Idioma de la Planilla': 'Idioma da Planilha',
+    'Código Unidad': 'Código Unidade',
+    'Dimensión Física': 'Dimensão Física',
+    'Unidad Canónica': 'Unidade Canônica',
+    'Factor hacia Unidad Canónica': 'Fator para Unidade Canônica',
+    'ID Insumo': 'ID Insumo',
+    'Nombre del Ingrediente': 'Nome do Ingrediente',
+    'Rubro / Familia': 'Categoria / Família',
+    'Dimensión': 'Dimensão',
+    'Unidad Base': 'Unidade Base',
+    'Cant. Envase': 'Qtd. Embalagem',
+    'Unidad Envase': 'Unidade Embalagem',
+    'Cant. en Unidad Base (Auto)': 'Qtd. na Unidade Base (Auto)',
+    'Densidad (g/ml)': 'Densidade (g/ml)',
+    'Peso por Unidad (g)': 'Peso por Unidade (g)',
+    'Costo Cero (1=Sí,0=No)': 'Custo Zero (1=Sim,0=Não)',
+    'Proveedor Vigente': 'Fornecedor Atual',
+    'Ingrediente': 'Ingrediente',
+    'Cant. Bruta en Base': 'Qtd. Bruta na Base',
+    'Rendimiento Utilizable (%)': 'Rendimento Utilizável (%)',
+    'Merma (%)': 'Perda (%)',
+    'Cant. Limpia Utilizable': 'Qtd. Limpa Utilizável',
+    'Estado de Validación': 'Status de Validação',
+    'Fecha de Compra': 'Data de Compra',
+    'Proveedor': 'Fornecedor',
+    'Rendimiento (%)': 'Rendimento (%)',
+    'ID Subreceta': 'ID Sub-receita',
+    'Nombre de Masa / Subreceta': 'Nome da Massa / Sub-receita',
+    'Rendimiento Batch': 'Rendimento do Lote',
+    'Unidad Rend.': 'Unidade Rend.',
+    'Componentes Incompletos': 'Componentes Incompletos',
+    'Estado Subreceta': 'Status Sub-receita',
+    'ID Producto': 'ID Produto',
+    'Nombre del Producto Final': 'Nome do Produto Final',
+    'Rendimiento': 'Rendimento',
+    'Unidad': 'Unidade',
+    'Líneas Incompletas': 'Linhas Incompletas',
+    'Estado Costeo': 'Status Custeio',
+    'Producto Final': 'Produto Final',
+    'Food Cost Objetivo (%)': 'CMV Objetivo (%)',
+    'Food Cost Real (%)': 'CMV Real (%)',
+    'Margen Bruto (%)': 'Margem Bruta (%)',
+    'Unidades Vendidas / Mes': 'Unidades Vendidas / Mês',
+    'Mix de Unidades (%)': 'Mix de Unidades (%)',
+    'TOTALES MENSUALES': 'TOTAIS MENSAIS',
+    'ID Gasto': 'ID Despesa',
+    'Concepto / Rubro Operativo': 'Conceito / Despesa Operacional',
+    'Categoría': 'Categoria',
+    'TOTAL GASTOS OPERATIVOS FIJOS MENSUALES': 'TOTAL DESPESAS OPERACIONAIS FIXAS MENSAIS',
+    'TOTAL SIMULADO': 'TOTAL SIMULADO',
+    'ATENCIÓN: COMPLETAR PRECIOS EN HOJA 02': 'ATENÇÃO: PREENCHER PREÇOS NA ABA 02',
+    'BLOQUEO ACTIVO EN RECETAS INCOMPLETAS': 'BLOQUEIO ATIVO EM RECEITAS INCOMPLETAS',
+  },
+  en: {
+    'Nombre del Restaurante / Proyecto': 'Restaurant / Project Name',
+    'Moneda Base': 'Base Currency',
+    'Food Cost Objetivo General (%)': 'Global Target Food Cost (%)',
+    'Incremento de Redondeo Comercial': 'Commercial Rounding Increment',
+    'Costo Packaging Delivery por Unidad': 'Delivery Packaging Cost per Unit',
+    'Comisión Canal App Delivery (%)': 'Delivery App Channel Fee (%)',
+    'Sistema de Unidades': 'Unit System',
+    'Idioma de la Planilla': 'Workbook Language',
+    'Código Unidad': 'Unit Code',
+    'Dimensión Física': 'Physical Dimension',
+    'Unidad Canónica': 'Canonical Unit',
+    'Factor hacia Unidad Canónica': 'Factor to Canonical Unit',
+    'ID Insumo': 'Ingredient ID',
+    'Nombre del Ingrediente': 'Ingredient Name',
+    'Rubro / Familia': 'Category / Family',
+    'Dimensión': 'Dimension',
+    'Unidad Base': 'Base Unit',
+    'Cant. Envase': 'Pack Qty',
+    'Unidad Envase': 'Pack Unit',
+    'Cant. en Unidad Base (Auto)': 'Qty in Base Unit (Auto)',
+    'Densidad (g/ml)': 'Density (g/ml)',
+    'Peso por Unidad (g)': 'Unit Weight (g)',
+    'Costo Cero (1=Sí,0=No)': 'Zero Cost (1=Yes,0=No)',
+    'Proveedor Vigente': 'Active Supplier',
+    'Ingrediente': 'Ingredient',
+    'Cant. Bruta en Base': 'Gross Qty in Base',
+    'Rendimiento Utilizable (%)': 'Usable Yield (%)',
+    'Merma (%)': 'Waste (%)',
+    'Cant. Limpia Utilizable': 'Clean Usable Qty',
+    'Estado de Validación': 'Validation Status',
+    'Fecha de Compra': 'Purchase Date',
+    'Proveedor': 'Supplier',
+    'Rendimiento (%)': 'Yield (%)',
+    'ID Subreceta': 'Subrecipe ID',
+    'Nombre de Masa / Subreceta': 'Dough / Subrecipe Name',
+    'Rendimiento Batch': 'Batch Yield',
+    'Unidad Rend.': 'Yield Unit',
+    'Componentes Incompletos': 'Incomplete Components',
+    'Estado Subreceta': 'Subrecipe Status',
+    'ID Producto': 'Product ID',
+    'Nombre del Producto Final': 'Final Product Name',
+    'Rendimiento': 'Yield',
+    'Unidad': 'Unit',
+    'Líneas Incompletas': 'Incomplete Lines',
+    'Estado Costeo': 'Costing Status',
+    'Producto Final': 'Final Product',
+    'Food Cost Objetivo (%)': 'Target Food Cost (%)',
+    'Food Cost Real (%)': 'Actual Food Cost (%)',
+    'Margen Bruto (%)': 'Gross Margin (%)',
+    'Unidades Vendidas / Mes': 'Monthly Units Sold',
+    'Mix de Unidades (%)': 'Unit Sales Mix (%)',
+    'TOTALES MENSUALES': 'MONTHLY TOTALS',
+    'ID Gasto': 'Expense ID',
+    'Concepto / Rubro Operativo': 'Operating Expense Item',
+    'Categoría': 'Category',
+    'TOTAL GASTOS OPERATIVOS FIJOS MENSUALES': 'TOTAL MONTHLY FIXED OPERATING EXPENSES',
+    'TOTAL SIMULADO': 'SIMULATED TOTAL',
+    'ATENCIÓN: COMPLETAR PRECIOS EN HOJA 02': 'WARNING: COMPLETE PRICES IN SHEET 02',
+    'BLOQUEO ACTIVO EN RECETAS INCOMPLETAS': 'ACTIVE BLOCK ON INCOMPLETE RECIPES',
+  },
+};
+
+function translateCellText(val: string, locale: WorkbookLocale): string {
+  if (locale === 'es-AR') return val;
+  const dict = WORKBOOK_CELL_TRANSLATIONS[locale];
+  if (dict[val]) return dict[val];
+  return val;
+}
+
+function buildWorksheetXml(rows: RowSpec[], colWidths: number[] = [], locale: WorkbookLocale = 'es-AR'): string {
   const colsXml =
     colWidths.length > 0
       ? `<cols>${colWidths
@@ -638,7 +781,8 @@ function buildWorksheetXml(rows: RowSpec[], colWidths: number[] = []): string {
       if (obj.f !== undefined) {
         const isTextResult = typeof obj.v === 'string';
         const tAttr = isTextResult ? ` t="str"` : '';
-        const valTag = obj.v !== undefined && obj.v !== null ? `<v>${escapeXml(obj.v)}</v>` : '';
+        const vTranslated = typeof obj.v === 'string' ? translateCellText(obj.v, locale) : obj.v;
+        const valTag = vTranslated !== undefined && vTranslated !== null ? `<v>${escapeXml(vTranslated)}</v>` : '';
         cellsXml.push(`<c r="${cellRef}"${styleAttr}${tAttr}><f>${escapeXml(obj.f)}</f>${valTag}</c>`);
       } else if (typeof obj.v === 'number' && Number.isFinite(obj.v)) {
         cellsXml.push(`<c r="${cellRef}"${styleAttr}><v>${obj.v}</v></c>`);
@@ -647,7 +791,8 @@ function buildWorksheetXml(rows: RowSpec[], colWidths: number[] = []): string {
           cellsXml.push(`<c r="${cellRef}"${styleAttr}/>`);
         }
       } else {
-        cellsXml.push(`<c r="${cellRef}"${styleAttr} t="inlineStr"><is><t>${escapeXml(obj.v)}</t></is></c>`);
+        const vStr = typeof obj.v === 'string' ? translateCellText(obj.v, locale) : String(obj.v);
+        cellsXml.push(`<c r="${cellRef}"${styleAttr} t="inlineStr"><is><t>${escapeXml(vStr)}</t></is></c>`);
       }
     }
 
@@ -925,16 +1070,26 @@ export function generateProfitKitV2WorkbookBytes(input: ProfitKitWorkbookInput):
     const priceNum = pp.purchase_price !== null && pp.purchase_price !== undefined && pp.purchase_price !== ''
       ? Number(pp.purchase_price)
       : '';
+    let activeUsableCost: number | string = '';
+    if (ing) {
+      const eff = selectEffectivePurchasePrice(ing.id, input.catalog.purchase_prices, input.catalog.as_of_date);
+      try {
+        const c = computeUsableIngredientCost(ing, eff, currency, input.catalog.exchange_rates, input.catalog.as_of_date);
+        activeUsableCost = c.usableUnitCostInBase ?? 0;
+      } catch {
+        activeUsableCost = 0;
+      }
+    }
     sheet04Rows.push([
       { v: pp.ingredient_id, s: 3 },
       { f: `IF(A${r}="","",INDEX('${S[2]}'!$B$${ingStartRow}:$B$${ingEndRow},MATCH(A${r},'${S[2]}'!$A$${ingStartRow}:$A$${ingEndRow},0)))`, v: ing?.name ?? pp.ingredient_id, s: 0 },
-      { v: pp.purchase_date ?? (input.catalog.as_of_date || '2026-11-01'), s: 3 },
-      { v: pp.supplier ?? 'Proveedor General', s: 3 },
+      { v: formatWorkbookDate(pp.purchase_date ?? (input.catalog.as_of_date || '2026-11-01'), locale), s: 3 },
+      { v: pp.supplier ?? (locale === 'en' ? 'General Supplier' : locale === 'pt-BR' ? 'Fornecedor Geral' : 'Proveedor General'), s: 3 },
       { v: priceNum, s: 3 },
       { v: pp.pack_quantity, s: 3 },
       { v: pp.pack_unit, s: 3 },
       { v: pp.usable_quantity !== undefined && pp.usable_quantity !== null && typeof pp.pack_quantity === 'number' && pp.pack_quantity > 0 ? (pp.usable_quantity / pp.pack_quantity) * 100 : (pp.yield_pct ?? 100), s: 3 },
-      { f: `IF(A${r}="","",SUMIF('${S[3]}'!$A$${ingStartRow}:$A$${ingEndRow},A${r},'${S[3]}'!$J$${ingStartRow}:$J$${ingEndRow}))`, v: 0, s: 5 },
+      { f: `IF(A${r}="","",SUMIF('${S[3]}'!$A$${ingStartRow}:$A$${ingEndRow},A${r},'${S[3]}'!$J$${ingStartRow}:$J$${ingEndRow}))`, v: activeUsableCost, s: 5 },
     ]);
   });
 
@@ -1534,8 +1689,8 @@ export function generateProfitKitV2WorkbookBytes(input: ProfitKitWorkbookInput):
         { v: sRec.product_id ?? '', s: 0 },
         { v: sRec.product_name, s: 0 },
         { v: sRec.channel ?? 'General', s: 0 },
-        { v: sRec.period_start, s: 0 },
-        { v: sRec.period_end, s: 0 },
+        { v: formatWorkbookDate(sRec.period_start, locale), s: 0 },
+        { v: formatWorkbookDate(sRec.period_end, locale), s: 0 },
         { v: sRec.quantity, s: 4 },
         { v: sRec.gross_revenue ?? '', s: 4 },
         { v: sRec.net_revenue ?? '', s: 4 },
@@ -1938,7 +2093,7 @@ ${relsXml}
   };
 
   allSheetsData.forEach((sh, idx) => {
-    filesMap[`xl/worksheets/sheet${idx + 1}.xml`] = buildWorksheetXml(sh.rows, sh.widths);
+    filesMap[`xl/worksheets/sheet${idx + 1}.xml`] = buildWorksheetXml(sh.rows, sh.widths, locale);
   });
 
   return buildZipBytes(filesMap);

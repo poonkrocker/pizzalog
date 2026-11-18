@@ -86,16 +86,20 @@ export function App({
   account,
   initialWorkspace,
   initialUpdatedAt,
+  initialVersion,
   onLogout,
 }: {
   token: string;
   account: ToolsAccount;
   initialWorkspace: ToolsWorkspaceState;
   initialUpdatedAt?: string | null;
+  initialVersion?: number | null;
   onLogout: () => void;
 }) {
   const [state, setState] = useState<ToolsWorkspaceState>(() => normalizeWorkspace(initialWorkspace));
   const workspaceUpdatedAtRef = useRef<string | null>(initialUpdatedAt ?? null);
+  const workspaceVersionRef = useRef<number | null>(initialVersion ?? null);
+  const [onlineRetryTick, setOnlineRetryTick] = useState<number>(0);
   const [workspaceConflict, setWorkspaceConflict] = useState<string | null>(null);
   const [importEquivalences, setImportEquivalences] = useState<Record<string, string>>({});
   const [replaceConfirmed, setReplaceConfirmed] = useState(false);
@@ -172,6 +176,12 @@ export function App({
   const [simCategoryFilter, setSimCategoryFilter] = useState<'all' | 'flour' | 'dairy' | 'meat' | 'vegetables'>('all');
 
   useEffect(() => {
+    const onOnline = () => setOnlineRetryTick((n) => n + 1);
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, []);
+
+  useEffect(() => {
     const workspaceSnapshot = state;
     const serialized = JSON.stringify(workspaceSnapshot);
     if (account.id === 0 || token === 'guest-demo-token') {
@@ -187,10 +197,40 @@ export function App({
     if (isInitialMountRef.current) {
       isInitialMountRef.current = false;
       lastSavedJsonRef.current = serialized;
+      try {
+        localStorage.setItem(
+          `pizzalog_tools_recovery_${account.id}`,
+          JSON.stringify({
+            workspace: workspaceSnapshot,
+            baseVersion: workspaceVersionRef.current,
+            baseUpdatedAt: workspaceUpdatedAtRef.current,
+            savedAt: new Date().toISOString(),
+            pendingSync: false,
+          })
+        );
+      } catch {
+        // Ignorar si el storage local está lleno
+      }
       return;
     }
     if (serialized === lastSavedJsonRef.current) {
       return;
+    }
+
+    // Guardar copia de recuperación local inmediata por cuenta antes del autosave de red (resiliencia ante pérdida de conexión)
+    try {
+      localStorage.setItem(
+        `pizzalog_tools_recovery_${account.id}`,
+        JSON.stringify({
+          workspace: workspaceSnapshot,
+          baseVersion: workspaceVersionRef.current,
+          baseUpdatedAt: workspaceUpdatedAtRef.current,
+          savedAt: new Date().toISOString(),
+          pendingSync: true,
+        })
+      );
+    } catch {
+      // Ignorar si el storage local está lleno
     }
 
     const timer = window.setTimeout(() => {
@@ -207,10 +247,11 @@ export function App({
               },
               body: JSON.stringify({
                 workspace: workspaceSnapshot,
+                version: workspaceVersionRef.current,
                 updated_at: workspaceUpdatedAtRef.current,
               }),
             });
-            const payload = await parseToolsJsonResponse<{ ok?: boolean; error?: string; data?: { updated_at?: string } }>(response);
+            const payload = await parseToolsJsonResponse<{ ok?: boolean; error?: string; data?: { updated_at?: string; version?: number } }>(response);
             if (response.status === 409) {
               setWorkspaceConflict(
                 'El espacio de trabajo fue modificado en otra sesión o pestaña. Para evitar sobreescribir datos ajenos, recargá la versión más reciente del servidor o descargá una copia de seguridad.'
@@ -223,7 +264,24 @@ export function App({
             if (payload.data?.updated_at) {
               workspaceUpdatedAtRef.current = payload.data.updated_at;
             }
+            if (typeof payload.data?.version === 'number') {
+              workspaceVersionRef.current = payload.data.version;
+            }
             lastSavedJsonRef.current = serialized;
+            try {
+              localStorage.setItem(
+                `pizzalog_tools_recovery_${account.id}`,
+                JSON.stringify({
+                  workspace: workspaceSnapshot,
+                  baseVersion: workspaceVersionRef.current,
+                  baseUpdatedAt: workspaceUpdatedAtRef.current,
+                  savedAt: new Date().toISOString(),
+                  pendingSync: false,
+                })
+              );
+            } catch {
+              // Ignorar si el storage local está lleno
+            }
             setWorkspaceSaveError(null);
             setWorkspaceConflict(null);
           } catch (err) {
@@ -234,7 +292,7 @@ export function App({
         });
     }, 650);
     return () => window.clearTimeout(timer);
-  }, [state, token, account.id]);
+  }, [state, token, account.id, onlineRetryTick]);
 
   const t = TOOLS_I18N[state.locale] ?? TOOLS_I18N['es-AR'];
   const canChangeCurrency =
@@ -822,15 +880,13 @@ export function App({
         if (!parsed?.catalog || !Array.isArray(parsed.catalog.ingredients) || !Array.isArray(parsed.catalog.recipes)) {
           throw new Error('Estructura JSON inválida: debe incluir catalog.ingredients y catalog.recipes');
         }
-        const testEngine = new CostEngine(parsed.catalog);
-        for (const r of parsed.catalog.recipes) {
+        const normalized = normalizeWorkspace(parsed);
+        const testEngine = new CostEngine(normalized.catalog);
+        for (const r of normalized.catalog.recipes) {
           testEngine.calculateRecipeCost(r.id);
         }
-        setState({
-          ...createInitialDemoWorkspace(),
-          ...parsed,
-          productSalesMap: parsed.productSalesMap ?? {},
-        });
+        setState(normalized);
+        setImportNotice(`Respaldo JSON restaurado correctamente (${normalized.catalog.ingredients.length} insumos, ${normalized.catalog.recipes.length} recetas).`);
       } catch (err) {
         setImportError(err instanceof Error ? err.message : 'Error al validar archivo importado');
       }
@@ -920,7 +976,12 @@ export function App({
       } else {
         if (data.data?.workspace) {
           workspaceUpdatedAtRef.current = data.data.updated_at ?? workspaceUpdatedAtRef.current;
-          setState(normalizeWorkspace(data.data.workspace));
+          if (typeof data.data.version === 'number') {
+            workspaceVersionRef.current = data.data.version;
+          }
+          const normalized = normalizeWorkspace(data.data.workspace);
+          lastSavedJsonRef.current = JSON.stringify(normalized);
+          setState(normalized);
         } else {
           const wsRes = await toolsFetch(`/tools/workspace`, {
             headers: { Authorization: `Bearer ${token}` },
@@ -928,7 +989,12 @@ export function App({
           const wsData = await wsRes.json();
           if (wsData.ok && wsData.data?.workspace) {
             workspaceUpdatedAtRef.current = wsData.data.updated_at ?? data.data?.updated_at ?? null;
-            setState(normalizeWorkspace(wsData.data.workspace));
+            if (typeof wsData.data.version === 'number') {
+              workspaceVersionRef.current = wsData.data.version;
+            }
+            const normalized = normalizeWorkspace(wsData.data.workspace);
+            lastSavedJsonRef.current = JSON.stringify(normalized);
+            setState(normalized);
           }
         }
         const importedProds = data.data.imported_products ?? data.data.imported_recipes ?? 0;

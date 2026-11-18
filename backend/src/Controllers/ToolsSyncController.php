@@ -54,11 +54,14 @@ class ToolsSyncController
             return null;
         }
         $stmt = $pdo->prepare(
-            'SELECT COALESCE(ta.business_id, u.business_id) AS bid
+            "SELECT COALESCE(ta.business_id, u.business_id) AS bid
                FROM tools_accounts ta
-          LEFT JOIN users u ON u.id = ta.app_user_id
+               JOIN users u ON u.id = ta.app_user_id
               WHERE ta.id = ?
-              LIMIT 1'
+                AND ta.app_user_id IS NOT NULL
+                AND u.is_active = 1
+                AND u.role = 'admin'
+              LIMIT 1"
         );
         $stmt->execute([$accountId]);
         $bid = $stmt->fetchColumn();
@@ -76,6 +79,8 @@ class ToolsSyncController
         $stmt = $pdo->prepare(
             'SELECT ta.id,
                     ta.app_user_id,
+                    u.is_active AS app_user_active,
+                    u.role AS app_user_role,
                     COALESCE(ta.business_id, u.business_id) AS business_id,
                     b.name AS business_name,
                     COALESCE(u.email, u.username) AS app_user_email
@@ -88,12 +93,35 @@ class ToolsSyncController
         $stmt->execute([$accountId]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
 
-        $isLinked = !empty($row['business_id']);
+        $isLinked = !empty($row['app_user_id'])
+            && !empty($row['business_id'])
+            && (int) ($row['app_user_active'] ?? 0) === 1
+            && ($row['app_user_role'] ?? '') === 'admin';
         Response::ok([
             'linked' => $isLinked,
             'business_id' => $isLinked ? (int) $row['business_id'] : null,
             'business_name' => $isLinked ? (string) ($row['business_name'] ?? 'Negocio vinculado') : null,
             'app_user_email' => $isLinked ? (string) ($row['app_user_email'] ?? $req->auth['tools_email'] ?? '') : null,
+        ]);
+    }
+
+    /**
+     * POST /tools/sync/unlink-app
+     * Desvincula la cuenta de Tools de Pizzalog App sin tocar los datos de ninguno de los dos sistemas.
+     */
+    public function unlinkApp(Request $req): void
+    {
+        $accountId = (int) $req->auth['tools_account_id'];
+        $pdo = Database::pdo();
+        ToolsAuthController::ensureTables($pdo);
+        $pdo->prepare('UPDATE tools_accounts SET app_user_id = NULL, business_id = NULL WHERE id = ?')
+            ->execute([$accountId]);
+
+        Response::ok([
+            'linked' => false,
+            'business_id' => null,
+            'business_name' => null,
+            'app_user_email' => null,
         ]);
     }
 
@@ -809,14 +837,16 @@ class ToolsSyncController
             $accountId = (int) $req->auth['tools_account_id'];
             $savedJson = json_encode($newWs, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
             $pdo->prepare(
-                'INSERT INTO tools_workspaces (account_id, workspace_json, schema_version)
-                 VALUES (?, ?, 1)
-                 ON DUPLICATE KEY UPDATE workspace_json = VALUES(workspace_json), schema_version = 1, updated_at = NOW()'
+                'INSERT INTO tools_workspaces (account_id, workspace_json, schema_version, version)
+                 VALUES (?, ?, 1, 1)
+                 ON DUPLICATE KEY UPDATE workspace_json = VALUES(workspace_json), schema_version = 1, version = version + 1, updated_at = NOW()'
             )->execute([$accountId, $savedJson]);
 
-            $tsStmt = $pdo->prepare('SELECT updated_at FROM tools_workspaces WHERE account_id = ? LIMIT 1');
+            $tsStmt = $pdo->prepare('SELECT version, updated_at FROM tools_workspaces WHERE account_id = ? LIMIT 1');
             $tsStmt->execute([$accountId]);
-            $updatedAt = $tsStmt->fetchColumn();
+            $tsRow = $tsStmt->fetch(\PDO::FETCH_ASSOC);
+            $updatedAt = $tsRow['updated_at'] ?? null;
+            $newVersion = isset($tsRow['version']) ? (int) $tsRow['version'] : 1;
 
             Response::ok([
                 'direction' => 'from_app',
@@ -825,6 +855,7 @@ class ToolsSyncController
                 'imported_recipes' => count($combinedRecipes),
                 'imported_products' => count($appProducts),
                 'imported_sales' => count($salesHistory),
+                'version' => $newVersion,
                 'updated_at' => $updatedAt ?: null,
                 'workspace' => $newWs,
             ]);

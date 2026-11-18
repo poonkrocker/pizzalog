@@ -16,6 +16,9 @@ class Auth
             if ($payload === null) {
                 Response::error('Token inválido o expirado', 401);
             }
+            if (($payload['aud'] ?? null) === 'pizzalog-tools') {
+                Response::error('Las sesiones de Pizzalog Tools están aisladas y no pueden utilizarse en Pizzalog App', 401);
+            }
 
             $userId = isset($payload['sub']) ? (int) $payload['sub'] : null;
             $businessId = isset($payload['business_id']) ? (int) $payload['business_id'] : null;

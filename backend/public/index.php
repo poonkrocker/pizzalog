@@ -75,9 +75,12 @@ $router->post('/billing/webhook/mercadopago', [BillingWebhookController::class, 
 $router->get('/tools/workspace', [ToolsWorkspaceController::class, 'show'], [$toolsAuth]);
 $router->put('/tools/workspace', [ToolsWorkspaceController::class, 'save'], [$toolsAuth]);
 $router->post('/tools/workspace', [ToolsWorkspaceController::class, 'save'], [$toolsAuth]);
+$router->get('/tools/workspace/backups', [ToolsWorkspaceController::class, 'backups'], [$toolsAuth]);
+$router->post('/tools/workspace/restore', [ToolsWorkspaceController::class, 'restore'], [$toolsAuth]);
 $router->post('/tools/import/preview', [ToolsImportController::class, 'preview'], [$toolsAuth]);
 $router->get('/tools/sync/status', [ToolsSyncController::class, 'status'], [$toolsAuth]);
 $router->post('/tools/sync/link-app', [ToolsSyncController::class, 'linkApp'], [$toolsAuth]);
+$router->post('/tools/sync/unlink-app', [ToolsSyncController::class, 'unlinkApp'], [$toolsAuth]);
 $router->post('/tools/sync/preview', [ToolsSyncController::class, 'preview'], [$toolsAuth]);
 $router->post('/tools/sync/apply', [ToolsSyncController::class, 'apply'], [$toolsAuth]);
 $router->post('/tools/admin/accounts', [ToolsAdminController::class, 'createAccount'], [$auth, $admin]);

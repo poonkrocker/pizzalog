@@ -44,11 +44,12 @@ function parseNumber(raw: string): number | null {
     value = decimals > 0 && decimals <= 2 ? value.replace(',', '.') : value.replace(/,/g, '');
   } else if (dot >= 0) {
     // XLSX numeric values use "." as the decimal separator, including es-AR files.
-    // Preserve long decimals such as 932.298871562119; only repeated dot groups
-    // are interpreted as thousands separators.
+    // Preserve long decimals such as 932.298871562119; repeated dot groups or
+    // canonical thousands groups like "8.000" / "68.500" are interpreted as thousands separators.
     const dotCount = (value.match(/\./g) ?? []).length;
-    if (dotCount > 1) value = value.replace(/\./g, '');
-
+    if (dotCount > 1 || /^[1-9]\d{0,2}(\.\d{3})+$/.test(value)) {
+      value = value.replace(/\./g, '');
+    }
   }
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
@@ -110,9 +111,27 @@ function parseRecipeType(raw: string): Recipe['recipe_type'] | null {
 
 function unitValue(raw: string): UnitCode | null {
   const value = raw.trim();
-  if (value.toLowerCase() === 'u') return 'unit';
-  if (value.toLowerCase() === 'docena') return 'dozen';
-  return UNITS.includes(value as UnitCode) ? (value as UnitCode) : null;
+  if (!value) return null;
+  if (UNITS.includes(value as UnitCode)) {
+    if (value === 'l') return 'L';
+    if (value === 'u') return 'unit';
+    if (value === 'docena') return 'dozen';
+    return value as UnitCode;
+  }
+  const lower = normalizedName(value).replace(/\.$/, '');
+  if (['kg', 'kilo', 'kilos', 'kilogramo', 'kilogramos'].includes(lower)) return 'kg';
+  if (['g', 'gr', 'grs', 'gramo', 'gramos'].includes(lower)) return 'g';
+  if (['mg', 'miligramo', 'miligramos'].includes(lower)) return 'mg';
+  if (['lb', 'lbs', 'libra', 'libras'].includes(lower)) return 'lb';
+  if (['oz', 'onza', 'onzas'].includes(lower)) return 'oz';
+  if (['l', 'lt', 'lts', 'litro', 'litros'].includes(lower)) return 'L';
+  if (['ml', 'mililitro', 'mililitros'].includes(lower)) return 'ml';
+  if (['cc', 'cm3'].includes(lower)) return 'cc';
+  if (['fl_oz_us', 'fl oz', 'fl_oz', 'floz'].includes(lower)) return 'fl_oz_us';
+  if (['gal_us', 'gal', 'galon', 'gallon', 'galones', 'gallons'].includes(lower)) return 'gal_us';
+  if (['u', 'un', 'und', 'unit', 'units', 'unidad', 'unidades'].includes(lower)) return 'unit';
+  if (['dozen', 'docena', 'docenas', 'doz'].includes(lower)) return 'dozen';
+  return null;
 }
 
 function currencyValue(raw: string): string | null {
@@ -172,12 +191,16 @@ export function applyImportMappings(
     if (target) knownIngredients.set(aliasKey, target);
   }
   const doughProfiles = sheets.flatMap((sheet) => sheet.doughProfiles ?? []);
-  const doughRecipesByName = new Map<string, Recipe>();
+  const doughRecipesByName = new Map<string, Recipe>(
+    recipes
+      .filter((recipe) => recipe.recipe_type === 'subrecipe')
+      .map((recipe) => [normalizedName(recipe.name), recipe])
+  );
   let doughProfilesAdded = false;
   const warnings: string[] = [];
   const counts = { ingredients: 0, prices: 0, recipes: 0, expenses: 0, sales: 0 };
   const pendingPrices: Array<{ name: string; price: PurchasePrice }> = [];
-  const recipeRows = new Map<string, { name: string; type: Recipe['recipe_type']; yieldQuantity: number; yieldUnit: UnitCode; components: NonNullable<Recipe['components']> }>();
+  const recipeRows = new Map<string, { id: string; name: string; type: Recipe['recipe_type']; yieldQuantity: number; yieldUnit: UnitCode; components: NonNullable<Recipe['components']> }>();
   const invalidRecipeKeys = new Set<string>();
 
   const addDoughProfiles = () => {
@@ -276,19 +299,58 @@ export function applyImportMappings(
     return order[a.kind] - order[b.kind];
   });
 
+  const flushPendingRecipes = () => {
+    for (const [key, row] of recipeRows) {
+      const name = row.name;
+      if (invalidRecipeKeys.has(key)) {
+        warnings.push(`La receta ${name} contiene una o más líneas sin validar y no se importó.`);
+        continue;
+      }
+      if (recipes.some((recipe) => normalizedName(recipe.name) === key)) {
+        warnings.push(`La receta ${name} ya existe; no se duplicó.`);
+        continue;
+      }
+      const importedRecipe: Recipe = {
+        id: row.id,
+        name,
+        recipe_type: row.type,
+        yield_quantity: row.yieldQuantity,
+        yield_unit: row.yieldUnit,
+        currency: current.currency,
+        components: row.components ?? [],
+      };
+      recipes.push(importedRecipe);
+      knownProducts.set(normalizedName(name), importedRecipe);
+      counts.recipes += 1;
+    }
+    recipeRows.clear();
+  };
+
   for (const mapping of orderedMappings) {
     const sheet = sheets[mapping.sheet_index];
     if (!sheet) continue;
     if (mapping.kind === 'recipes') addDoughProfiles();
+    if (mapping.kind === 'sales') flushPendingRecipes();
     if (mapping.kind === 'unknown') {
       warnings.push(`${mapping.name}: tipo de hoja no reconocido; no se importó.`);
       continue;
     }
     if (mapping.warnings.length) warnings.push(...mapping.warnings.map((warning) => `${mapping.name}: ${warning}`));
 
-    const rows = sheet.rows.slice(mapping.header_row_index + 1);
-    rows.forEach((row, rowOffset) => {
-      const sourceRow = mapping.header_row_index + rowOffset + 2;
+    const rawRows = sheet.rows.slice(mapping.header_row_index + 1);
+    const indexedRows = rawRows.map((row, rowOffset) => ({
+      row,
+      sourceRow: mapping.header_row_index + rowOffset + 2,
+    }));
+    // En hojas de recetas, procesar primero las subrecetas para que los productos finales de la misma hoja puedan referenciarlas
+    if (mapping.kind === 'recipes') {
+      indexedRows.sort((a, b) => {
+        const typeA = parseRecipeType(cell(a.row, mapping, 'recipe_type')) === 'subrecipe' ? 0 : 1;
+        const typeB = parseRecipeType(cell(b.row, mapping, 'recipe_type')) === 'subrecipe' ? 0 : 1;
+        return typeA - typeB;
+      });
+    }
+    indexedRows.forEach(({ row, sourceRow }) => {
 
       if (mapping.kind === 'ingredients') {
         const name = cell(row, mapping, 'name', 'ingredient_name');
@@ -324,6 +386,11 @@ export function applyImportMappings(
         } else if (ingredient.base_unit !== baseUnit || ingredient.base_dimension !== dimension) {
           warnings.push(`${mapping.name}, fila ${sourceRow}: ${name} ya existe con otra unidad base; no se incorporó su precio.`);
           allowPriceForIngredient = false;
+        } else {
+          const density = parseNumber(cell(row, mapping, 'density_g_per_ml'));
+          const unitWeight = parseNumber(cell(row, mapping, 'unit_weight_g'));
+          if (density !== null && density > 0 && !ingredient.density_g_per_ml) ingredient.density_g_per_ml = density;
+          if (unitWeight !== null && unitWeight > 0 && !ingredient.unit_weight_g) ingredient.unit_weight_g = unitWeight;
         }
 
         const price = parseNumber(cell(row, mapping, 'purchase_price'));
@@ -536,7 +603,20 @@ export function applyImportMappings(
         const componentQuantity = parseNumber(cell(row, mapping, 'component_quantity'));
         const componentUnit = unitValue(cell(row, mapping, 'component_unit'));
         const ingredient = knownIngredients.get(normalizedName(componentName));
-        const doughRecipe = doughRecipesByName.get(normalizedName(componentName));
+        const pendingSubRow = recipeRows.get(normalizedName(componentName));
+        const doughRecipe =
+          doughRecipesByName.get(normalizedName(componentName)) ??
+          (pendingSubRow && pendingSubRow.type === 'subrecipe' && !invalidRecipeKeys.has(normalizedName(componentName))
+            ? ({
+                id: pendingSubRow.id,
+                name: pendingSubRow.name,
+                recipe_type: 'subrecipe',
+                yield_quantity: pendingSubRow.yieldQuantity,
+                yield_unit: pendingSubRow.yieldUnit,
+                currency: current.currency,
+                components: pendingSubRow.components,
+              } as Recipe)
+            : undefined);
         const validIngredientComponent = Boolean(ingredient && componentUnit && areUnitsCompatible(componentUnit, ingredient.base_unit, ingredient));
         const validDoughComponent = Boolean(doughRecipe && componentUnit && areUnitsCompatible(componentUnit, doughRecipe.yield_unit));
         if (
@@ -556,12 +636,14 @@ export function applyImportMappings(
           return;
         }
         const target: {
+          id: string;
           name: string;
           type: Recipe['recipe_type'];
           yieldQuantity: number;
           yieldUnit: UnitCode;
           components: NonNullable<Recipe['components']>;
         } = existing ?? {
+          id: makeId('imp_recipe', name, usedRecipeIds),
           name,
           type: recipeType,
           yieldQuantity,
@@ -599,29 +681,7 @@ export function applyImportMappings(
     counts.prices += 1;
   }
 
-  for (const [key, row] of recipeRows) {
-    const name = row.name;
-    if (invalidRecipeKeys.has(key)) {
-      warnings.push(`La receta ${name} contiene una o más líneas sin validar y no se importó.`);
-      continue;
-    }
-    if (recipes.some((recipe) => normalizedName(recipe.name) === key)) {
-      warnings.push(`La receta ${name} ya existe; no se duplicó.`);
-      continue;
-    }
-    const importedRecipe: Recipe = {
-      id: makeId('imp_recipe', name, usedRecipeIds),
-      name,
-      recipe_type: row.type,
-      yield_quantity: row.yieldQuantity,
-      yield_unit: row.yieldUnit,
-      currency: current.currency,
-      components: row.components ?? [],
-    };
-    recipes.push(importedRecipe);
-    knownProducts.set(normalizedName(name), importedRecipe);
-    counts.recipes += 1;
-  }
+  flushPendingRecipes();
 
   const importedMonths = importedSalesRecords
     .map((record) => record.period_start.slice(0, 7))
@@ -682,9 +742,40 @@ export function findUnmatchedComponents(
 ): string[] {
   const equivalences = { ...(current.equivalences ?? {}), ...(customEquivalences ?? {}) };
   const known = new Set(current.catalog.ingredients.map((i) => normalizedName(i.name)));
+  for (const r of current.catalog.recipes) {
+    if (r.recipe_type === 'subrecipe') {
+      known.add(normalizedName(r.name));
+    }
+  }
+  for (const sheet of sheets) {
+    for (const dp of sheet.doughProfiles ?? []) {
+      known.add(normalizedName(dp.name));
+    }
+  }
   for (const alias of Object.keys(equivalences)) {
     known.add(alias);
   }
+  // Incluir también los insumos y subrecetas que vienen en las hojas del mismo archivo importado
+  for (const mapping of mappings) {
+    const sheet = sheets[mapping.sheet_index];
+    if (!sheet) continue;
+    const rows = sheet.rows.slice(mapping.header_row_index + 1);
+    if (mapping.kind === 'ingredients' || mapping.kind === 'purchase_prices') {
+      for (const row of rows) {
+        const ingName = cell(row, mapping, 'name', 'ingredient_name').trim();
+        if (ingName) known.add(normalizedName(ingName));
+      }
+    } else if (mapping.kind === 'recipes') {
+      for (const row of rows) {
+        const rType = parseRecipeType(cell(row, mapping, 'recipe_type'));
+        const rName = cell(row, mapping, 'recipe_name').trim();
+        if (rType === 'subrecipe' && rName) {
+          known.add(normalizedName(rName));
+        }
+      }
+    }
+  }
+
   const unmatched = new Set<string>();
 
   for (const mapping of mappings) {

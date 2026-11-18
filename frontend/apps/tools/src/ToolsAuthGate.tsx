@@ -193,20 +193,110 @@ function removeLegacyWorkspace(): void {
   try { localStorage.removeItem(LEGACY_WORKSPACE_KEY); } catch { /* Retain the local recovery copy if storage is unavailable. */ }
 }
 
-async function restoreOrMigrateWorkspace(token: string): Promise<{ workspace: ToolsWorkspaceState; updatedAt: string | null }> {
-  const server = await api<{ workspace: ToolsWorkspaceState | null; updated_at?: string | null }>('/tools/workspace', token);
-  if (server.workspace) return { workspace: normalizeWorkspace(server.workspace), updatedAt: server.updated_at ?? null };
+function readAccountRecoveryBackup(accountId?: number): {
+  workspace: ToolsWorkspaceState;
+  baseVersion?: number | null;
+  baseUpdatedAt?: string | null;
+  pendingSync?: boolean;
+} | null {
+  if (!accountId || accountId <= 0) return null;
+  try {
+    const raw = localStorage.getItem(`pizzalog_tools_recovery_${accountId}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || !parsed.workspace?.catalog) return null;
+    return {
+      workspace: normalizeWorkspace(parsed.workspace),
+      baseVersion: typeof parsed.baseVersion === 'number' ? parsed.baseVersion : null,
+      baseUpdatedAt: typeof parsed.baseUpdatedAt === 'string' ? parsed.baseUpdatedAt : null,
+      pendingSync: Boolean(parsed.pendingSync),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function restoreOrMigrateWorkspace(
+  token: string,
+  accountId?: number
+): Promise<{ workspace: ToolsWorkspaceState; updatedAt: string | null; version: number | null }> {
+  const localRecovery = readAccountRecoveryBackup(accountId);
+  try {
+    const server = await api<{ workspace: ToolsWorkspaceState | null; updated_at?: string | null; version?: number | null }>('/tools/workspace', token);
+    const serverVersion = typeof server.version === 'number' ? server.version : 1;
+
+    // Si había cambios hechos sin conexión en esta misma versión base, sincronizarlos automáticamente
+    if (
+      localRecovery &&
+      localRecovery.pendingSync &&
+      (localRecovery.baseVersion === null || localRecovery.baseVersion === undefined || localRecovery.baseVersion === serverVersion)
+    ) {
+      try {
+        const synced = await api<{ saved: boolean; updated_at?: string | null; version?: number | null }>('/tools/workspace', token, {
+          method: 'POST',
+          body: JSON.stringify({
+            workspace: localRecovery.workspace,
+            version: server.workspace ? serverVersion : undefined,
+            updated_at: server.updated_at ?? undefined,
+          }),
+        });
+        localStorage.setItem(
+          `pizzalog_tools_recovery_${accountId}`,
+          JSON.stringify({
+            workspace: localRecovery.workspace,
+            baseVersion: synced.version ?? serverVersion + 1,
+            baseUpdatedAt: synced.updated_at ?? server.updated_at ?? null,
+            pendingSync: false,
+          })
+        );
+        return {
+          workspace: localRecovery.workspace,
+          updatedAt: synced.updated_at ?? server.updated_at ?? null,
+          version: synced.version ?? serverVersion + 1,
+        };
+      } catch {
+        // Si falló la resincronización inicial, continuar con los datos locales recuperados
+        return {
+          workspace: localRecovery.workspace,
+          updatedAt: server.updated_at ?? null,
+          version: serverVersion,
+        };
+      }
+    }
+
+    if (server.workspace) {
+      return {
+        workspace: normalizeWorkspace(server.workspace),
+        updatedAt: server.updated_at ?? null,
+        version: serverVersion,
+      };
+    }
+  } catch (err) {
+    // Si hay pérdida temporal de red pero existe backup local de la cuenta, permitir continuar sin pantalla bloqueada
+    if (localRecovery) {
+      return {
+        workspace: localRecovery.workspace,
+        updatedAt: localRecovery.baseUpdatedAt ?? null,
+        version: localRecovery.baseVersion ?? 1,
+      };
+    }
+    throw err;
+  }
 
   const legacy = readLegacyWorkspace();
-  if (!legacy) return { workspace: createInitialDemoWorkspace(), updatedAt: null };
+  if (!legacy) return { workspace: createInitialDemoWorkspace(), updatedAt: null, version: 1 };
 
   const normalizedLegacy = normalizeWorkspace(legacy);
-  const saved = await api<{ saved: boolean; updated_at?: string | null }>('/tools/workspace', token, {
+  const saved = await api<{ saved: boolean; updated_at?: string | null; version?: number | null }>('/tools/workspace', token, {
     method: 'POST',
     body: JSON.stringify({ workspace: normalizedLegacy }),
   });
   removeLegacyWorkspace();
-  return { workspace: normalizedLegacy, updatedAt: saved.updated_at ?? null };
+  return {
+    workspace: normalizedLegacy,
+    updatedAt: saved.updated_at ?? null,
+    version: typeof saved.version === 'number' ? saved.version : 1,
+  };
 }
 
 function readSessionToken(): string | null {
@@ -251,6 +341,7 @@ export function ToolsAuthGate() {
   const [account, setAccount] = useState<Account | null>(null);
   const [workspace, setWorkspace] = useState<ToolsWorkspaceState | null>(null);
   const [workspaceUpdatedAt, setWorkspaceUpdatedAt] = useState<string | null>(null);
+  const [workspaceVersion, setWorkspaceVersion] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -316,9 +407,10 @@ export function ToolsAuthGate() {
         setToken(savedToken);
         setAccount(me.account);
         try {
-          const restored = await restoreOrMigrateWorkspace(savedToken);
+          const restored = await restoreOrMigrateWorkspace(savedToken, me.account.id);
           setWorkspace(restored.workspace);
           setWorkspaceUpdatedAt(restored.updatedAt);
+          setWorkspaceVersion(restored.version);
           setWorkspaceError('');
         } catch (err) {
           setWorkspaceError(err instanceof Error ? err.message : 'No se pudo recuperar el espacio de trabajo');
@@ -353,9 +445,10 @@ export function ToolsAuthGate() {
       setToken(result.token);
       setAccount(result.account);
       try {
-        const restored = await restoreOrMigrateWorkspace(result.token);
+        const restored = await restoreOrMigrateWorkspace(result.token, result.account.id);
         setWorkspace(restored.workspace);
         setWorkspaceUpdatedAt(restored.updatedAt);
+        setWorkspaceVersion(restored.version);
       } catch (err) {
         setWorkspaceError(err instanceof Error ? err.message : 'No se pudo recuperar el espacio de trabajo');
       }
@@ -393,9 +486,10 @@ export function ToolsAuthGate() {
       setToken(result.token);
       setAccount(result.account);
       try {
-        const restored = await restoreOrMigrateWorkspace(result.token);
+        const restored = await restoreOrMigrateWorkspace(result.token, result.account.id);
         setWorkspace(restored.workspace);
         setWorkspaceUpdatedAt(restored.updatedAt);
+        setWorkspaceVersion(restored.version);
       } catch (err) {
         setWorkspaceError(err instanceof Error ? err.message : 'No se pudo recuperar el espacio de trabajo');
       }
@@ -429,9 +523,10 @@ export function ToolsAuthGate() {
     setLoading(true);
     setWorkspaceError('');
     try {
-      const restored = await restoreOrMigrateWorkspace(token);
+      const restored = await restoreOrMigrateWorkspace(token, account?.id);
       setWorkspace(restored.workspace);
       setWorkspaceUpdatedAt(restored.updatedAt);
+      setWorkspaceVersion(restored.version);
     } catch (err) {
       setWorkspaceError(err instanceof Error ? err.message : 'No se pudo recuperar el espacio de trabajo');
     } finally {
@@ -502,7 +597,14 @@ export function ToolsAuthGate() {
         onResetDemo={() => setWorkspace(createInitialDemoWorkspace())}
         onLogout={logout}
       >
-        <App token={token} account={account} initialWorkspace={workspace} initialUpdatedAt={workspaceUpdatedAt} onLogout={logout} />
+        <App
+          token={token}
+          account={account}
+          initialWorkspace={workspace}
+          initialUpdatedAt={workspaceUpdatedAt}
+          initialVersion={workspaceVersion}
+          onLogout={logout}
+        />
       </ToolsErrorBoundary>
     );
   }

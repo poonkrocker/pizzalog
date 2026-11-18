@@ -40,7 +40,23 @@ class ToolsAuthController
                     account_id INT UNSIGNED NOT NULL PRIMARY KEY,
                     workspace_json LONGTEXT NOT NULL,
                     schema_version INT UNSIGNED NOT NULL DEFAULT 1,
+                    version INT UNSIGNED NOT NULL DEFAULT 1,
                     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+            ");
+            try {
+                $pdo->exec("ALTER TABLE tools_workspaces ADD COLUMN version INT UNSIGNED NOT NULL DEFAULT 1");
+            } catch (\Throwable $ignore) {
+                // La columna version ya existe
+            }
+            $pdo->exec("
+                CREATE TABLE IF NOT EXISTS tools_workspace_backups (
+                    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    account_id INT UNSIGNED NOT NULL,
+                    version INT UNSIGNED NOT NULL DEFAULT 1,
+                    workspace_json LONGTEXT NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_tools_ws_backups_account (account_id, id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             ");
             $pdo->exec("
