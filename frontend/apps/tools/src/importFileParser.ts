@@ -100,6 +100,9 @@ function xmlDocument(source: string, name: string): XMLDocument {
 }
 
 async function inflateRaw(data: Uint8Array): Promise<Uint8Array> {
+  if (typeof DecompressionStream !== 'function') {
+    throw new Error('Tu navegador no soporta descompresión XLSX nativa (DecompressionStream). Actualizá el navegador o importá el archivo en formato CSV.');
+  }
   const bytes = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
   const stream = new Blob([bytes]).stream().pipeThrough(
     new DecompressionStream('deflate-raw' as CompressionFormat)

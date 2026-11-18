@@ -53,6 +53,7 @@ class ToolsImportController
         @ini_set('memory_limit', '256M');
 
         if ($req->postMaxExceeded) {
+            error_log('[pizzalog-tools-import] Payload rejected (413 post_max_size exceeded) account_id=' . (int) ($req->auth['tools_account_id'] ?? 0) . ' content_length=' . $req->contentLengthBytes);
             Response::error('El envío supera el límite configurado en el servidor (post_max_size / 20 MB)', 413);
         }
 
@@ -223,11 +224,12 @@ PROMPT;
             CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_UNICODE),
         ]);
         $raw = curl_exec($ch);
+        $curlErrno = curl_errno($ch);
         $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
         if ($raw === false || $status < 200 || $status >= 300) {
-            error_log('[pizzalog-tools] DeepSeek import preview failed with HTTP ' . $status . ', using local fallback');
+            error_log('[pizzalog-tools-import] DeepSeek preview failed status=' . $status . ' curl_errno=' . $curlErrno . ', using local fallback');
             Response::ok([
                 'sheets' => $this->buildLocalMappings($sheets),
                 'ai_previews_remaining_today' => max(0, self::DAILY_AI_LIMIT - $used),

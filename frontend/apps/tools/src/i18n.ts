@@ -593,6 +593,24 @@ export interface ToolsDictionary {
   syncPreviewBtn: string;
   syncExportTitle: string;
   syncImportTitle: string;
+  syncModeLabel: string;
+  syncModeMerge: string;
+  syncModeMergeDesc: string;
+  syncModeOverwrite: string;
+  syncModeOverwriteDesc: string;
+  syncPreviewNew: string;
+  syncPreviewPreserved: string;
+  // Cloud Backups
+  bkpTitle: string;
+  bkpLead: string;
+  bkpRefreshBtn: string;
+  bkpEmpty: string;
+  bkpColVersion: string;
+  bkpColDate: string;
+  bkpColSize: string;
+  bkpRestoreBtn: string;
+  bkpRestoringBtn: string;
+  bkpRestoredOk: string;
   // Golden tests
   goldenTitle: string;
   goldenLead: string;
@@ -984,6 +1002,23 @@ export const TOOLS_I18N: Record<LocaleCode, ToolsDictionary> = {
     syncPreviewBtn: 'Previsualizar',
     syncExportTitle: '📤 Exportar a Pizzalog App (Tools → App)',
     syncImportTitle: '📥 Importar desde Pizzalog App (App → Tools)',
+    syncModeLabel: 'Protección de ediciones manuales (App → Tools)',
+    syncModeMerge: '🛡️ Conservar ediciones manuales en Tools (Recomendado)',
+    syncModeMergeDesc: 'Agrega insumos, precios y productos nuevos de App sin sobrescribir recetas ni precios manuales ya editados en Tools.',
+    syncModeOverwrite: '🔄 Sobrescribir ítems vinculados con App (autorizo reemplazo)',
+    syncModeOverwriteDesc: 'Actualiza los ítems importados con los de Pizzalog App (resguarda un backup automático previo en la nube).',
+    syncPreviewNew: 'Nuevos a incorporar:',
+    syncPreviewPreserved: 'Ediciones/ítems manuales preservados:',
+    bkpTitle: 'Copias de Seguridad en la Nube y Restauración',
+    bkpLead: 'Cada guardado automático o sincronización desde App genera un respaldo previo recuperable con 1 clic.',
+    bkpRefreshBtn: '🔄 Actualizar lista de backups',
+    bkpEmpty: 'Todavía no hay backups automáticos almacenados para esta cuenta.',
+    bkpColVersion: 'Versión',
+    bkpColDate: 'Fecha de respaldo',
+    bkpColSize: 'Tamaño',
+    bkpRestoreBtn: '⏪ Restaurar esta versión',
+    bkpRestoringBtn: 'Restaurando…',
+    bkpRestoredOk: 'Backup restaurado correctamente ✓',
     goldenTitle: 'Verificación en Vivo — Batería de 8 Casos Golden',
     goldenLead: 'Los 8 casos Golden definidos en la especificación se ejecutan en tiempo real sobre el motor puro @pizzalog/cost-engine.',
     goldenColId: 'ID Caso',
@@ -1372,6 +1407,23 @@ export const TOOLS_I18N: Record<LocaleCode, ToolsDictionary> = {
     syncPreviewBtn: 'Pré-visualizar',
     syncExportTitle: '📤 Exportar para Pizzalog App (Tools → App)',
     syncImportTitle: '📥 Importar do Pizzalog App (App → Tools)',
+    syncModeLabel: 'Proteção contra sobrescrita manual (App → Tools)',
+    syncModeMerge: '🛡️ Preservar edições manuais no Tools (Recomendado)',
+    syncModeMergeDesc: 'Adiciona novos insumos, preços e produtos do App sem sobrescrever receitas ou preços editados manualmente.',
+    syncModeOverwrite: '🔄 Sobrescrever itens vinculados ao App (autorizo)',
+    syncModeOverwriteDesc: 'Atualiza os itens importados com os dados do Pizzalog App (salva backup automático prévio na nuvem).',
+    syncPreviewNew: 'Novos a adicionar:',
+    syncPreviewPreserved: 'Itens/edições manuais preservados:',
+    bkpTitle: 'Cópias de Segurança na Nuvem e Restauração',
+    bkpLead: 'Cada salvamento ou sincronização com o App cria um ponto de restauração prévio recuperável em 1 clique.',
+    bkpRefreshBtn: '🔄 Atualizar lista de backups',
+    bkpEmpty: 'Ainda não há backups automáticos salvos nesta conta.',
+    bkpColVersion: 'Versão',
+    bkpColDate: 'Data do backup',
+    bkpColSize: 'Tamanho',
+    bkpRestoreBtn: '⏪ Restaurar esta versão',
+    bkpRestoringBtn: 'Restaurando…',
+    bkpRestoredOk: 'Backup restaurado com sucesso ✓',
     goldenTitle: 'Verificação ao Vivo — Bateria de 8 Casos Golden',
     goldenLead: 'Os 8 casos Golden definidos na especificação são executados em tempo real sobre o motor puro @pizzalog/cost-engine.',
     goldenColId: 'ID Caso',
@@ -1760,6 +1812,23 @@ export const TOOLS_I18N: Record<LocaleCode, ToolsDictionary> = {
     syncPreviewBtn: 'Preview',
     syncExportTitle: '📤 Export to Pizzalog App (Tools → App)',
     syncImportTitle: '📥 Import from Pizzalog App (App → Tools)',
+    syncModeLabel: 'Manual Edit Protection (App → Tools)',
+    syncModeMerge: '🛡️ Preserve manual edits in Tools (Recommended)',
+    syncModeMergeDesc: 'Adds new supplies, costs, and products from App without overwriting recipes or prices manually edited in Tools.',
+    syncModeOverwrite: '🔄 Overwrite App-linked records (authorized)',
+    syncModeOverwriteDesc: 'Replaces previously imported App items with current App data (creates an automatic cloud backup first).',
+    syncPreviewNew: 'New items to add:',
+    syncPreviewPreserved: 'Manual edits/items preserved:',
+    bkpTitle: 'Cloud Backups & Recovery Restore',
+    bkpLead: 'Every save or App sync keeps an automatic snapshot you can restore in one click.',
+    bkpRefreshBtn: '🔄 Refresh backups',
+    bkpEmpty: 'No cloud backups stored yet for this account.',
+    bkpColVersion: 'Version',
+    bkpColDate: 'Backup date',
+    bkpColSize: 'Size',
+    bkpRestoreBtn: '⏪ Restore version',
+    bkpRestoringBtn: 'Restoring…',
+    bkpRestoredOk: 'Backup restored successfully ✓',
     goldenTitle: 'Live Verification — 8 Golden Cases Battery',
     goldenLead: 'All 8 Golden Cases defined in the specification are evaluated in real time on the pure @pizzalog/cost-engine.',
     goldenColId: 'Case ID',

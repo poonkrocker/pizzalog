@@ -9,6 +9,11 @@ use Pizzalog\Core\Response;
 
 class ToolsAuthController
 {
+    private static function safeLogTag(string $value): string
+    {
+        return substr(hash('sha256', strtolower(trim($value))), 0, 12);
+    }
+
     public static function ensureTables(?\PDO $pdo = null): void
     {
         $pdo ??= Database::pdo();
@@ -124,6 +129,7 @@ class ToolsAuthController
         );
         $attemptQuery->execute([$emailHash, $ipHash]);
         if ((int)$attemptQuery->fetchColumn() > 10) {
+            error_log('[pizzalog-tools-auth] Login rate-limit blocked (429) tag=' . self::safeLogTag($email) . ' env=' . $environment);
             Response::error('Demasiados intentos. Esperá 15 minutos antes de volver a ingresar.', 429);
         }
 
@@ -205,13 +211,16 @@ class ToolsAuthController
             $account = $accountQuery->fetch();
             $effectiveEnv = $account && !empty($account['environment']) ? (string)$account['environment'] : $effectiveEnv;
         } elseif (!$account || empty($account['password_hash']) || !password_verify($password, (string)$account['password_hash'])) {
+            error_log('[pizzalog-tools-auth] Invalid credentials (401) tag=' . self::safeLogTag($email) . ' env=' . $effectiveEnv);
             Response::error('Email/usuario o contraseña incorrectos', 401);
         }
 
         if (!$account || (int)$account['is_active'] !== 1) {
+            error_log('[pizzalog-tools-auth] Inactive account blocked (403) account_id=' . ($account['id'] ?? 0) . ' env=' . $effectiveEnv);
             Response::error('El acceso a esta cuenta no está habilitado', 403);
         }
         if ($account['expires_at'] !== null && strtotime($account['expires_at']) <= time()) {
+            error_log('[pizzalog-tools-auth] Expired account blocked (403) account_id=' . ($account['id'] ?? 0) . ' env=' . $effectiveEnv);
             Response::error('El acceso a Pizzalog Tools ha vencido', 403);
         }
 
@@ -282,6 +291,7 @@ class ToolsAuthController
         $account = $stmt->fetch(\PDO::FETCH_ASSOC);
 
         if (!$account) {
+            error_log('[pizzalog-tools-auth] Invalid or expired activation token (404) token_tag=' . self::safeLogTag($token));
             Response::error('El enlace de activación expiró o es inválido. Si ya activaste tu cuenta, ingresá directamente con tu contraseña.', 404);
         }
 
@@ -347,7 +357,10 @@ class ToolsAuthController
 
             $toolsBaseUrl = trim((string) (Config::get('tools', [])['url'] ?? 'https://tools.pizzalog.net'), '/');
             $resetLink = "{$toolsBaseUrl}/?reset={$resetToken}";
-            \Pizzalog\Services\Mailer::sendPasswordReset($email, (string) $account['name'], $resetLink);
+            $mailSent = \Pizzalog\Services\Mailer::sendPasswordReset($email, (string) $account['name'], $resetLink);
+            if (!$mailSent) {
+                error_log('[pizzalog-tools-auth] Password reset email send failed account_id=' . (int) $account['id']);
+            }
         }
 
         Response::ok(['sent' => true]);
@@ -382,6 +395,7 @@ class ToolsAuthController
         $account = $stmt->fetch(\PDO::FETCH_ASSOC);
 
         if (!$account) {
+            error_log('[pizzalog-tools-auth] Invalid or expired reset token (404) token_tag=' . self::safeLogTag($token));
             Response::error('El enlace de recuperación venció o ya fue utilizado.', 404);
         }
 

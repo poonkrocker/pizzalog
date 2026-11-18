@@ -382,7 +382,8 @@ export function classifyIngredientCategory(name: string): 'flour' | 'dairy' | 'm
 export function decomposeRecipeCategoryCosts(
   catalog: CostCatalog,
   recipeId: string,
-  currency: string
+  currency: string,
+  existingEngine?: CostEngine
 ): {
   flourCost: number;
   dairyCost: number;
@@ -391,7 +392,7 @@ export function decomposeRecipeCategoryCosts(
   otherCost: number;
   totalCost: number;
 } {
-  const engine = new CostEngine(catalog);
+  const engine = existingEngine ?? new CostEngine(catalog);
   const res = engine.calculateRecipeCost(recipeId);
   if (res.status !== 'complete' || res.raw_unit_cost === null || res.raw_unit_cost <= 0) {
     return { flourCost: 0, dairyCost: 0, meatCost: 0, vegetablesCost: 0, otherCost: 0, totalCost: 0 };
@@ -1266,7 +1267,7 @@ export function generateProfitKitV2WorkbookBytes(input: ProfitKitWorkbookInput):
             ? 'flour'
             : 'other'
           : classifyIngredientCategory(comp.name);
-      const subCatDecomp = comp.component_type === 'subrecipe' ? decomposeRecipeCategoryCosts(input.catalog, comp.id, currency) : null;
+      const subCatDecomp = comp.component_type === 'subrecipe' ? decomposeRecipeCategoryCosts(input.catalog, comp.id, currency, engine) : null;
       const flourLineCost = comp.status !== 'complete' || comp.raw_total_cost === null ? 0 : comp.component_type === 'subrecipe' ? comp.normalized_quantity * (subCatDecomp?.flourCost ?? 0) : cat === 'flour' ? comp.raw_total_cost : 0;
       const dairyLineCost = comp.status !== 'complete' || comp.raw_total_cost === null ? 0 : comp.component_type === 'subrecipe' ? comp.normalized_quantity * (subCatDecomp?.dairyCost ?? 0) : cat === 'dairy' ? comp.raw_total_cost : 0;
       const meatLineCost = comp.status !== 'complete' || comp.raw_total_cost === null ? 0 : comp.component_type === 'subrecipe' ? comp.normalized_quantity * (subCatDecomp?.meatCost ?? 0) : cat === 'meat' ? comp.raw_total_cost : 0;
@@ -1315,7 +1316,7 @@ export function generateProfitKitV2WorkbookBytes(input: ProfitKitWorkbookInput):
     const r = prodStartRow + i;
     const prod = products[i];
     const res = prod ? engine.calculateRecipeCost(prod.id) : null;
-    const decomp = prod ? decomposeRecipeCategoryCosts(input.catalog, prod.id, currency) : null;
+    const decomp = prod ? decomposeRecipeCategoryCosts(input.catalog, prod.id, currency, engine) : null;
     const idVal = prod ? prod.id : '';
     const nameVal = prod ? prod.name : '';
     const yieldQty = res ? res.raw_yield_quantity : (prod ? prod.yield_quantity : '');

@@ -44,6 +44,148 @@ class ToolsSyncController
         };
     }
 
+    /**
+     * Convierte una cantidad de envase en Tools a la unidad destino en App respetando dimensiones físicas.
+     */
+    private static function convertQuantityForApp(
+        float $qty,
+        string $fromUnit,
+        string $toUnit,
+        ?float $densityGPerMl = null,
+        ?float $unitWeightG = null
+    ): ?float {
+        if (!is_finite($qty) || $qty <= 0) {
+            return null;
+        }
+        $fromNorm = self::normalizeCostEngineUnit($fromUnit, $fromUnit);
+        $toNorm = self::normalizeCostEngineUnit($toUnit, $toUnit);
+        if ($fromNorm === $toNorm) {
+            return $qty;
+        }
+
+        $massToG = [
+            'g' => 1.0,
+            'kg' => 1000.0,
+            'mg' => 0.001,
+            'lb' => 453.59237,
+            'oz' => 28.349523125,
+        ];
+        $volToMl = [
+            'ml' => 1.0,
+            'cc' => 1.0,
+            'L' => 1000.0,
+            'fl_oz_us' => 29.5735295625,
+            'gal_us' => 3785.411784,
+        ];
+        $countToUnit = [
+            'unit' => 1.0,
+            'dozen' => 12.0,
+        ];
+
+        $fromGrams = $massToG[$fromNorm] ?? null;
+        $toGrams = $massToG[$toNorm] ?? null;
+        if ($fromGrams !== null && $toGrams !== null) {
+            return ($qty * $fromGrams) / $toGrams;
+        }
+
+        $fromMl = $volToMl[$fromNorm] ?? null;
+        $toMl = $volToMl[$toNorm] ?? null;
+        if ($fromMl !== null && $toMl !== null) {
+            return ($qty * $fromMl) / $toMl;
+        }
+
+        $fromCount = $countToUnit[$fromNorm] ?? null;
+        $toCount = $countToUnit[$toNorm] ?? null;
+        if ($fromCount !== null && $toCount !== null) {
+            return ($qty * $fromCount) / $toCount;
+        }
+
+        // Puente explícito masa <-> volumen cuando el ingrediente define densidad_g_per_ml
+        if ($densityGPerMl !== null && $densityGPerMl > 0) {
+            if ($fromGrams !== null && $toMl !== null) {
+                $grams = $qty * $fromGrams;
+                return ($grams / $densityGPerMl) / $toMl;
+            }
+            if ($fromMl !== null && $toGrams !== null) {
+                $grams = ($qty * $fromMl) * $densityGPerMl;
+                return $grams / $toGrams;
+            }
+        }
+
+        // Puente explícito conteo <-> masa cuando el ingrediente define unit_weight_g
+        if ($unitWeightG !== null && $unitWeightG > 0) {
+            if ($fromCount !== null && $toGrams !== null) {
+                return ($qty * $fromCount * $unitWeightG) / $toGrams;
+            }
+            if ($fromGrams !== null && $toCount !== null) {
+                return (($qty * $fromGrams) / $unitWeightG) / $toCount;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Selecciona el precio de compra vigente más reciente para un ingrediente (paridad con Cost Engine).
+     */
+    private static function selectLatestPurchasePrice(string $ingredientId, array $prices, ?string $asOfDate = null): ?array
+    {
+        $candidates = [];
+        foreach ($prices as $idx => $p) {
+            if (!is_array($p) || ($p['ingredient_id'] ?? '') !== $ingredientId) {
+                continue;
+            }
+            $date = trim((string) ($p['purchase_date'] ?? ''));
+            if ($asOfDate !== null && $asOfDate !== '' && $date !== '' && $date > $asOfDate) {
+                continue;
+            }
+            $candidates[] = ['idx' => $idx, 'date' => $date, 'rec' => $p];
+        }
+        if (empty($candidates)) {
+            return null;
+        }
+        usort($candidates, static function (array $a, array $b): int {
+            $cmp = strcmp($b['date'], $a['date']);
+            return $cmp !== 0 ? $cmp : ($b['idx'] <=> $a['idx']);
+        });
+        return $candidates[0]['rec'];
+    }
+
+    /**
+     * Calcula el costo unitario utilizable en la unidad de App considerando tamaño de envase y rendimiento (%).
+     */
+    private static function computeUnitCostForApp(array $ingredient, array $prices, string $appTargetUnit): ?float
+    {
+        $ingId = (string) ($ingredient['id'] ?? '');
+        if ($ingId === '') {
+            return null;
+        }
+        if (!empty($ingredient['is_free'])) {
+            return 0.0;
+        }
+        $priceRec = self::selectLatestPurchasePrice($ingId, $prices);
+        if (!$priceRec || !is_numeric($priceRec['purchase_price'] ?? null)) {
+            return null;
+        }
+        $packPrice = (float) $priceRec['purchase_price'];
+        $packQty = is_numeric($priceRec['pack_quantity'] ?? null) && (float) $priceRec['pack_quantity'] > 0
+            ? (float) $priceRec['pack_quantity']
+            : 1.0;
+        $packUnit = (string) ($priceRec['pack_unit'] ?? ($ingredient['base_unit'] ?? $appTargetUnit));
+        $density = is_numeric($ingredient['density_g_per_ml'] ?? null) ? (float) $ingredient['density_g_per_ml'] : null;
+        $unitWeight = is_numeric($ingredient['unit_weight_g'] ?? null) ? (float) $ingredient['unit_weight_g'] : null;
+
+        $convertedPackQty = self::convertQuantityForApp($packQty, $packUnit, $appTargetUnit, $density, $unitWeight);
+        if ($convertedPackQty === null || $convertedPackQty <= 0) {
+            return null;
+        }
+        $yieldPct = is_numeric($priceRec['yield_pct'] ?? null) ? (float) $priceRec['yield_pct'] : 100.0;
+        if ($yieldPct <= 0 || $yieldPct > 100) {
+            $yieldPct = 100.0;
+        }
+        return round(($packPrice / $convertedPackQty) / ($yieldPct / 100.0), 4);
+    }
+
     private function resolveBusinessId(Request $req, \PDO $pdo): ?int
     {
         if (!empty($req->auth['business_id'])) {
@@ -153,6 +295,7 @@ class ToolsSyncController
         $appUser = $stmt->fetch(\PDO::FETCH_ASSOC);
 
         if (!$appUser || empty($appUser['password_hash']) || !password_verify($password, (string) $appUser['password_hash'])) {
+            error_log('[pizzalog-sync] Failed App link attempt account_id=' . $accountId . ' tag=' . substr(hash('sha256', $identifier), 0, 12));
             Response::error('Credenciales de Pizzalog App incorrectas o usuario sin rol administrador', 401);
         }
 
@@ -192,15 +335,21 @@ class ToolsSyncController
         }
 
         $direction = (string) $req->input('direction', 'to_app');
+        $mode = (string) $req->input('mode', 'merge_preserve_manual');
+        if (!in_array($mode, ['merge_preserve_manual', 'overwrite_app_records'], true)) {
+            $mode = 'merge_preserve_manual';
+        }
 
         if ($direction === 'from_app') {
-            $suppliesStmt = $pdo->prepare('SELECT COUNT(*) FROM supplies WHERE business_id = ? AND is_active = 1');
+            $suppliesStmt = $pdo->prepare('SELECT id, name FROM supplies WHERE business_id = ? AND is_active = 1');
             $suppliesStmt->execute([$bid]);
-            $suppliesCount = (int) $suppliesStmt->fetchColumn();
+            $appSupplies = $suppliesStmt->fetchAll(\PDO::FETCH_ASSOC);
+            $suppliesCount = count($appSupplies);
 
-            $productsStmt = $pdo->prepare('SELECT COUNT(*) FROM products WHERE business_id = ? AND is_active = 1');
+            $productsStmt = $pdo->prepare('SELECT id, name FROM products WHERE business_id = ? AND is_active = 1');
             $productsStmt->execute([$bid]);
-            $productsCount = (int) $productsStmt->fetchColumn();
+            $appProducts = $productsStmt->fetchAll(\PDO::FETCH_ASSOC);
+            $productsCount = count($appProducts);
 
             $salesTicketsCount = 0;
             $salesAggCount = 0;
@@ -221,16 +370,71 @@ class ToolsSyncController
                 $aggStmt->execute([$bid]);
                 $salesAggCount = (int) $aggStmt->fetchColumn();
             } catch (\Throwable $e) {
-                // Ignorar si no existen tablas de ventas aún
+                error_log('[pizzalog-sync] preview from_app sales query note: ' . $e->getMessage());
+            }
+
+            $wsRow = $pdo->prepare('SELECT workspace_json FROM tools_workspaces WHERE account_id = ? LIMIT 1');
+            $wsRow->execute([(int) $req->auth['tools_account_id']]);
+            $wsJson = $wsRow->fetchColumn();
+            $existingWs = $wsJson ? json_decode((string) $wsJson, true) : [];
+
+            $existingIngIds = [];
+            $manualIngCount = 0;
+            foreach ((array) ($existingWs['catalog']['ingredients'] ?? []) as $exIng) {
+                $iid = (string) ($exIng['id'] ?? '');
+                if ($iid !== '') {
+                    $existingIngIds[$iid] = true;
+                    if (!str_starts_with($iid, 'ing_app_') && !str_starts_with($iid, 'ing_')) {
+                        $manualIngCount++;
+                    } elseif (str_starts_with($iid, 'ing_') && !str_starts_with($iid, 'ing_app_') && !in_array($iid, ['ing_harina', 'ing_levadura', 'ing_sal', 'ing_agua', 'ing_tomate', 'ing_aceite', 'ing_mozzarella', 'ing_pollo', 'ing_garbanzo', 'ing_trufa', 'ing_harina_00', 'ing_levadura_fresca', 'ing_sal_fina', 'ing_aceite_oliva', 'ing_tomate_pelado', 'ing_mozzarella_fior', 'ing_albahaca_fresca', 'ing_pechuga_pollo', 'ing_trufa_negra', 'ing_caja_pizza_33', 'ing_bolsa_delivery'], true)) {
+                        $manualIngCount++;
+                    }
+                }
+            }
+            $existingRecIds = [];
+            $manualRecCount = 0;
+            foreach ((array) ($existingWs['catalog']['recipes'] ?? []) as $exRec) {
+                $rid = (string) ($exRec['id'] ?? '');
+                if ($rid !== '') {
+                    $existingRecIds[$rid] = $exRec;
+                    if (!str_starts_with($rid, 'prod_app_') && !str_starts_with($rid, 'sub_app_') && !in_array($rid, ['prod_margherita', 'prod_focaccia_a', 'prod_pollo_merma', 'prod_trufa_incompleta', 'sub_masa_poolish', 'sub_salsa', 'sub_masa_napolitana', 'sub_salsa_san_marzano', 'sub_aceite_ajo_romero'], true)) {
+                        $manualRecCount++;
+                    }
+                }
+            }
+
+            $newSuppliesToAdd = 0;
+            $existingAppLinked = 0;
+            foreach ($appSupplies as $s) {
+                $idKey = 'ing_app_' . $s['id'];
+                if (isset($existingIngIds[$idKey])) {
+                    $existingAppLinked++;
+                } else {
+                    $newSuppliesToAdd++;
+                }
+            }
+            $newProductsToAdd = 0;
+            foreach ($appProducts as $p) {
+                $pKey = 'prod_app_' . $p['id'];
+                if (!isset($existingRecIds[$pKey])) {
+                    $newProductsToAdd++;
+                } else {
+                    $existingAppLinked++;
+                }
             }
 
             Response::ok([
                 'direction' => 'from_app',
+                'mode' => $mode,
                 'summary' => [
                     'app_supplies_count' => $suppliesCount,
                     'app_products_count' => $productsCount,
                     'app_sales_tickets' => $salesTicketsCount,
                     'app_sales_history_rows' => $salesAggCount,
+                    'new_supplies_to_add' => $newSuppliesToAdd,
+                    'new_products_to_add' => $newProductsToAdd,
+                    'existing_app_linked_count' => $existingAppLinked,
+                    'manual_items_preserved' => $manualIngCount + $manualRecCount,
                 ],
             ]);
             return;
@@ -262,19 +466,12 @@ class ToolsSyncController
             $norm = mb_strtolower(trim((string) ($ing['name'] ?? '')));
             if (!$norm) continue;
 
-            $priceRec = null;
-            foreach ($toolsPrices as $p) {
-                if (($p['ingredient_id'] ?? '') === ($ing['id'] ?? '')) {
-                    $priceRec = $p;
-                    break;
-                }
-            }
-
             if (!isset($appSuppliesByName[$norm])) {
                 $newInApp++;
             } else {
+                $appUnit = (string) ($appSuppliesByName[$norm]['unit'] ?? self::normalizeAppSupplyUnit((string) ($ing['base_unit'] ?? 'kg')));
                 $currentCost = $appSuppliesByName[$norm]['cost'] !== null ? (float) $appSuppliesByName[$norm]['cost'] : null;
-                $newCost = is_numeric($priceRec['purchase_price'] ?? null) ? (float) $priceRec['purchase_price'] : null;
+                $newCost = self::computeUnitCostForApp($ing, $toolsPrices, $appUnit);
                 if ($newCost !== null && ($currentCost === null || abs($currentCost - $newCost) > 0.001)) {
                     $updatedPrices++;
                 } else {
@@ -310,6 +507,13 @@ class ToolsSyncController
         }
 
         $direction = (string) $req->input('direction', 'to_app');
+        $mode = (string) $req->input('mode', 'merge_preserve_manual');
+        if (!in_array($mode, ['merge_preserve_manual', 'overwrite_app_records'], true)) {
+            $mode = 'merge_preserve_manual';
+        }
+        $driver = (string) $pdo->getAttribute(\PDO::ATTR_DRIVER_NAME);
+        $nowExpr = $driver === 'sqlite' ? "datetime('now')" : 'NOW()';
+
         PriceListController::ensureTables();
         RecipeCostingController::ensureTables($pdo);
 
@@ -325,13 +529,14 @@ class ToolsSyncController
             $toolsIngredients = (array) ($workspace['catalog']['ingredients'] ?? []);
             $toolsPrices = (array) ($workspace['catalog']['purchase_prices'] ?? []);
             $batchId = 'sync_' . date('YmdHis') . '_' . bin2hex(random_bytes(3));
+            $forUpdate = $driver === 'sqlite' ? '' : ' FOR UPDATE';
 
             $pdo->beginTransaction();
             try {
                 $createdSupplies = 0;
                 $updatedSupplies = 0;
 
-                $selSupply = $pdo->prepare('SELECT id, cost, unit FROM supplies WHERE business_id = ? AND LOWER(name) = ? LIMIT 1 FOR UPDATE');
+                $selSupply = $pdo->prepare("SELECT id, cost, unit FROM supplies WHERE business_id = ? AND LOWER(name) = ? LIMIT 1{$forUpdate}");
                 $insSupply = $pdo->prepare('INSERT INTO supplies (business_id, name, unit, cost, is_active) VALUES (?, ?, ?, ?, 1)');
                 $updSupply = $pdo->prepare('UPDATE supplies SET cost = ?, unit = ? WHERE id = ? AND business_id = ?');
 
@@ -340,19 +545,11 @@ class ToolsSyncController
                     if ($name === '') continue;
                     $unit = self::normalizeAppSupplyUnit((string) ($ing['base_unit'] ?? 'kg'));
 
-                    $priceRec = null;
-                    foreach ($toolsPrices as $p) {
-                        if (($p['ingredient_id'] ?? '') === ($ing['id'] ?? '')) {
-                            $priceRec = $p;
-                            break;
-                        }
-                    }
-                    $cost = is_numeric($priceRec['purchase_price'] ?? null) ? round((float) $priceRec['purchase_price'], 4) : null;
-
                     $selSupply->execute([$bid, mb_strtolower($name)]);
                     $existing = $selSupply->fetch(\PDO::FETCH_ASSOC);
 
                     if (!$existing) {
+                        $cost = self::computeUnitCostForApp($ing, $toolsPrices, $unit);
                         $insSupply->execute([$bid, $name, $unit, $cost]);
                         $supplyId = (int) $pdo->lastInsertId();
                         $createdSupplies++;
@@ -364,10 +561,12 @@ class ToolsSyncController
                         }
                     } else {
                         $supplyId = (int) $existing['id'];
+                        $targetUnit = trim((string) ($existing['unit'] ?? $unit)) ?: $unit;
+                        $cost = self::computeUnitCostForApp($ing, $toolsPrices, $targetUnit);
                         $oldCost = $existing['cost'] !== null ? (float) $existing['cost'] : null;
                         if ($cost !== null && ($oldCost === null || abs($oldCost - $cost) > 0.0001)) {
-                            $updSupply->execute([$cost, $unit, $supplyId, $bid]);
-                            PriceListController::recordHistory($bid, $supplyId, $oldCost, $cost, $unit, null, 'tools_sync', [
+                            $updSupply->execute([$cost, $targetUnit, $supplyId, $bid]);
+                            PriceListController::recordHistory($bid, $supplyId, $oldCost, $cost, $targetUnit, null, 'tools_sync', [
                                 'batch_id' => $batchId,
                                 'source_name' => '1-Click Sync Tools',
                             ]);
@@ -391,8 +590,12 @@ class ToolsSyncController
                 if ($pdo->inTransaction()) {
                     $pdo->rollBack();
                 }
-                error_log('[pizzalog-sync] to_app failed: ' . $e->getMessage());
-                Response::error('Error al sincronizar datos hacia Pizzalog App: ' . $e->getMessage(), 500);
+                error_log('[pizzalog-sync] to_app failed account_id=' . (int) ($req->auth['tools_account_id'] ?? 0) . ': ' . $e->getMessage());
+                $debug = (bool) \Pizzalog\Core\Config::get('debug', false);
+                Response::error(
+                    $debug ? ('Error al sincronizar datos hacia Pizzalog App: ' . $e->getMessage()) : 'No se pudo completar la sincronización hacia Pizzalog App. Los cambios fueron revertidos sin afectar los datos existentes.',
+                    500
+                );
             }
         } else {
             // from_app: Sincronizar catálogo, productos, recetas, precios de venta e historial desde App hacia Tools
@@ -718,13 +921,14 @@ class ToolsSyncController
                 // Ignorar si falla lectura de ventas
             }
 
-            // 6. Obtener espacio de trabajo actual para preservar gastos operativos, snapshots y limpiar datos demo
-            $wsRow = $pdo->prepare('SELECT workspace_json FROM tools_workspaces WHERE account_id = ? LIMIT 1');
-            $wsRow->execute([(int) $req->auth['tools_account_id']]);
-            $wsJson = $wsRow->fetchColumn();
-            $existingWs = $wsJson ? json_decode((string) $wsJson, true) : [];
+            // 6. Obtener espacio de trabajo actual para preservar ediciones manuales, gastos y crear backup previo
+            $accountId = (int) $req->auth['tools_account_id'];
+            $wsRow = $pdo->prepare('SELECT workspace_json, version FROM tools_workspaces WHERE account_id = ? LIMIT 1');
+            $wsRow->execute([$accountId]);
+            $wsCurrentRow = $wsRow->fetch(\PDO::FETCH_ASSOC);
+            $wsJson = $wsCurrentRow ? (string) ($wsCurrentRow['workspace_json'] ?? '') : '';
+            $existingWs = $wsJson !== '' ? json_decode($wsJson, true) : [];
 
-            // Conjunto de IDs demo a eliminar para evitar duplicados y datos ficticios
             $demoIds = [
                 'prod_margherita', 'prod_focaccia_a', 'prod_pollo_merma', 'prod_trufa_incompleta',
                 'sub_masa_poolish', 'sub_salsa',
@@ -739,44 +943,133 @@ class ToolsSyncController
             $demoExpenseSet = array_flip(['exp_1', 'exp_2', 'exp_3', 'exp_4']);
             $demoSnapshotSet = array_flip(['snap_margh_sep', 'snap_margh_oct', 'snap_margh_nov']);
 
-            // Preservar recetas personalizadas existentes que no sean demo ni colisionen con las de App
-            $combinedRecipes = array_merge($subrecipes, $productRecipes);
-            $importedRecipeIds = array_flip(array_column($combinedRecipes, 'id'));
-            foreach ((array) ($existingWs['catalog']['recipes'] ?? []) as $exRec) {
-                $rid = $exRec['id'] ?? '';
-                if (!isset($demoSet[$rid]) && !isset($importedRecipeIds[$rid])) {
-                    $combinedRecipes[] = $exRec;
-                }
-            }
-
-            // Preservar insumos personalizados existentes que no sean demo
-            $importedIngIds = array_flip(array_column($ingredients, 'id'));
+            $existingIngredientsById = [];
             foreach ((array) ($existingWs['catalog']['ingredients'] ?? []) as $exIng) {
-                $iid = $exIng['id'] ?? '';
-                if (!isset($demoSet[$iid]) && !isset($importedIngIds[$iid])) {
+                $iid = (string) ($exIng['id'] ?? '');
+                if ($iid !== '' && !isset($demoSet[$iid])) {
+                    $existingIngredientsById[$iid] = $exIng;
+                }
+            }
+            $existingRecipesById = [];
+            foreach ((array) ($existingWs['catalog']['recipes'] ?? []) as $exRec) {
+                $rid = (string) ($exRec['id'] ?? '');
+                if ($rid !== '' && !isset($demoSet[$rid])) {
+                    $existingRecipesById[$rid] = $exRec;
+                }
+            }
+
+            // Fusionar ingredientes preservando metadatos técnicos manuales (densidad, unit_weight_g, is_free)
+            $preservedManualCount = 0;
+            foreach ($ingredients as &$appIng) {
+                $iid = (string) ($appIng['id'] ?? '');
+                if (isset($existingIngredientsById[$iid])) {
+                    $ex = $existingIngredientsById[$iid];
+                    if (array_key_exists('density_g_per_ml', $ex) && $ex['density_g_per_ml'] !== null) {
+                        $appIng['density_g_per_ml'] = $ex['density_g_per_ml'];
+                    }
+                    if (array_key_exists('unit_weight_g', $ex) && $ex['unit_weight_g'] !== null) {
+                        $appIng['unit_weight_g'] = $ex['unit_weight_g'];
+                    }
+                    if (!empty($ex['is_free'])) {
+                        $appIng['is_free'] = true;
+                    }
+                    if ($mode === 'merge_preserve_manual' && !empty($ex['base_unit'])) {
+                        $appIng['base_dimension'] = $ex['base_dimension'] ?? $appIng['base_dimension'];
+                        $appIng['base_unit'] = $ex['base_unit'];
+                    }
+                }
+            }
+            unset($appIng);
+
+            $importedIngIds = array_flip(array_column($ingredients, 'id'));
+            foreach ($existingIngredientsById as $iid => $exIng) {
+                if (!isset($importedIngIds[$iid])) {
                     $ingredients[] = $exIng;
+                    $preservedManualCount++;
                 }
             }
 
-            foreach ((array) ($existingWs['catalog']['purchase_prices'] ?? []) as $exP) {
-                $iid = $exP['ingredient_id'] ?? '';
-                if (!isset($demoSet[$iid]) && !isset($importedIngIds[$iid])) {
-                    $purchasePrices[] = $exP;
+            // Historial de precios: preservar TODAS las cargas manuales y evitar duplicar filas idénticas de App Sync
+            $manualAndPriorPrices = [];
+            $latestAppSyncPriceByIng = [];
+            foreach ((array) ($existingWs['catalog']['purchase_prices'] ?? []) as $exIdx => $exP) {
+                if (!is_array($exP)) continue;
+                $iid = (string) ($exP['ingredient_id'] ?? '');
+                if ($iid === '' || isset($demoSet[$iid])) continue;
+                $sup = (string) ($exP['supplier'] ?? '');
+                if ($sup === 'Pizzalog App Sync') {
+                    $latestAppSyncPriceByIng[$iid] = $exP;
+                    $manualAndPriorPrices[] = $exP;
+                } else {
+                    $manualAndPriorPrices[] = $exP;
                 }
             }
 
-            // Preservar ventas personalizadas existentes que no sean demo
+            $mergedPurchasePrices = $manualAndPriorPrices;
+            $skippedDuplicatePrices = 0;
+            foreach ($purchasePrices as $newAppPrice) {
+                $iid = (string) ($newAppPrice['ingredient_id'] ?? '');
+                $prevApp = $latestAppSyncPriceByIng[$iid] ?? null;
+                if (
+                    $prevApp !== null
+                    && is_numeric($prevApp['purchase_price'] ?? null)
+                    && is_numeric($newAppPrice['purchase_price'] ?? null)
+                    && abs((float) $prevApp['purchase_price'] - (float) $newAppPrice['purchase_price']) <= 0.0001
+                    && (string) ($prevApp['pack_unit'] ?? '') === (string) ($newAppPrice['pack_unit'] ?? '')
+                ) {
+                    $skippedDuplicatePrices++;
+                    continue;
+                }
+                $mergedPurchasePrices[] = $newAppPrice;
+            }
+
+            // Recetas y Subrecetas: en merge_preserve_manual no sobrescribir recetas ya cargadas/editadas manualmente
+            $mergedAppRecipes = [];
+            foreach (array_merge($subrecipes, $productRecipes) as $appRec) {
+                $rid = (string) ($appRec['id'] ?? '');
+                $exRec = $existingRecipesById[$rid] ?? null;
+                $existingHasFormula = $exRec !== null && (!empty($exRec['components']) || !empty($exRec['bakers_dough']) || !empty($exRec['faina']));
+                if ($mode === 'merge_preserve_manual' && $exRec !== null && ($existingHasFormula || (isset($appRec['components']) && count((array) $appRec['components']) === 0))) {
+                    $mergedAppRecipes[] = $exRec;
+                    $preservedManualCount++;
+                } else {
+                    $mergedAppRecipes[] = $appRec;
+                }
+            }
+            $importedRecipeIds = array_flip(array_column($mergedAppRecipes, 'id'));
+            foreach ($existingRecipesById as $rid => $exRec) {
+                if (!isset($importedRecipeIds[$rid])) {
+                    $mergedAppRecipes[] = $exRec;
+                    $preservedManualCount++;
+                }
+            }
+
+            // Ventas históricas: conservar registros manuales y deduplicar por id estable
             $importedSaleIds = array_flip(array_column($salesHistory, 'id'));
             foreach ((array) ($existingWs['salesHistory'] ?? []) as $exSale) {
-                $pid = $exSale['product_id'] ?? '';
-                $sid = $exSale['id'] ?? '';
+                $pid = (string) ($exSale['product_id'] ?? '');
+                $sid = (string) ($exSale['id'] ?? '');
                 if (!isset($demoSet[$pid]) && !isset($importedSaleIds[$sid]) && !str_starts_with($sid, 'sale_10_') && !str_starts_with($sid, 'sale_11_')) {
                     $salesHistory[] = $exSale;
                 }
             }
 
-            // Preservar productSalesMap existente para productos no demo
-            foreach ((array) ($existingWs['productSalesMap'] ?? []) as $k => $v) {
+            // productSalesMap: preservar precios de carta o unidades cargadas manualmente cuando el modo es conservador
+            $existingSalesMap = is_array($existingWs['productSalesMap'] ?? null) ? $existingWs['productSalesMap'] : [];
+            foreach ($productSalesMap as $k => $appPlan) {
+                $exPlan = $existingSalesMap[$k] ?? null;
+                if ($mode === 'merge_preserve_manual' && is_array($exPlan)) {
+                    $mergedPlan = $appPlan;
+                    if (array_key_exists('sellingPrice', $exPlan) && $exPlan['sellingPrice'] !== null) {
+                        $mergedPlan['sellingPrice'] = $exPlan['sellingPrice'];
+                    }
+                    if (array_key_exists('monthlyUnitsSold', $exPlan) && $exPlan['monthlyUnitsSold'] !== null) {
+                        $mergedPlan['monthlyUnitsSold'] = $exPlan['monthlyUnitsSold'];
+                    }
+                    $productSalesMap[$k] = $mergedPlan;
+                }
+            }
+            foreach ($existingSalesMap as $k => $v) {
                 if (!isset($demoSet[$k]) && !isset($productSalesMap[$k])) {
                     $productSalesMap[$k] = $v;
                 }
@@ -785,9 +1078,11 @@ class ToolsSyncController
             $bizNameStmt = $pdo->prepare('SELECT name FROM businesses WHERE id = ? LIMIT 1');
             $bizNameStmt->execute([$bid]);
             $appBusinessName = trim((string) ($bizNameStmt->fetchColumn() ?: ''));
-            $resolvedBusinessName = $appBusinessName !== ''
-                ? $appBusinessName
-                : (trim((string) ($existingWs['businessName'] ?? '')) ?: 'Mi Pizzería');
+            $existingBusinessName = trim((string) ($existingWs['businessName'] ?? ''));
+            $isDefaultBizName = $existingBusinessName === '' || $existingBusinessName === 'Mi Pizzería' || str_contains($existingBusinessName, 'Il Forno') || str_contains($existingBusinessName, 'Demo');
+            $resolvedBusinessName = ($mode === 'merge_preserve_manual' && !$isDefaultBizName)
+                ? $existingBusinessName
+                : ($appBusinessName !== '' ? $appBusinessName : ($existingBusinessName ?: 'Mi Pizzería'));
 
             $cleanExpenses = [];
             foreach ((array) ($existingWs['operatingExpenses'] ?? []) as $exExp) {
@@ -820,8 +1115,8 @@ class ToolsSyncController
                 'catalog' => [
                     'as_of_date' => $today,
                     'ingredients' => array_values($ingredients),
-                    'purchase_prices' => array_values($purchasePrices),
-                    'recipes' => array_values($combinedRecipes),
+                    'purchase_prices' => array_values($mergedPurchasePrices),
+                    'recipes' => array_values($mergedAppRecipes),
                 ],
                 'operatingExpenses' => array_values($cleanExpenses),
                 'productSalesMap' => (object) $productSalesMap,
@@ -834,31 +1129,71 @@ class ToolsSyncController
                 ],
             ];
 
-            $accountId = (int) $req->auth['tools_account_id'];
             $savedJson = json_encode($newWs, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
-            $pdo->prepare(
-                'INSERT INTO tools_workspaces (account_id, workspace_json, schema_version, version)
-                 VALUES (?, ?, 1, 1)
-                 ON DUPLICATE KEY UPDATE workspace_json = VALUES(workspace_json), schema_version = 1, version = version + 1, updated_at = NOW()'
-            )->execute([$accountId, $savedJson]);
+            if ($savedJson === false || strlen($savedJson) > 20 * 1024 * 1024) {
+                Response::error('El espacio de trabajo resultante supera el límite seguro de 20 MB', 413);
+            }
 
-            $tsStmt = $pdo->prepare('SELECT version, updated_at FROM tools_workspaces WHERE account_id = ? LIMIT 1');
-            $tsStmt->execute([$accountId]);
-            $tsRow = $tsStmt->fetch(\PDO::FETCH_ASSOC);
-            $updatedAt = $tsRow['updated_at'] ?? null;
-            $newVersion = isset($tsRow['version']) ? (int) $tsRow['version'] : 1;
+            $pdo->beginTransaction();
+            try {
+                if ($wsCurrentRow) {
+                    $curVersion = (int) ($wsCurrentRow['version'] ?? 1);
+                    try {
+                        $pdo->prepare(
+                            "INSERT INTO tools_workspace_backups (account_id, version, workspace_json, created_at)
+                             VALUES (?, ?, ?, {$nowExpr})"
+                        )->execute([$accountId, $curVersion, $wsJson]);
+                    } catch (\Throwable $ignoreBkp) {
+                        error_log('[pizzalog-sync] pre-sync backup note: ' . $ignoreBkp->getMessage());
+                    }
 
-            Response::ok([
-                'direction' => 'from_app',
-                'imported_ingredients' => count($ingredients),
-                'imported_prices' => count($purchasePrices),
-                'imported_recipes' => count($combinedRecipes),
-                'imported_products' => count($appProducts),
-                'imported_sales' => count($salesHistory),
-                'version' => $newVersion,
-                'updated_at' => $updatedAt ?: null,
-                'workspace' => $newWs,
-            ]);
+                    $newVersion = $curVersion + 1;
+                    $pdo->prepare(
+                        "UPDATE tools_workspaces
+                            SET workspace_json = ?, schema_version = 1, version = ?, updated_at = {$nowExpr}
+                          WHERE account_id = ?"
+                    )->execute([$savedJson, $newVersion, $accountId]);
+                } else {
+                    $newVersion = 1;
+                    $pdo->prepare(
+                        "INSERT INTO tools_workspaces (account_id, workspace_json, schema_version, version, updated_at)
+                         VALUES (?, ?, 1, 1, {$nowExpr})"
+                    )->execute([$accountId, $savedJson]);
+                }
+
+                $tsStmt = $pdo->prepare('SELECT version, updated_at FROM tools_workspaces WHERE account_id = ? LIMIT 1');
+                $tsStmt->execute([$accountId]);
+                $tsRow = $tsStmt->fetch(\PDO::FETCH_ASSOC);
+                $updatedAt = $tsRow['updated_at'] ?? null;
+                $finalVersion = isset($tsRow['version']) ? (int) $tsRow['version'] : $newVersion;
+
+                $pdo->commit();
+
+                Response::ok([
+                    'direction' => 'from_app',
+                    'mode' => $mode,
+                    'imported_ingredients' => count($ingredients),
+                    'imported_prices' => count($mergedPurchasePrices),
+                    'skipped_duplicate_prices' => $skippedDuplicatePrices,
+                    'preserved_manual_items' => $preservedManualCount,
+                    'imported_recipes' => count($mergedAppRecipes),
+                    'imported_products' => count($appProducts),
+                    'imported_sales' => count($salesHistory),
+                    'version' => $finalVersion,
+                    'updated_at' => $updatedAt ?: null,
+                    'workspace' => $newWs,
+                ]);
+            } catch (\Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                error_log('[pizzalog-sync] from_app failed account_id=' . $accountId . ': ' . $e->getMessage());
+                $debug = (bool) \Pizzalog\Core\Config::get('debug', false);
+                Response::error(
+                    $debug ? ('Error al importar desde Pizzalog App: ' . $e->getMessage()) : 'No se pudo completar la importación desde Pizzalog App. No se modificó tu espacio de trabajo.',
+                    500
+                );
+            }
         }
     }
 }

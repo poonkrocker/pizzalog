@@ -173,6 +173,11 @@ export function App({
   const [showMoreActions, setShowMoreActions] = useState(false);
   const [priceHistoryIngredientId, setPriceHistoryIngredientId] = useState<string | null>(null);
   const [showExchangeRatesModal, setShowExchangeRatesModal] = useState(false);
+  const [cloudBackups, setCloudBackups] = useState<Array<{ id: number; version: number; created_at: string; size_bytes: number }>>([]);
+  const [loadingBackups, setLoadingBackups] = useState(false);
+  const [restoringBackupId, setRestoringBackupId] = useState<number | null>(null);
+  const [backupNotice, setBackupNotice] = useState<string | null>(null);
+  const [syncImportMode, setSyncImportMode] = useState<'merge_preserve_manual' | 'overwrite_app_records'>('merge_preserve_manual');
   const [manualSaleForm, setManualSaleForm] = useState(() => {
     const ym = todayLocalDateString().slice(0, 7);
     const [y, m] = ym.split('-').map(Number);
@@ -937,6 +942,61 @@ export function App({
     reader.readAsText(file);
   }
 
+  async function loadCloudBackups() {
+    if (account.id === 0 || token === 'guest-demo-token') return;
+    setLoadingBackups(true);
+    try {
+      const res = await toolsFetch(`/tools/workspace/backups`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await parseToolsJsonResponse<{ ok?: boolean; data?: { backups?: Array<{ id: number; version: number; created_at: string; size_bytes: number }> } }>(res);
+      if (data.ok && Array.isArray(data.data?.backups)) {
+        setCloudBackups(data.data.backups);
+      }
+    } catch {
+      // Sin conexión o sin permisos
+    } finally {
+      setLoadingBackups(false);
+    }
+  }
+
+  async function restoreCloudBackup(backupId: number) {
+    if (account.id === 0 || token === 'guest-demo-token') return;
+    setRestoringBackupId(backupId);
+    setBackupNotice(null);
+    setImportError(null);
+    try {
+      const res = await toolsFetch(`/tools/workspace/restore`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ backup_id: backupId }),
+      });
+      const data = await parseToolsJsonResponse<{
+        ok?: boolean;
+        error?: string;
+        data?: { workspace?: any; version?: number; updated_at?: string };
+      }>(res);
+      if (!res.ok || !data.ok || !data.data?.workspace) {
+        throw new Error(data.error || 'No se pudo restaurar el backup');
+      }
+      const normalized = normalizeWorkspace(data.data.workspace);
+      if (typeof data.data.version === 'number') {
+        workspaceVersionRef.current = data.data.version;
+      }
+      if (data.data.updated_at) {
+        workspaceUpdatedAtRef.current = data.data.updated_at;
+      }
+      lastSavedJsonRef.current = JSON.stringify(normalized);
+      setState(normalized);
+      setBackupNotice(t.bkpRestoredOk);
+      void loadCloudBackups();
+    } catch (err: any) {
+      setImportError(err?.message || 'No se pudo restaurar el backup');
+    } finally {
+      setRestoringBackupId(null);
+    }
+  }
+
   async function loadSyncStatus() {
     setSyncLoading(true);
     setSyncError(null);
@@ -1006,7 +1066,7 @@ export function App({
       const res = await toolsFetch(`/tools/sync/preview`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ direction }),
+        body: JSON.stringify({ direction, ...(direction === 'from_app' ? { mode: syncImportMode } : {}) }),
       });
       const data = await parseToolsJsonResponse<{ ok?: boolean; error?: string; data?: any }>(res);
       if (!res.ok || !data.ok) throw new Error(data.error || 'Error al obtener previsualización');
@@ -1030,7 +1090,7 @@ export function App({
       const res = await toolsFetch(`/tools/sync/apply`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ direction }),
+        body: JSON.stringify({ direction, ...(direction === 'from_app' ? { mode: syncImportMode } : {}) }),
       });
       const data = await parseToolsJsonResponse<{ ok?: boolean; error?: string; data?: any }>(res);
       if (!res.ok || !data.ok || !data.data) throw new Error(data.error || 'Error al sincronizar');
@@ -1358,6 +1418,17 @@ export function App({
   }, [state, recipeResults, menuCompareMode, menuComparePeriod, menuChannelFilter]);
 
   // Cálculos de Simulación Estratégica de Negocio impulsados por CostEngine (desglose real por ingrediente y subreceta)
+  const baseDecompByProductId = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof decomposeRecipeCategoryCosts>>();
+    const baseEngine = new CostEngine(state.catalog);
+    for (const row of monthlySummary.rows) {
+      if (row.isComplete) {
+        map.set(row.prod.id, decomposeRecipeCategoryCosts(state.catalog, row.prod.id, state.currency, baseEngine));
+      }
+    }
+    return map;
+  }, [monthlySummary.rows, state.catalog, state.currency]);
+
   const simulatedBusinessResult = useMemo(() => {
     const completeRows = monthlySummary.rows.filter((r) => r.isComplete);
     const ingMap = new Map(state.catalog.ingredients.map((i) => [i.id, i]));
@@ -1406,7 +1477,9 @@ export function App({
         const basePrice = r.evaluatedPrice;
         const simPrice = Math.max(0, Math.round(basePrice * (1 + priceDeltaPct / 100)));
 
-        const decomp = decomposeRecipeCategoryCosts(state.catalog, r.prod.id, state.currency);
+        const decomp = baseDecompByProductId.get(r.prod.id) ?? {
+          flourCost: 0, dairyCost: 0, meatCost: 0, vegetablesCost: 0, otherCost: 0, totalCost: r.unitCost,
+        };
         const affectedCostShare =
           categoryFilter === 'all'
             ? r.unitCost
@@ -1495,7 +1568,7 @@ export function App({
       optimistic: optimisticScenario,
       custom: customScenario,
     };
-  }, [monthlySummary, simCategoryFilter, state.catalog, state.currency, state.defaultPackagingCost, state.defaultChannelFeePct, state.operatingExpenses, simVolumeDelta, simPriceDelta, simCostDelta]);
+  }, [monthlySummary, baseDecompByProductId, simCategoryFilter, state.catalog, state.currency, state.defaultPackagingCost, state.defaultChannelFeePct, state.operatingExpenses, simVolumeDelta, simPriceDelta, simCostDelta]);
 
   const totalMonthlyExpenses = useMemo(() => {
     const factor: Record<string, number> = { monthly: 1, weekly: 52 / 12, yearly: 1 / 12 };
@@ -1953,7 +2026,7 @@ export function App({
         <button
           type="button"
           className={`tab-btn ${activeTab === 'snapshots' ? 'tab-btn--active' : ''}`}
-          onClick={() => setActiveTab('snapshots')}
+          onClick={() => { setActiveTab('snapshots'); void loadCloudBackups(); }}
         >
           {t.tabSnapshots}
         </button>
@@ -3158,7 +3231,36 @@ export function App({
 
               <div style={{ padding: 20, border: '1px solid #e2e8f0', borderRadius: 8, background: '#fff' }}>
                 <h3 style={{ marginTop: 0 }}>{t.syncImportTitle}</h3>
-                <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
+                <div style={{ marginTop: 10, fontSize: '0.82rem' }}>
+                  <strong style={{ display: 'block', marginBottom: 6 }}>{t.syncModeLabel}</strong>
+                  <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 6, cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="syncImportMode"
+                      checked={syncImportMode === 'merge_preserve_manual'}
+                      onChange={() => setSyncImportMode('merge_preserve_manual')}
+                      style={{ marginTop: 3 }}
+                    />
+                    <span>
+                      <strong>{t.syncModeMerge}</strong>
+                      <small style={{ display: 'block', color: 'var(--muted)' }}>{t.syncModeMergeDesc}</small>
+                    </span>
+                  </label>
+                  <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="syncImportMode"
+                      checked={syncImportMode === 'overwrite_app_records'}
+                      onChange={() => setSyncImportMode('overwrite_app_records')}
+                      style={{ marginTop: 3 }}
+                    />
+                    <span>
+                      <strong>{t.syncModeOverwrite}</strong>
+                      <small style={{ display: 'block', color: 'var(--muted)' }}>{t.syncModeOverwriteDesc}</small>
+                    </span>
+                  </label>
+                </div>
+                <div style={{ display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
                   <button type="button" className="btn btn--secondary" disabled={syncLoading} onClick={() => handleSyncPreview('from_app')}>
                     {t.syncPreviewBtn}
                   </button>
@@ -3175,9 +3277,10 @@ export function App({
               <h4 style={{ margin: '0 0 10px 0' }}>{syncPreviewData.direction === 'to_app' ? 'Tools → App' : 'App → Tools'}</h4>
               {syncPreviewData.direction === 'from_app' ? (
                 <ul style={{ margin: 0, paddingLeft: 20, fontSize: '0.88rem' }}>
-                  <li>{t.ingTitle}: <strong>{syncPreviewData.summary?.app_supplies_count ?? 0}</strong></li>
-                  <li>{t.recColProduct}: <strong>{syncPreviewData.summary?.app_products_count ?? 0}</strong></li>
+                  <li>{t.ingTitle}: <strong>{syncPreviewData.summary?.app_supplies_count ?? 0}</strong> ({t.syncPreviewNew} {syncPreviewData.summary?.new_supplies_to_add ?? 0})</li>
+                  <li>{t.recColProduct}: <strong>{syncPreviewData.summary?.app_products_count ?? 0}</strong> ({t.syncPreviewNew} {syncPreviewData.summary?.new_products_to_add ?? 0})</li>
                   <li>{t.salesTitle}: <strong>{syncPreviewData.summary?.app_sales_tickets ?? 0}</strong></li>
+                  <li>{t.syncPreviewPreserved} <strong>{syncPreviewData.summary?.manual_items_preserved ?? 0}</strong></li>
                 </ul>
               ) : (
                 <ul style={{ margin: 0, paddingLeft: 20, fontSize: '0.88rem' }}>
@@ -4254,6 +4357,60 @@ export function App({
               </div>
             )}
           </div>
+
+          {account.id > 0 && token !== 'guest-demo-token' && (
+            <div className="card">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+                <div>
+                  <h2>{t.bkpTitle}</h2>
+                  <p className="lead">{t.bkpLead}</p>
+                </div>
+                <button type="button" className="btn btn--secondary" disabled={loadingBackups} onClick={() => void loadCloudBackups()}>
+                  {loadingBackups ? '…' : t.bkpRefreshBtn}
+                </button>
+              </div>
+              {backupNotice && (
+                <div className="alert-banner" style={{ background: '#e8f5e9', color: '#2e7d32', borderColor: '#86efac', marginBottom: 12 }}>
+                  {backupNotice}
+                </div>
+              )}
+              {cloudBackups.length === 0 ? (
+                <div className="empty-state">{t.bkpEmpty}</div>
+              ) : (
+                <div className="table-wrap">
+                  <table className="kit-table">
+                    <thead>
+                      <tr>
+                        <th>{t.bkpColVersion}</th>
+                        <th>{t.bkpColDate}</th>
+                        <th>{t.bkpColSize}</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cloudBackups.map((bkp) => (
+                        <tr key={bkp.id}>
+                          <td><strong>v{bkp.version}</strong> (#{bkp.id})</td>
+                          <td>{fmtDateTime(bkp.created_at)}</td>
+                          <td>{fmt(Math.max(1, Math.round(bkp.size_bytes / 1024)), 0)} KB</td>
+                          <td>
+                            <button
+                              type="button"
+                              className="btn btn--sm btn--secondary"
+                              disabled={restoringBackupId !== null}
+                              onClick={() => void restoreCloudBackup(bkp.id)}
+                            >
+                              {restoringBackupId === bkp.id ? t.bkpRestoringBtn : t.bkpRestoreBtn}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="card">
             <h2>{t.goldenTitle} (Cost Engine v{goldenCases.version})</h2>
