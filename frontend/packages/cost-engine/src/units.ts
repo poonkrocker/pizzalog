@@ -184,9 +184,6 @@ export function areUnitsCompatible(
   ingredient?: Pick<Ingredient, 'name' | 'density_g_per_ml' | 'unit_weight_g'>
 ): boolean {
   try {
-    const f = (fromUnit ?? '').trim().toLowerCase();
-    const t = (toUnit ?? '').trim().toLowerCase();
-    if (f === t) return true;
     convertQuantity(1, fromUnit, toUnit, ingredient);
     return true;
   } catch {

@@ -642,6 +642,10 @@ function buildWorksheetXml(rows: RowSpec[], colWidths: number[] = []): string {
         cellsXml.push(`<c r="${cellRef}"${styleAttr}${tAttr}><f>${escapeXml(obj.f)}</f>${valTag}</c>`);
       } else if (typeof obj.v === 'number' && Number.isFinite(obj.v)) {
         cellsXml.push(`<c r="${cellRef}"${styleAttr}><v>${obj.v}</v></c>`);
+      } else if (obj.v === '' || obj.v === null || obj.v === undefined) {
+        if (styleAttr) {
+          cellsXml.push(`<c r="${cellRef}"${styleAttr}/>`);
+        }
       } else {
         cellsXml.push(`<c r="${cellRef}"${styleAttr} t="inlineStr"><is><t>${escapeXml(obj.v)}</t></is></c>`);
       }
@@ -673,7 +677,7 @@ export function generateProfitKitV2WorkbookBytes(input: ProfitKitWorkbookInput):
   const currency = input.currency || 'ARS';
 
   const engine = new CostEngine(input.catalog);
-  const ingredients = input.catalog.ingredients;
+  const ingredients = input.catalog.ingredients.filter((i) => i.is_active !== false);
   const subrecipes = input.catalog.recipes.filter((r) => r.recipe_type === 'subrecipe');
   const products = input.catalog.recipes.filter((r) => r.recipe_type === 'product');
 
@@ -688,12 +692,12 @@ export function generateProfitKitV2WorkbookBytes(input: ProfitKitWorkbookInput):
 
   const subStartRow = 5;
   const subEndRow = subStartRow + subrecipes.length + subSpareRows - 1;
-  const subLinesHeaderRow = subEndRow + 4;
+  const subLinesHeaderRow = subEndRow + 3;
   const subLinesStartRow = subLinesHeaderRow + 1;
 
   const prodStartRow = 5;
   const prodEndRow = prodStartRow + products.length + prodSpareRows - 1;
-  const prodLinesHeaderRow = prodEndRow + 4;
+  const prodLinesHeaderRow = prodEndRow + 3;
   const prodLinesStartRow = prodLinesHeaderRow + 1;
 
   // =========================================================================
@@ -823,7 +827,7 @@ export function generateProfitKitV2WorkbookBytes(input: ProfitKitWorkbookInput):
       : '';
     const packQty = priceRec?.pack_quantity ?? (ing ? 1 : '');
     const packUnit = priceRec?.pack_unit ?? (ing ? ing.base_unit : '');
-    const yieldPct = priceRec?.yield_pct ?? (ing ? 100 : '');
+    const yieldPct = priceRec?.usable_quantity !== undefined && priceRec?.usable_quantity !== null && typeof priceRec.pack_quantity === 'number' && priceRec.pack_quantity > 0 ? (priceRec.usable_quantity / priceRec.pack_quantity) * 100 : (priceRec?.yield_pct ?? 100);
     const isFreeNum = ing?.is_free ? 1 : (ing ? 0 : '');
     const densityVal = ing?.density_g_per_ml ?? '';
     const unitWeightVal = ing?.unit_weight_g ?? '';
@@ -882,7 +886,7 @@ export function generateProfitKitV2WorkbookBytes(input: ProfitKitWorkbookInput):
       { f: `IF('${S[2]}'!A${r}="","",IF('${S[2]}'!F${r}="",0,'${S[2]}'!F${r}))`, v: ing ? (typeof rawPrice === 'number' ? rawPrice : 0) : '', s: 4 },
       { f: `IF('${S[2]}'!A${r}="","",'${S[2]}'!I${r})`, v: packInBaseVal, s: 4 },
       { v: yieldPct, s: 3 },
-      { f: `IF(A${r}="","",100-F${r})`, v: typeof yieldPct === 'number' ? 100 - yieldPct : '', s: 6 },
+      { f: `IF(A${r}="","",100-F${r})`, v: ing && typeof yieldPct === 'number' ? 100 - yieldPct : '', s: 6 },
       { f: `IF(A${r}="","",E${r}*(F${r}/100))`, v: usableQty, s: 4 },
       { f: `IF(A${r}="","",IF('${S[2]}'!L${r}=1,0,IF(OR(D${r}<=0,E${r}<=0),"",D${r}/E${r})))`, v: grossUnitCost, s: 5 },
       { f: `IF(A${r}="","",IF('${S[2]}'!L${r}=1,0,IF(OR(D${r}<=0,E${r}<=0,F${r}<=0,F${r}>100),"",I${r}/(F${r}/100))))`, v: usableUnitCost, s: 5 },
@@ -929,7 +933,7 @@ export function generateProfitKitV2WorkbookBytes(input: ProfitKitWorkbookInput):
       { v: priceNum, s: 3 },
       { v: pp.pack_quantity, s: 3 },
       { v: pp.pack_unit, s: 3 },
-      { v: pp.yield_pct ?? 100, s: 3 },
+      { v: pp.usable_quantity !== undefined && pp.usable_quantity !== null && typeof pp.pack_quantity === 'number' && pp.pack_quantity > 0 ? (pp.usable_quantity / pp.pack_quantity) * 100 : (pp.yield_pct ?? 100), s: 3 },
       { f: `IF(A${r}="","",SUMIF('${S[3]}'!$A$${ingStartRow}:$A$${ingEndRow},A${r},'${S[3]}'!$J$${ingStartRow}:$J$${ingEndRow}))`, v: 0, s: 5 },
     ]);
   });
@@ -950,6 +954,7 @@ export function generateProfitKitV2WorkbookBytes(input: ProfitKitWorkbookInput):
     baseUnit: string;
     unitCost: number | null;
     totalCost: number | null;
+    category?: string;
     status: string;
   }> = [];
 
@@ -966,6 +971,7 @@ export function generateProfitKitV2WorkbookBytes(input: ProfitKitWorkbookInput):
         unitCost: comp.raw_unit_cost,
         totalCost: comp.raw_total_cost,
         status: comp.status === 'complete' ? L.statusComplete : L.statusIncompletePrice,
+        category: classifyIngredientCategory(comp.name),
       });
     }
   }
@@ -986,6 +992,9 @@ export function generateProfitKitV2WorkbookBytes(input: ProfitKitWorkbookInput):
       { v: 'Estado Subreceta', s: 2 },
       { v: `Costo / Unidad Rend. (${currency})`, s: 2 },
       { v: `Costo por kg / L (${currency})`, s: 2 },
+      { v: `Costo Harinas / Unid. (${currency})`, s: 2 },
+      { v: `Costo Lácteos / Unid. (${currency})`, s: 2 },
+      { v: `Costo Carnes / Unid. (${currency})`, s: 2 },
     ],
   ];
 
@@ -994,6 +1003,7 @@ export function generateProfitKitV2WorkbookBytes(input: ProfitKitWorkbookInput):
     const r = subStartRow + i;
     const sub = subrecipes[i];
     const res = sub ? engine.calculateRecipeCost(sub.id) : null;
+    const subDecomp = sub ? decomposeRecipeCategoryCosts(input.catalog, sub.id, currency) : null;
     const idVal = sub ? sub.id : '';
     const nameVal = sub ? sub.name : '';
     const yieldQty = res ? res.raw_yield_quantity : (sub ? sub.yield_quantity : '');
@@ -1014,6 +1024,9 @@ export function generateProfitKitV2WorkbookBytes(input: ProfitKitWorkbookInput):
       { f: `IF(A${r}="","",IF(AND(F${r}=0,COUNTIF($A$${subLinesStartRow}:$A$${subLinesEndRow},A${r})>0),"${L.statusComplete}","${L.statusIncompleteRecipe}"))`, v: statusVal, s: statusVal === L.statusIncompleteRecipe ? 7 : 0 },
       { f: `IF(OR(A${r}="",G${r}<>"${L.statusComplete}",C${r}<=0),"",E${r}/C${r})`, v: unitCostVal, s: 5 },
       { f: `IF(H${r}="","",IF(OR(D${r}="g",D${r}="ml",D${r}="cc"),H${r}*1000,H${r}))`, v: costPerKgVal, s: 4 },
+      { f: `IF(OR(A${r}="",G${r}<>"${L.statusComplete}",C${r}<=0),0,SUMIFS($H$${subLinesStartRow}:$H$${subLinesEndRow},$A$${subLinesStartRow}:$A$${subLinesEndRow},A${r},$J$${subLinesStartRow}:$J$${subLinesEndRow},"flour")/C${r})`, v: sub ? (subDecomp?.flourCost ?? 0) : '', s: 5 },
+      { f: `IF(OR(A${r}="",G${r}<>"${L.statusComplete}",C${r}<=0),0,SUMIFS($H$${subLinesStartRow}:$H$${subLinesEndRow},$A$${subLinesStartRow}:$A$${subLinesEndRow},A${r},$J$${subLinesStartRow}:$J$${subLinesEndRow},"dairy")/C${r})`, v: sub ? (subDecomp?.dairyCost ?? 0) : '', s: 5 },
+      { f: `IF(OR(A${r}="",G${r}<>"${L.statusComplete}",C${r}<=0),0,SUMIFS($H$${subLinesStartRow}:$H$${subLinesEndRow},$A$${subLinesStartRow}:$A$${subLinesEndRow},A${r},$J$${subLinesStartRow}:$J$${subLinesEndRow},"meat")/C${r})`, v: sub ? (subDecomp?.meatCost ?? 0) : '', s: 5 },
     ]);
   }
 
@@ -1029,6 +1042,7 @@ export function generateProfitKitV2WorkbookBytes(input: ProfitKitWorkbookInput):
     { v: `Costo Utilizable / Base (${currency})`, s: 2 },
     { v: `Costo Total Componente (${currency})`, s: 2 },
     { v: 'Estado Componente', s: 2 },
+    { v: 'Rubro Sensibilidad', s: 2 },
   ]);
 
   const totalSubLineRows = subLinesEndRow - subLinesStartRow + 1;
@@ -1043,7 +1057,7 @@ export function generateProfitKitV2WorkbookBytes(input: ProfitKitWorkbookInput):
       { v: line?.qtyInBase ?? '', s: 3 },
       { v: line?.baseUnit ?? '', s: 3 },
       {
-        f: `IF(C${r}="","",SUMIF('${S[3]}'!$A$${ingStartRow}:$A$${ingEndRow},C${r},'${S[3]}'!$J$${ingStartRow}:$J$${ingEndRow}))`,
+        f: `IF(C${r}="","",IF(COUNTIF('${S[3]}'!$A$${ingStartRow}:$A$${ingEndRow},C${r})>0,SUMIF('${S[3]}'!$A$${ingStartRow}:$A$${ingEndRow},C${r},'${S[3]}'!$J$${ingStartRow}:$J$${ingEndRow}),SUMIF($A$${subStartRow}:$A$${subEndRow},C${r},$H$${subStartRow}:$H$${subEndRow})))`,
         v: line?.unitCost ?? '',
         s: 5,
       },
@@ -1053,9 +1067,13 @@ export function generateProfitKitV2WorkbookBytes(input: ProfitKitWorkbookInput):
         s: 4,
       },
       {
-        f: `IF(C${r}="","",IF(COUNTIFS('${S[3]}'!$A$${ingStartRow}:$A$${ingEndRow},C${r},'${S[3]}'!$L$${ingStartRow}:$L$${ingEndRow},"${L.statusComplete}")+COUNTIFS('${S[3]}'!$A$${ingStartRow}:$A$${ingEndRow},C${r},'${S[3]}'!$L$${ingStartRow}:$L$${ingEndRow},"${L.statusFree}")>0,"${L.statusComplete}","${L.statusIncompletePrice}"))`,
+        f: `IF(C${r}="","",IF(E${r}<=0,"${L.statusIncompletePrice}",IF(COUNTIFS('${S[3]}'!$A$${ingStartRow}:$A$${ingEndRow},C${r},'${S[3]}'!$L$${ingStartRow}:$L$${ingEndRow},"${L.statusComplete}")+COUNTIFS('${S[3]}'!$A$${ingStartRow}:$A$${ingEndRow},C${r},'${S[3]}'!$L$${ingStartRow}:$L$${ingEndRow},"${L.statusFree}")+COUNTIFS($A$${subStartRow}:$A$${subEndRow},C${r},$G$${subStartRow}:$G$${subEndRow},"${L.statusComplete}")>0,"${L.statusComplete}","${L.statusIncompletePrice}")))`,
         v: line?.status ?? '',
         s: line && line.status !== L.statusComplete ? 7 : 0,
+      },
+      {
+        v: line?.category ?? '',
+        s: 3,
       },
     ]);
   }
@@ -1078,6 +1096,9 @@ export function generateProfitKitV2WorkbookBytes(input: ProfitKitWorkbookInput):
     costUnit: string;
     unitCost: number | null;
     totalCost: number | null;
+    flourLineCost?: number;
+    dairyLineCost?: number;
+    meatLineCost?: number;
     status: string;
   }> = [];
 
@@ -1090,7 +1111,14 @@ export function generateProfitKitV2WorkbookBytes(input: ProfitKitWorkbookInput):
             ? 'flour'
             : 'other'
           : classifyIngredientCategory(comp.name);
+      const subCatDecomp = comp.component_type === 'subrecipe' ? decomposeRecipeCategoryCosts(input.catalog, comp.id, currency) : null;
+      const flourLineCost = comp.status !== 'complete' || comp.raw_total_cost === null ? 0 : comp.component_type === 'subrecipe' ? comp.normalized_quantity * (subCatDecomp?.flourCost ?? 0) : cat === 'flour' ? comp.raw_total_cost : 0;
+      const dairyLineCost = comp.status !== 'complete' || comp.raw_total_cost === null ? 0 : comp.component_type === 'subrecipe' ? comp.normalized_quantity * (subCatDecomp?.dairyCost ?? 0) : cat === 'dairy' ? comp.raw_total_cost : 0;
+      const meatLineCost = comp.status !== 'complete' || comp.raw_total_cost === null ? 0 : comp.component_type === 'subrecipe' ? comp.normalized_quantity * (subCatDecomp?.meatCost ?? 0) : cat === 'meat' ? comp.raw_total_cost : 0;
       prodComponentLines.push({
+        flourLineCost,
+        dairyLineCost,
+        meatLineCost,
         prodId: prod.id,
         prodName: prod.name,
         compType: comp.component_type,
@@ -1151,9 +1179,9 @@ export function generateProfitKitV2WorkbookBytes(input: ProfitKitWorkbookInput):
       { f: `IF(A${r}="","",COUNTIFS($A$${prodLinesStartRow}:$A$${prodLinesEndRow},A${r},$K$${prodLinesStartRow}:$K$${prodLinesEndRow},"<>${L.statusComplete}"))`, v: incCountVal, s: 0 },
       { f: `IF(A${r}="","",IF(AND(F${r}=0,COUNTIF($A$${prodLinesStartRow}:$A$${prodLinesEndRow},A${r})>0),"${L.statusComplete}","${L.statusIncompleteRecipe}"))`, v: statusVal, s: statusVal === L.statusIncompleteRecipe ? 7 : 0 },
       { f: `IF(OR(A${r}="",G${r}<>"${L.statusComplete}",C${r}<=0),"",E${r}/C${r})`, v: unitCostVal, s: 4 },
-      { f: `IF(OR(A${r}="",G${r}<>"${L.statusComplete}"),0,SUMIFS($J$${prodLinesStartRow}:$J$${prodLinesEndRow},$A$${prodLinesStartRow}:$A$${prodLinesEndRow},A${r},$F$${prodLinesStartRow}:$F$${prodLinesEndRow},"flour")/C${r})`, v: decomp?.flourCost ?? '', s: 4 },
-      { f: `IF(OR(A${r}="",G${r}<>"${L.statusComplete}"),0,SUMIFS($J$${prodLinesStartRow}:$J$${prodLinesEndRow},$A$${prodLinesStartRow}:$A$${prodLinesEndRow},A${r},$F$${prodLinesStartRow}:$F$${prodLinesEndRow},"dairy")/C${r})`, v: decomp?.dairyCost ?? '', s: 4 },
-      { f: `IF(OR(A${r}="",G${r}<>"${L.statusComplete}"),0,SUMIFS($J$${prodLinesStartRow}:$J$${prodLinesEndRow},$A$${prodLinesStartRow}:$A$${prodLinesEndRow},A${r},$F$${prodLinesStartRow}:$F$${prodLinesEndRow},"meat")/C${r})`, v: decomp?.meatCost ?? '', s: 4 },
+      { f: `IF(OR(A${r}="",G${r}<>"${L.statusComplete}",C${r}<=0),0,SUMIF($A$${prodLinesStartRow}:$A$${prodLinesEndRow},A${r},$L$${prodLinesStartRow}:$L$${prodLinesEndRow})/C${r})`, v: decomp?.flourCost ?? '', s: 4 },
+      { f: `IF(OR(A${r}="",G${r}<>"${L.statusComplete}",C${r}<=0),0,SUMIF($A$${prodLinesStartRow}:$A$${prodLinesEndRow},A${r},$M$${prodLinesStartRow}:$M$${prodLinesEndRow})/C${r})`, v: decomp?.dairyCost ?? '', s: 4 },
+      { f: `IF(OR(A${r}="",G${r}<>"${L.statusComplete}",C${r}<=0),0,SUMIF($A$${prodLinesStartRow}:$A$${prodLinesEndRow},A${r},$N$${prodLinesStartRow}:$N$${prodLinesEndRow})/C${r})`, v: decomp?.meatCost ?? '', s: 4 },
     ]);
   }
 
@@ -1171,6 +1199,9 @@ export function generateProfitKitV2WorkbookBytes(input: ProfitKitWorkbookInput):
     { v: `Costo Unitario (${currency})`, s: 2 },
     { v: `Costo Total Línea (${currency})`, s: 2 },
     { v: 'Estado Componente', s: 2 },
+    { v: `Costo Harinas Línea (${currency})`, s: 2 },
+    { v: `Costo Lácteos Línea (${currency})`, s: 2 },
+    { v: `Costo Carnes Línea (${currency})`, s: 2 },
   ]);
 
   const totalProdLineRows = prodLinesEndRow - prodLinesStartRow + 1;
@@ -1197,9 +1228,24 @@ export function generateProfitKitV2WorkbookBytes(input: ProfitKitWorkbookInput):
         s: 4,
       },
       {
-        f: `IF(D${r}="","",IF(C${r}="subrecipe",IF(COUNTIFS('${S[5]}'!$A$${subStartRow}:$A$${subEndRow},D${r},'${S[5]}'!$G$${subStartRow}:$G$${subEndRow},"${L.statusComplete}")>0,"${L.statusComplete}","${L.statusIncompleteRecipe}"),IF(COUNTIFS('${S[3]}'!$A$${ingStartRow}:$A$${ingEndRow},D${r},'${S[3]}'!$L$${ingStartRow}:$L$${ingEndRow},"${L.statusComplete}")+COUNTIFS('${S[3]}'!$A$${ingStartRow}:$A$${ingEndRow},D${r},'${S[3]}'!$L$${ingStartRow}:$L$${ingEndRow},"${L.statusFree}")>0,"${L.statusComplete}","${L.statusIncompleteRecipe}")))`,
+        f: `IF(D${r}="","",IF(G${r}<=0,"${L.statusIncompleteRecipe}",IF(C${r}="subrecipe",IF(COUNTIFS('${S[5]}'!$A$${subStartRow}:$A$${subEndRow},D${r},'${S[5]}'!$G$${subStartRow}:$G$${subEndRow},"${L.statusComplete}")>0,"${L.statusComplete}","${L.statusIncompleteRecipe}"),IF(COUNTIFS('${S[3]}'!$A$${ingStartRow}:$A$${ingEndRow},D${r},'${S[3]}'!$L$${ingStartRow}:$L$${ingEndRow},"${L.statusComplete}")+COUNTIFS('${S[3]}'!$A$${ingStartRow}:$A$${ingEndRow},D${r},'${S[3]}'!$L$${ingStartRow}:$L$${ingEndRow},"${L.statusFree}")>0,"${L.statusComplete}","${L.statusIncompleteRecipe}"))))`,
         v: line?.status ?? '',
         s: line && line.status !== L.statusComplete ? 7 : 0,
+      },
+      {
+        f: `IF(OR(A${r}="",D${r}="",K${r}<>"${L.statusComplete}"),0,IF(C${r}="subrecipe",G${r}*SUMIF('${S[5]}'!$A$${subStartRow}:$A$${subEndRow},D${r},'${S[5]}'!$J$${subStartRow}:$J$${subEndRow}),IF(F${r}="flour",J${r},0)))`,
+        v: line ? (line.flourLineCost ?? 0) : '',
+        s: 4,
+      },
+      {
+        f: `IF(OR(A${r}="",D${r}="",K${r}<>"${L.statusComplete}"),0,IF(C${r}="subrecipe",G${r}*SUMIF('${S[5]}'!$A$${subStartRow}:$A$${subEndRow},D${r},'${S[5]}'!$K$${subStartRow}:$K$${subEndRow}),IF(F${r}="dairy",J${r},0)))`,
+        v: line ? (line.dairyLineCost ?? 0) : '',
+        s: 4,
+      },
+      {
+        f: `IF(OR(A${r}="",D${r}="",K${r}<>"${L.statusComplete}"),0,IF(C${r}="subrecipe",G${r}*SUMIF('${S[5]}'!$A$${subStartRow}:$A$${subEndRow},D${r},'${S[5]}'!$L$${subStartRow}:$L$${subEndRow}),IF(F${r}="meat",J${r},0)))`,
+        v: line ? (line.meatLineCost ?? 0) : '',
+        s: 4,
       },
     ]);
   }
@@ -1392,7 +1438,7 @@ export function generateProfitKitV2WorkbookBytes(input: ProfitKitWorkbookInput):
       { f: `IF(A${r}="","",IF(C${r}<>"${L.statusComplete}","${L.statusBlocked}",D${r}/(E${r}/100)))`, v: p ? c.minPrice : '', s: p && !c.isComplete ? 7 : 4 },
       { f: `IF(A${r}="","",IF(C${r}<>"${L.statusComplete}","${L.statusBlocked}",CEILING(G${r},F${r})))`, v: p ? c.suggPrice : '', s: p && !c.isComplete ? 7 : 4 },
       { v: c.manualPrice, s: 3 },
-      { f: `IF(A${r}="","",IF(C${r}<>"${L.statusComplete}","",IF(I${r}>0,I${r},H${r})))`, v: p && c.isComplete ? c.evalPrice : '', s: 4 },
+      { f: `IF(A${r}="","",IF(C${r}<>"${L.statusComplete}","",IF(N(I${r})>0,I${r},H${r})))`, v: p && c.isComplete ? c.evalPrice : '', s: 4 },
       { f: `IF(or(A${r}="",C${r}<>"${L.statusComplete}"),"",J${r}-D${r})`.replace('or(', 'OR('), v: p && c.isComplete ? c.grossProfit : '', s: 4 },
       { f: `IF(OR(A${r}="",C${r}<>"${L.statusComplete}",J${r}<=0),"",(D${r}/J${r})*100)`, v: p && c.isComplete ? c.fcPct : '', s: 6 },
       { f: `IF(OR(A${r}="",C${r}<>"${L.statusComplete}",J${r}<=0),"",(K${r}/J${r})*100)`, v: p && c.isComplete ? c.marginPct : '', s: 6 },
@@ -1604,7 +1650,7 @@ export function generateProfitKitV2WorkbookBytes(input: ProfitKitWorkbookInput):
     [{ v: 'PARÁMETRO DE SIMULACIÓN (Celdas Amarillas Interactivas)', s: 2 }, { v: 'Variación (%)', s: 2 }, { v: 'Explicación del Impacto en Fórmulas', s: 2 }],
     [{ v: 'Variación General de Precios de Venta (%)', s: 0 }, { v: 0, s: 3 }, { v: 'Ajusta el precio de carta proyectado de cada producto', s: 0 }],
     [{ v: 'Variación de Volumen de Unidades Vendidas (%)', s: 0 }, { v: 0, s: 3 }, { v: 'Ajusta las unidades vendidas mensuales proyectadas', s: 0 }],
-    [{ v: 'Aumento en Harinas, Sémolas y Masas (%)', s: 0 }, { v: 10, s: 3 }, { v: 'Se aplica SOLO a la porción del costo que proviene de harinas/masas (Col I de Hoja 06)', s: 0 }],
+    [{ v: 'Aumento en Harinas, Sémolas y Masas (%)', s: 0 }, { v: 0, s: 3 }, { v: 'Se aplica SOLO a la porción del costo que proviene de harinas/masas (Col I de Hoja 06)', s: 0 }],
     [{ v: 'Aumento en Lácteos y Quesos (%)', s: 0 }, { v: 0, s: 3 }, { v: 'Se aplica SOLO a la porción del costo que proviene de lácteos/quesos (Col J de Hoja 06)', s: 0 }],
     [{ v: 'Aumento en Carnes, Pollo y Fiambres (%)', s: 0 }, { v: 0, s: 3 }, { v: 'Se aplica SOLO a la porción del costo que proviene de carnes/fiambres (Col K de Hoja 06)', s: 0 }],
     [{ v: 'Aumento en Resto de Insumos (%)', s: 0 }, { v: 0, s: 3 }, { v: 'Se aplica al resto de los ingredientes de la receta', s: 0 }],
@@ -1637,11 +1683,8 @@ export function generateProfitKitV2WorkbookBytes(input: ProfitKitWorkbookInput):
     const rSim = simProdStartRow + i;
     const c = prodEvaluatedCache[i]!;
     const p = c.prod;
-    const decomp = p ? decomposeRecipeCategoryCosts(input.catalog, p.id, currency) : null;
-    const simCostCache = p && c.isComplete && decomp
-      ? c.unitCost + decomp.flourCost * 0.10
-      : 0;
-    const simDeltaCache = p && c.isComplete ? simCostCache - c.unitCost : 0;
+    const simCostCache = p && c.isComplete ? c.unitCost : 0;
+    const simDeltaCache = 0;
 
     sheet12Rows.push([
       { f: `IF('${S[6]}'!A${r6}="","",'${S[6]}'!A${r6})`, v: p?.id ?? '', s: 0 },
@@ -1832,8 +1875,8 @@ export function generateProfitKitV2WorkbookBytes(input: ProfitKitWorkbookInput):
     { name: S[2], rows: sheet02Rows, widths: [16, 34, 16, 14, 14, 18, 14, 14, 22, 16, 16, 18, 24] },
     { name: S[3], rows: sheet03Rows, widths: [16, 34, 14, 18, 18, 20, 14, 20, 22, 24, 22, 28] },
     { name: S[4], rows: sheet04Rows, widths: [16, 32, 16, 24, 18, 14, 14, 16, 24] },
-    { name: S[5], rows: sheet05Rows, widths: [18, 34, 18, 28, 22, 18, 22, 22, 24] },
-    { name: S[6], rows: sheet06Rows, widths: [18, 34, 20, 18, 28, 18, 22, 22, 22, 22, 24] },
+    { name: S[5], rows: sheet05Rows, widths: [18, 34, 18, 28, 22, 18, 22, 22, 24, 22, 22, 22] },
+    { name: S[6], rows: sheet06Rows, widths: [18, 34, 20, 18, 28, 18, 22, 22, 22, 22, 24, 22, 22, 22] },
     { name: S[7], rows: sheet07Rows, widths: [16, 34, 22, 18, 18, 16, 18, 18, 18, 18, 18, 16, 16, 16, 22] },
     { name: S[8], rows: sheet08Rows, widths: [16, 34, 20, 18, 18, 18, 22, 22, 22, 18] },
     { name: S[9], rows: sheet09Rows, widths: [16, 34, 20, 16, 20, 18, 20, 16, 16, 22, 22] },
@@ -1884,6 +1927,7 @@ ${overridesXml}
   <sheets>
 ${sheetsTagXml}
   </sheets>
+  <calcPr calcId="191029" calcMode="auto" fullCalcOnLoad="1" forceFullCalc="1"/>
 </workbook>`,
     'xl/_rels/workbook.xml.rels': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">

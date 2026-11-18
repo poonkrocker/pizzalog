@@ -709,6 +709,20 @@ export class CostEngine {
             ingredient_name: ingId,
             reason: 'missing_ingredient',
           });
+          warnings.push(`El ingrediente "${ingId}" no existe en el catálogo. La receta permanece incompleta.`);
+          breakdowns.push({
+            component_type: 'ingredient',
+            id: ingId,
+            name: ingId,
+            quantity: comp.quantity,
+            unit: comp.unit,
+            normalized_quantity: comp.quantity,
+            cost_unit: comp.unit,
+            raw_unit_cost: null,
+            raw_total_cost: null,
+            total_cost: null,
+            status: 'incomplete',
+          });
           continue;
         }
         if (!ingredient.is_active) {
@@ -717,6 +731,20 @@ export class CostEngine {
             ingredient_id: ingredient.id,
             ingredient_name: ingredient.name,
             reason: 'inactive_ingredient',
+          });
+          warnings.push(`El ingrediente "${ingredient.name}" está inactivo. La receta permanece incompleta.`);
+          breakdowns.push({
+            component_type: 'ingredient',
+            id: ingredient.id,
+            name: ingredient.name,
+            quantity: comp.quantity,
+            unit: comp.unit,
+            normalized_quantity: comp.quantity,
+            cost_unit: ingredient.base_unit,
+            raw_unit_cost: null,
+            raw_total_cost: null,
+            total_cost: null,
+            status: 'incomplete',
           });
           continue;
         }

@@ -157,7 +157,8 @@ describe('Excel v2 Workbook (14 Sheets 00..13) & Ingredient-Level Cost Decomposi
       // Check Sheet 05 (Subrecipes) uses SUMIF against Sheet 03 (Yields)
       assert.match(entries['xl/worksheets/sheet6.xml'], /SUMIF\(/, 'Sheet 05 (sheet6.xml) must use SUMIF formulas');
       // Check Sheet 06 (Products) uses SUMIF / SUMIFS for recipe cost and category decomposition
-      assert.match(entries['xl/worksheets/sheet7.xml'], /SUMIFS\(/, 'Sheet 06 (sheet7.xml) must decompose category costs via SUMIFS');
+      assert.match(entries['xl/worksheets/sheet6.xml'], /SUMIFS\(/, 'Sheet 05 (sheet6.xml) must decompose subrecipe categories via SUMIFS');
+      assert.match(entries['xl/worksheets/sheet7.xml'], /COUNTIFS\(/, 'Sheet 06 (sheet7.xml) must decompose category costs via SUMIF/COUNTIFS');
       // Check Sheet 07 (Pricing) uses CEILING and blocks incomplete products
       assert.match(entries['xl/worksheets/sheet8.xml'], /CEILING\(/, 'Sheet 07 (sheet8.xml) must use CEILING formula');
       // Check Sheet 13 (Mathematical Validation) has all 8 Golden Cases CE-001..CE-008
