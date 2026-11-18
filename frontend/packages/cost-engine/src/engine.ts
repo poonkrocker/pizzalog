@@ -646,6 +646,13 @@ export class CostEngine {
         effectiveYieldQty = expanded.yieldQuantityG;
         effectiveYieldUnit = 'g';
       }
+    } else if (recipe.faina) {
+      const expanded = expandFainaSpec(recipe.faina);
+      effectiveComponents = expanded.components;
+      if (!effectiveYieldQty || effectiveYieldQty <= 0) {
+        effectiveYieldQty = expanded.totalWeightG;
+        effectiveYieldUnit = 'g';
+      }
     }
 
     if (!Number.isFinite(effectiveYieldQty) || effectiveYieldQty <= 0) {
@@ -684,6 +691,14 @@ export class CostEngine {
         continue;
       }
 
+      if (!Number.isFinite(comp.quantity) || comp.quantity < 0) {
+        throw new CostEngineValidationError(
+          'INCOMPATIBLE_UNITS',
+          `La cantidad del componente debe ser un número finito no negativo (recibido: ${comp.quantity})`,
+          { quantity: comp.quantity, recipeId: recipe.id }
+        );
+      }
+
       if (comp.component_type === 'ingredient') {
         const ingId = comp.ingredient_id ?? '';
         const ingredient = this.ingredientsById.get(ingId);
@@ -702,6 +717,32 @@ export class CostEngine {
             ingredient_id: ingredient.id,
             ingredient_name: ingredient.name,
             reason: 'inactive_ingredient',
+          });
+          continue;
+        }
+
+        if (comp.quantity === 0) {
+          isComplete = false;
+          missingInputs.push({
+            ingredient_id: ingredient.id,
+            ingredient_name: ingredient.name,
+            reason: 'zero_quantity',
+          });
+          warnings.push(
+            `El ingrediente "${ingredient.name}" tiene cantidad 0 (pendiente de definir gramaje). La receta permanece incompleta.`
+          );
+          breakdowns.push({
+            component_type: 'ingredient',
+            id: ingredient.id,
+            name: ingredient.name,
+            quantity: 0,
+            unit: comp.unit,
+            normalized_quantity: 0,
+            cost_unit: ingredient.base_unit,
+            raw_unit_cost: null,
+            raw_total_cost: null,
+            total_cost: null,
+            status: 'incomplete',
           });
           continue;
         }
@@ -769,6 +810,32 @@ export class CostEngine {
 
         if (subRecipe.currency.toUpperCase() !== recipe.currency.toUpperCase()) {
           resolveCurrencyMultiplier(subRecipe.currency, recipe.currency, this.exchangeRates, this.asOfDate);
+        }
+
+        if (comp.quantity === 0) {
+          isComplete = false;
+          missingInputs.push({
+            ingredient_id: subRecipe.id,
+            ingredient_name: subRecipe.name,
+            reason: 'zero_quantity',
+          });
+          warnings.push(
+            `La subreceta "${subRecipe.name}" tiene cantidad 0 (pendiente de definir gramaje). La receta permanece incompleta.`
+          );
+          breakdowns.push({
+            component_type: 'subrecipe',
+            id: subRecipe.id,
+            name: subRecipe.name,
+            quantity: 0,
+            unit: comp.unit,
+            normalized_quantity: 0,
+            cost_unit: subResult.yield_unit,
+            raw_unit_cost: null,
+            raw_total_cost: null,
+            total_cost: null,
+            status: 'incomplete',
+          });
+          continue;
         }
 
         const normalizedQty = convertQuantity(
@@ -1078,11 +1145,14 @@ export function calculatePortfolioScenario(input: PortfolioScenarioInput): Portf
     input.cost_delta_pct <= -100 ||
     input.price_delta_pct <= -100 ||
     !Number.isFinite(roundingIncrement) ||
-    roundingIncrement <= 0
+    roundingIncrement <= 0 ||
+    !Number.isFinite(targetFoodCostPct) ||
+    targetFoodCostPct <= 0 ||
+    targetFoodCostPct >= 100
   ) {
     throw new CostEngineValidationError(
       'INVALID_PRICING_PARAMETERS',
-      'Las variaciones deben ser finitas y mayores a -100%; el redondeo debe ser positivo.'
+      'Las variaciones deben ser finitas y mayores a -100%, el redondeo positivo y target_food_cost_pct entre 0 y 100.'
     );
   }
 

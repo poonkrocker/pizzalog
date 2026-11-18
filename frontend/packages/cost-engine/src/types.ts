@@ -120,12 +120,13 @@ export interface Recipe {
   currency: string;
   components?: RecipeComponent[];
   bakers_dough?: BakersDoughSpec;
+  faina?: FainaSpec;
 }
 
 export interface MissingInput {
   ingredient_id: string;
   ingredient_name: string;
-  reason: 'missing_purchase_price' | 'missing_ingredient' | 'inactive_ingredient';
+  reason: 'missing_purchase_price' | 'missing_ingredient' | 'inactive_ingredient' | 'zero_quantity';
 }
 
 export interface ComponentCostBreakdown {

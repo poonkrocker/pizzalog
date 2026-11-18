@@ -53,6 +53,7 @@ export function getUnitDefinition(unit: string): UnitDefinition {
  * - Misma dimensión: conversión directa exacta.
  * - Masa ↔ Volumen: exige `density_g_per_ml > 0` explícita en el ingrediente.
  * - Conteo ↔ Masa: exige `unit_weight_g > 0` explícito en el ingrediente.
+ * - Conteo ↔ Volumen: exige `unit_weight_g > 0` y `density_g_per_ml > 0` explícitos en el ingrediente.
  * - De lo contrario lanza CostEngineValidationError (nunca devuelve la cantidad sin convertir).
  */
 export function convertQuantity(
@@ -132,13 +133,50 @@ export function convertQuantity(
     }
   }
 
+  // Conversión Conteo ↔ Volumen (requiere unit_weight_g > 0 y density_g_per_ml > 0 explícitos)
+  if (
+    (fromDef.dimension === 'count' && toDef.dimension === 'volume') ||
+    (fromDef.dimension === 'volume' && toDef.dimension === 'count')
+  ) {
+    const unitWeightG = ingredient?.unit_weight_g;
+    const density = ingredient?.density_g_per_ml;
+    if (
+      unitWeightG === undefined ||
+      unitWeightG === null ||
+      !Number.isFinite(unitWeightG) ||
+      unitWeightG <= 0 ||
+      density === undefined ||
+      density === null ||
+      !Number.isFinite(density) ||
+      density <= 0
+    ) {
+      const label = ingredient?.name ? ` para "${ingredient.name}"` : '';
+      throw new CostEngineValidationError(
+        'INCOMPATIBLE_UNITS',
+        `No se puede convertir entre ${fromUnit} (${fromDef.dimension}) y ${toUnit} (${toDef.dimension})${label} sin unit_weight_g > 0 y density_g_per_ml > 0 explícitos.`,
+        { fromUnit, toUnit, ingredient: ingredient?.name }
+      );
+    }
+
+    if (fromDef.dimension === 'count' && toDef.dimension === 'volume') {
+      const units = quantity * fromDef.toCanonicalFactor;
+      const grams = units * unitWeightG;
+      const ml = grams / density;
+      return ml / toDef.toCanonicalFactor;
+    } else {
+      const ml = quantity * fromDef.toCanonicalFactor;
+      const grams = ml * density;
+      const units = grams / unitWeightG;
+      return units / toDef.toCanonicalFactor;
+    }
+  }
+
   throw new CostEngineValidationError(
     'INCOMPATIBLE_UNITS',
     `Dimensiones incompatibles entre "${fromUnit}" (${fromDef.dimension}) y "${toUnit}" (${toDef.dimension}).`,
     { fromUnit, toUnit }
   );
 }
-
 
 export function areUnitsCompatible(
   fromUnit: string,
