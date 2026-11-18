@@ -19,3 +19,20 @@ CGIPassAuth On
     Header set Cache-Control "no-cache, no-store, must-revalidate"
   </FilesMatch>
 </IfModule>
+
+# Límites de tamaño de envío y ejecución para api-proxy.php (hasta 20 MB)
+LimitRequestBody 26214400
+<IfModule mod_php8.c>
+  php_value upload_max_filesize 25M
+  php_value post_max_size 25M
+  php_value max_execution_time 120
+  php_value max_input_time 120
+  php_value memory_limit 256M
+</IfModule>
+<IfModule lsapi_module>
+  php_value upload_max_filesize 25M
+  php_value post_max_size 25M
+  php_value max_execution_time 120
+  php_value max_input_time 120
+  php_value memory_limit 256M
+</IfModule>

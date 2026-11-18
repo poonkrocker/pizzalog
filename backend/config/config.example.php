@@ -61,14 +61,21 @@ return [
     ],
 
     'tools' => [
-        'url' => 'https://tools.pizzalog.net',
+        'env' => getenv('PIZZALOG_TOOLS_ENV') ?: 'production',
+        'url' => getenv('PIZZALOG_TOOLS_URL') ?: 'https://tools.pizzalog.net',
+        'staging_url' => getenv('PIZZALOG_TOOLS_STAGING_URL') ?: 'https://tools-staging.pizzalog.net',
+        'api_url' => getenv('PIZZALOG_TOOLS_API_URL') ?: 'https://api.pizzalog.net',
+        'staging_api_url' => getenv('PIZZALOG_TOOLS_STAGING_API_URL') ?: 'https://api-staging.pizzalog.net',
     ],
 
     'cors' => [
         // Orígenes autorizados a consumir la API.
         'allowed_origins' => [
             'https://tools.pizzalog.net',
+            'https://tools-staging.pizzalog.net',
+            'https://staging-tools.pizzalog.net',
             'https://staging.pizzalog.net',
+            'https://app-staging.pizzalog.net',
             'https://app.pizzalog.net',    // panel de administración / TPV web
             'https://pizzalog.net',        // La Carta pública (pizzalog.net/{slug})
             'http://localhost:5173',       // desarrollo local panel (Vite)

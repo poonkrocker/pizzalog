@@ -13,7 +13,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json",
-    "test": "tsc -p tsconfig.build.json && node --test tests/golden.test.mjs tests/bakers-dough.test.mjs tests/faina.test.mjs tests/portfolio-scenario.test.mjs tests/purchase-price-selection.test.mjs tests/workbook-v2.test.mjs tests/engine-audit-1-1.test.mjs tests/recipes-20-suite-1-2.test.mjs tests/units-conversions-1-3.test.mjs tests/yield-waste-1-4.test.mjs tests/nested-subrecipes-1-5.test.mjs tests/incomplete-recipes-1-6.test.mjs tests/cross-interface-parity-1-7.test.mjs tests/excel-v2-audit-2-1-to-2-4.test.mjs tests/excel-v2-audit-2-5-to-2-8.test.mjs tests/security-persistence-3-1-to-3-9.test.mjs tests/import-export-4-1-to-4-7.test.mjs"
+    "test": "tsc -p tsconfig.build.json && node --test tests/golden.test.mjs tests/bakers-dough.test.mjs tests/faina.test.mjs tests/portfolio-scenario.test.mjs tests/purchase-price-selection.test.mjs tests/workbook-v2.test.mjs tests/engine-audit-1-1.test.mjs tests/recipes-20-suite-1-2.test.mjs tests/units-conversions-1-3.test.mjs tests/yield-waste-1-4.test.mjs tests/nested-subrecipes-1-5.test.mjs tests/incomplete-recipes-1-6.test.mjs tests/cross-interface-parity-1-7.test.mjs tests/excel-v2-audit-2-1-to-2-4.test.mjs tests/excel-v2-audit-2-5-to-2-8.test.mjs tests/security-persistence-3-1-to-3-9.test.mjs tests/import-export-4-1-to-4-7.test.mjs tests/server-limits-staging-4-8-7-1.test.mjs tests/e2e-journey-5-1-to-5-12.test.mjs tests/i18n-regional-6-1-to-6-6.test.mjs"
   },
   "dependencies": {
     "@pizzalog/cost-engine-fixtures": "workspace:*"

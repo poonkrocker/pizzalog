@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  areUnitsCompatible,
   CostEngine,
   CostEngineValidationError,
   calculatePricingScenario,
@@ -9,8 +10,14 @@ import {
   createCostSnapshot,
   decomposeRecipeCategoryCosts,
   expandBakersDoughSpec,
+  formatCalendarDate,
   formatDecimal,
+  formatHistoricalDateTime,
+  formatLocaleNumber,
+  parseLocaleNumber,
   selectEffectivePurchasePrice,
+  todayLocalDateString,
+  toLocalIsoTimestamp,
   type Dimension,
   type Recipe,
   type RecipeComponent,
@@ -18,20 +25,21 @@ import {
 } from '@pizzalog/cost-engine';
 import { goldenCases } from '@pizzalog/cost-engine-fixtures';
 import {
-  I18N,
   createInitialDemoWorkspace,
   createEmptyWorkspace,
   isDemoWorkspace,
   normalizeWorkspace,
   type LocaleCode,
   type OperatingExpenseItem,
+  type SalesImportRecord,
   type ToolsWorkspaceState,
 } from './demoData';
 import { CommercialPlansModal } from './CommercialPlansModal';
 import { ContextualHelpModal, type HelpTopic } from './ContextualHelpModal';
 import { ExecutiveReportModal } from './ExecutiveReportModal';
+import { ExchangeRatesModal, PriceHistoryModal } from './PriceHistoryModal';
 import { downloadCustomProfitKitXlsx, downloadTemplateProfitKitXlsx } from './xlsxExporter';
-import { TOOLS_I18N } from './i18n';
+import { TOOLS_I18N, type ToolsDictionary } from './i18n';
 import { parseImportFile, type ParsedImportSheet } from '@pizzalog/price-list/file';
 import {
   detectPriceListColumns,
@@ -49,37 +57,37 @@ const ALL_UNITS: UnitCode[] = ['g', 'kg', 'mg', 'lb', 'oz', 'ml', 'cc', 'L', 'fl
 
 type ToolsAccount = { id: number; email: string; name: string; expires_at?: string | null };
 
-
-
-const IMPORT_FIELD_LABELS: Record<ImportSheetMapping['kind'], Array<[string, string]>> = {
-  ingredients: [
-    ['name', 'Nombre del insumo'], ['base_unit', 'Unidad base'], ['base_dimension', 'Dimensión'],
-    ['purchase_price', 'Precio de compra'], ['currency', 'Moneda'], ['pack_quantity', 'Cantidad del envase'],
-    ['pack_unit', 'Unidad del envase'], ['yield_pct', 'Rendimiento utilizable (%)'],
-    ['density_g_per_ml', 'Densidad (g/ml)'], ['unit_weight_g', 'Peso por unidad (g)'], ['supplier', 'Proveedor'],
-    ['purchase_date', 'Fecha del precio'],
-  ],
-  purchase_prices: [
-    ['ingredient_name', 'Nombre del insumo'], ['purchase_price', 'Precio de compra'], ['currency', 'Moneda'],
-    ['pack_quantity', 'Cantidad del envase'], ['pack_unit', 'Unidad del envase'],
-    ['yield_pct', 'Rendimiento utilizable (%)'], ['supplier', 'Proveedor'], ['purchase_date', 'Fecha del precio'],
-  ],
-  recipes: [
-    ['recipe_name', 'Nombre de receta'], ['recipe_type', 'Tipo de receta'], ['yield_quantity', 'Rendimiento'],
-    ['yield_unit', 'Unidad de rendimiento'], ['component_name', 'Ingrediente del componente'],
-    ['component_quantity', 'Cantidad del componente'], ['component_unit', 'Unidad del componente'],
-  ],
-  operating_expenses: [
-    ['expense_name', 'Concepto del gasto'], ['expense_category', 'Categoría'], ['expense_period', 'Período'],
-    ['expense_amount', 'Importe'],
-  ],
-  sales: [
-    ['product_name', 'Producto'], ['quantity', 'Unidades vendidas'], ['period_start', 'Inicio del período'],
-    ['period_end', 'Fin del período'], ['channel', 'Canal'], ['gross_revenue', 'Venta bruta'],
-    ['net_revenue', 'Venta neta'], ['source', 'Origen'],
-  ],
-  unknown: [],
-};
+function getImportFieldLabels(t: ToolsDictionary): Record<ImportSheetMapping['kind'], Array<[string, string]>> {
+  return {
+    ingredients: [
+      ['name', t.ingColName], ['base_unit', t.ingColDimBase], ['base_dimension', 'Dimensión'],
+      ['purchase_price', t.ingColPrice], ['currency', t.currencyLabel], ['pack_quantity', t.ingColPackQty],
+      ['pack_unit', t.ingColPackUnit], ['yield_pct', t.ingColYield],
+      ['density_g_per_ml', t.ingColDensity], ['unit_weight_g', t.ingColUnitWeight], ['supplier', t.ingHistorySupplier],
+      ['purchase_date', t.ingHistoryDate],
+    ],
+    purchase_prices: [
+      ['ingredient_name', t.ingColName], ['purchase_price', t.ingColPrice], ['currency', t.currencyLabel],
+      ['pack_quantity', t.ingColPackQty], ['pack_unit', t.ingColPackUnit],
+      ['yield_pct', t.ingColYield], ['supplier', t.ingHistorySupplier], ['purchase_date', t.ingHistoryDate],
+    ],
+    recipes: [
+      ['recipe_name', t.builderNameLabel], ['recipe_type', t.impSheetKindLabel], ['yield_quantity', t.builderYieldLabel],
+      ['yield_unit', t.builderYieldUnitLabel], ['component_name', t.recSimColComponent],
+      ['component_quantity', t.prodColTotalQty], ['component_unit', t.builderYieldUnitLabel],
+    ],
+    operating_expenses: [
+      ['expense_name', t.expColName], ['expense_category', t.expColCategory], ['expense_period', t.expColPeriod],
+      ['expense_amount', t.expColAmount],
+    ],
+    sales: [
+      ['product_name', t.recColProduct], ['quantity', t.salesColUnits], ['period_start', t.salesColPeriod],
+      ['period_end', t.salesColPeriod], ['channel', t.salesColChannel], ['gross_revenue', t.salesColGrossRev],
+      ['net_revenue', t.salesColNetRev], ['source', t.salesColSource],
+    ],
+    unknown: [],
+  };
+}
 
 export function App({
   token,
@@ -87,6 +95,7 @@ export function App({
   initialWorkspace,
   initialUpdatedAt,
   initialVersion,
+  toolsEnvironment = 'production',
   onLogout,
 }: {
   token: string;
@@ -94,6 +103,7 @@ export function App({
   initialWorkspace: ToolsWorkspaceState;
   initialUpdatedAt?: string | null;
   initialVersion?: number | null;
+  toolsEnvironment?: 'staging' | 'production';
   onLogout: () => void;
 }) {
   const [state, setState] = useState<ToolsWorkspaceState>(() => normalizeWorkspace(initialWorkspace));
@@ -154,13 +164,37 @@ export function App({
   const [isDoughMode, setIsDoughMode] = useState<boolean>(false);
   const [builderError, setBuilderError] = useState<string | null>(null);
 
-  // Modales comerciales, reportes, ayuda contextual y confirmación de demo
+  // Modales comerciales, reportes, ayuda contextual, historial de precios, tipos de cambio y confirmación de demo
   const [showPlansModal, setShowPlansModal] = useState(false);
   const [showReportModal, setShowReportModal] = useState(false);
   const [showHelpModal, setShowHelpModal] = useState(false);
   const [helpTopic, setHelpTopic] = useState<HelpTopic>('units');
   const [showClearDemoConfirm, setShowClearDemoConfirm] = useState(false);
   const [showMoreActions, setShowMoreActions] = useState(false);
+  const [priceHistoryIngredientId, setPriceHistoryIngredientId] = useState<string | null>(null);
+  const [showExchangeRatesModal, setShowExchangeRatesModal] = useState(false);
+  const [manualSaleForm, setManualSaleForm] = useState(() => {
+    const ym = todayLocalDateString().slice(0, 7);
+    const [y, m] = ym.split('-').map(Number);
+    const lastDay = new Date(Date.UTC(y || 2026, m || 1, 0)).getUTCDate();
+    return {
+      productId: '',
+      quantity: 50,
+      channel: 'Salón',
+      periodStart: `${ym}-01`,
+      periodEnd: `${ym}-${String(lastDay).padStart(2, '0')}`,
+      grossRevenue: '',
+    };
+  });
+
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.documentElement.lang = state.locale;
+    }
+    try {
+      localStorage.setItem('pizzalog_tools_locale', state.locale);
+    } catch { /* ignore */ }
+  }, [state.locale]);
 
   // Filtros y Comparación de Ingeniería de Menú
   const [menuPeriodFilter, setMenuPeriodFilter] = useState<string>('all');
@@ -294,7 +328,12 @@ export function App({
     return () => window.clearTimeout(timer);
   }, [state, token, account.id, onlineRetryTick]);
 
-  const t = TOOLS_I18N[state.locale] ?? TOOLS_I18N['es-AR'];
+  const loc: LocaleCode = state.locale === 'pt-BR' || state.locale === 'en' ? state.locale : 'es-AR';
+  const t = TOOLS_I18N[loc] ?? TOOLS_I18N['es-AR'];
+  const fmt = (value: number, dec = 2) => formatLocaleNumber(value, loc, dec);
+  const fmtDate = (value: string | null | undefined) => formatCalendarDate(value, loc);
+  const fmtDateTime = (value: string | null | undefined) => formatHistoricalDateTime(value, loc);
+  const importFieldLabels = useMemo(() => getImportFieldLabels(t), [t]);
   const canChangeCurrency =
     state.catalog.recipes.length === 0 &&
     !state.catalog.purchase_prices.some((p) => Number(p.purchase_price) > 0) &&
@@ -353,6 +392,9 @@ export function App({
   function addIngredient() {
     const nextNum = state.catalog.ingredients.length + 1;
     const id = `ing_custom_${Date.now()}`;
+    const isUs = state.unitSystem === 'us_customary';
+    const baseUnit: UnitCode = isUs ? 'oz' : 'g';
+    const packUnit: UnitCode = isUs ? 'lb' : 'kg';
     setState((prev) => ({
       ...prev,
       catalog: {
@@ -361,9 +403,9 @@ export function App({
           ...prev.catalog.ingredients,
           {
             id,
-            name: `Nuevo Insumo #${nextNum}`,
+            name: `${loc === 'en' ? 'New Ingredient' : loc === 'pt-BR' ? 'Novo Insumo' : 'Nuevo Insumo'} #${nextNum}`,
             base_dimension: 'mass',
-            base_unit: 'g',
+            base_unit: baseUnit,
             is_active: true,
           },
         ],
@@ -371,10 +413,11 @@ export function App({
           ...prev.catalog.purchase_prices,
           {
             ingredient_id: id,
-            purchase_price: 1000,
+            purchase_date: todayLocalDateString(),
+            purchase_price: null,
             currency: prev.currency,
             pack_quantity: 1,
-            pack_unit: 'kg',
+            pack_unit: packUnit,
             yield_pct: 100,
           },
         ],
@@ -467,23 +510,23 @@ export function App({
     if (!editingRecipe) return;
     setBuilderError(null);
     if (!editingRecipe.name.trim()) {
-      setBuilderError('El nombre de la receta es obligatorio.');
+      setBuilderError(t.builderErrNameRequired);
       return;
     }
     if (editingRecipe.bakers_dough) {
       const flourTotal = editingRecipe.bakers_dough.flours.reduce((sum, flour) => sum + (flour.share_pct ?? 0), 0);
       if (Math.abs(flourTotal - 100) > 0.01) {
-        setBuilderError(`La mezcla de harinas debe sumar 100% (actual: ${formatDecimal(flourTotal, 1)}%).`);
+        setBuilderError(`${t.builderErrFlourSum} (${fmt(flourTotal, 1)}%).`);
         return;
       }
       if (editingRecipe.bakers_dough.yield_basis === 'measured_yield' &&
           !(Number(editingRecipe.bakers_dough.measured_yield_g) > 0)) {
-        setBuilderError('Indicá un rendimiento medido mayor a cero.');
+        setBuilderError(t.builderErrMeasuredYield);
         return;
       }
     }
-    if (editingRecipe.components && editingRecipe.components.length === 0) {
-      setBuilderError('Agregá al menos un componente a la receta.');
+    if (!editingRecipe.bakers_dough && (!editingRecipe.components || editingRecipe.components.length === 0)) {
+      setBuilderError(t.builderErrNoComponents);
       return;
     }
 
@@ -500,9 +543,9 @@ export function App({
       testEngine.calculateRecipeCost(editingRecipe.id);
     } catch (err) {
       if (err instanceof CostEngineValidationError) {
-        setBuilderError(`[${err.code}] ${err.message}`);
+        setBuilderError(err.message);
       } else {
-        setBuilderError(err instanceof Error ? err.message : 'Error de validación en la receta');
+        setBuilderError(err instanceof Error ? err.message : t.recSimIncompleteErr);
       }
       return;
     }
@@ -580,7 +623,7 @@ export function App({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `pizzalog-profit-kit-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `pizzalog-profit-kit-${todayLocalDateString()}.json`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -604,11 +647,11 @@ export function App({
         },
         body: JSON.stringify({ sheets: previewSampleSheets }),
       });
-      const payload = (await response.json()) as {
+      const payload = await parseToolsJsonResponse<{
         ok?: boolean;
         error?: string;
         data?: { sheets: ImportSheetMapping[]; ai_previews_remaining_today: number; note?: string; mapping_mode?: 'local' | 'ai' };
-      };
+      }>(response);
       if (!response.ok || !payload.ok || !payload.data) {
         throw new Error(payload.error ?? 'No se pudo analizar el archivo');
       }
@@ -700,7 +743,7 @@ export function App({
       const backupUrl = URL.createObjectURL(backup);
       const backupLink = document.createElement('a');
       backupLink.href = backupUrl;
-      backupLink.download = `pizzalog-tools-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      backupLink.download = `pizzalog-tools-backup-${todayLocalDateString()}.json`;
       backupLink.click();
       URL.revokeObjectURL(backupUrl);
     }
@@ -832,7 +875,7 @@ export function App({
   }
 
   function confirmPriceListApply() {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayLocalDateString();
     const toApply = priceListMatches.filter((m, idx) => priceListSelectedRows[idx] && m.target_id && m.new_price_per_unit != null);
     if (!toApply.length) return;
 
@@ -901,7 +944,7 @@ export function App({
       const res = await toolsFetch(`/tools/sync/status`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      const data = await res.json();
+      const data = await parseToolsJsonResponse<{ ok?: boolean; data?: any }>(res);
       if (data.ok && data.data) {
         setSyncStatus(data.data);
       }
@@ -923,13 +966,34 @@ export function App({
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ email: syncLinkEmail, password: syncLinkPassword }),
       });
-      const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.error || 'Error al vincular cuenta');
+      const data = await parseToolsJsonResponse<{ ok?: boolean; error?: string; data?: any }>(res);
+      if (!res.ok || !data.ok || !data.data) throw new Error(data.error || 'Error al vincular cuenta');
       setSyncStatus(data.data);
-      setSyncNotice(`¡Vinculación exitosa con "${data.data.business_name}"!`);
+      setSyncNotice(`✓ "${data.data.business_name}"`);
       setSyncLinkPassword('');
     } catch (err: any) {
       setSyncError(err?.message || 'No se pudo vincular la cuenta');
+    } finally {
+      setSyncLoading(false);
+    }
+  }
+
+  async function handleUnlinkApp() {
+    setSyncLoading(true);
+    setSyncError(null);
+    setSyncNotice(null);
+    try {
+      const res = await toolsFetch(`/tools/sync/unlink-app`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      });
+      const data = await parseToolsJsonResponse<{ ok?: boolean; error?: string; data?: any }>(res);
+      if (!res.ok || !data.ok) throw new Error(data.error || 'No se pudo desvincular');
+      setSyncStatus({ linked: false });
+      setSyncPreviewData(null);
+      setSyncNotice(t.syncUnlinkBtn + ' ✓');
+    } catch (err: any) {
+      setSyncError(err?.message || 'No se pudo desvincular');
     } finally {
       setSyncLoading(false);
     }
@@ -944,7 +1008,7 @@ export function App({
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ direction }),
       });
-      const data = await res.json();
+      const data = await parseToolsJsonResponse<{ ok?: boolean; error?: string; data?: any }>(res);
       if (!res.ok || !data.ok) throw new Error(data.error || 'Error al obtener previsualización');
       setSyncPreviewData(data.data);
     } catch (err: any) {
@@ -956,8 +1020,8 @@ export function App({
 
   async function handleSyncApply(direction: 'to_app' | 'from_app') {
     if (!confirm(direction === 'to_app'
-      ? '¿Exportar insumos y costos desde Tools hacia Pizzalog App?'
-      : '¿Importar catálogo de Pizzalog App a Tools?')) return;
+      ? `${t.syncExportTitle}?`
+      : `${t.syncImportTitle}?`)) return;
 
     setSyncLoading(true);
     setSyncError(null);
@@ -968,11 +1032,11 @@ export function App({
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ direction }),
       });
-      const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.error || 'Error al sincronizar');
+      const data = await parseToolsJsonResponse<{ ok?: boolean; error?: string; data?: any }>(res);
+      if (!res.ok || !data.ok || !data.data) throw new Error(data.error || 'Error al sincronizar');
 
       if (direction === 'to_app') {
-        setSyncNotice(`Sincronización completada hacia Pizzalog App: ${data.data.created_supplies} insumos creados, ${data.data.updated_supplies} precios actualizados.`);
+        setSyncNotice(`✓ ${data.data.created_supplies} / ${data.data.updated_supplies}`);
       } else {
         if (data.data?.workspace) {
           workspaceUpdatedAtRef.current = data.data.updated_at ?? workspaceUpdatedAtRef.current;
@@ -986,7 +1050,7 @@ export function App({
           const wsRes = await toolsFetch(`/tools/workspace`, {
             headers: { Authorization: `Bearer ${token}` },
           });
-          const wsData = await wsRes.json();
+          const wsData = await parseToolsJsonResponse<{ ok?: boolean; data?: any }>(wsRes);
           if (wsData.ok && wsData.data?.workspace) {
             workspaceUpdatedAtRef.current = wsData.data.updated_at ?? data.data?.updated_at ?? null;
             if (typeof wsData.data.version === 'number') {
@@ -999,7 +1063,7 @@ export function App({
         }
         const importedProds = data.data.imported_products ?? data.data.imported_recipes ?? 0;
         const importedSales = data.data.imported_sales ?? 0;
-        setSyncNotice(`Sincronización completada desde Pizzalog App: se cargaron ${data.data.imported_ingredients} insumos, ${importedProds} productos y ${importedSales} registros de ventas.`);
+        setSyncNotice(`✓ ${data.data.imported_ingredients} · ${importedProds} · ${importedSales}`);
       }
       setSyncPreviewData(null);
     } catch (err: any) {
@@ -1007,6 +1071,78 @@ export function App({
     } finally {
       setSyncLoading(false);
     }
+  }
+
+  function addManualSale() {
+    const product = state.catalog.recipes.find((r) => r.recipe_type === 'product' && r.id === manualSaleForm.productId)
+      ?? state.catalog.recipes.find((r) => r.recipe_type === 'product');
+    if (!product) return;
+    const qty = Math.max(0, Number(manualSaleForm.quantity) || 0);
+    if (qty <= 0) return;
+    const pStart = manualSaleForm.periodStart || todayLocalDateString();
+    const pEnd = (manualSaleForm.periodEnd && manualSaleForm.periodEnd >= pStart) ? manualSaleForm.periodEnd : pStart;
+    const grossVal = manualSaleForm.grossRevenue.trim() !== '' ? parseLocaleNumber(manualSaleForm.grossRevenue) : null;
+    const newRecord: SalesImportRecord = {
+      id: `sale_manual_${Date.now()}`,
+      product_id: product.id,
+      product_name: product.name,
+      quantity: qty,
+      period_start: pStart,
+      period_end: pEnd,
+      channel: manualSaleForm.channel.trim() || 'Salón',
+      ...(grossVal !== null && grossVal >= 0 ? { gross_revenue: grossVal, net_revenue: grossVal } : {}),
+      source: t.salesManualSourceLabel,
+      imported_at: toLocalIsoTimestamp(),
+    };
+    setState((prev) => {
+      const updatedSales = [newRecord, ...(prev.salesHistory ?? [])];
+      const targetMonth = pStart.slice(0, 7);
+      const monthSales = updatedSales.filter((s) => s.period_start.slice(0, 7) === targetMonth && s.product_id);
+      const nextSalesMap = { ...prev.productSalesMap };
+      for (const prod of prev.catalog.recipes.filter((r) => r.recipe_type === 'product')) {
+        nextSalesMap[prod.id] = { ...nextSalesMap[prod.id], monthlyUnitsSold: 0 };
+      }
+      for (const item of monthSales) {
+        const pid = item.product_id!;
+        nextSalesMap[pid] = {
+          ...nextSalesMap[pid],
+          monthlyUnitsSold: (nextSalesMap[pid]?.monthlyUnitsSold ?? 0) + item.quantity,
+        };
+      }
+      return {
+        ...prev,
+        salesHistory: updatedSales,
+        salesPeriod: targetMonth,
+        productSalesMap: nextSalesMap,
+      };
+    });
+    setManualSaleForm((prev) => ({ ...prev, grossRevenue: '' }));
+  }
+
+  function deleteSalesRecord(saleId: string) {
+    setState((prev) => {
+      const updatedSales = (prev.salesHistory ?? []).filter((s) => s.id !== saleId);
+      const nextSalesMap = { ...prev.productSalesMap };
+      const targetMonth = prev.salesPeriod;
+      if (targetMonth) {
+        for (const prod of prev.catalog.recipes.filter((r) => r.recipe_type === 'product')) {
+          nextSalesMap[prod.id] = { ...nextSalesMap[prod.id], monthlyUnitsSold: 0 };
+        }
+        for (const item of updatedSales) {
+          if (item.product_id && item.period_start.slice(0, 7) === targetMonth) {
+            nextSalesMap[item.product_id] = {
+              ...nextSalesMap[item.product_id],
+              monthlyUnitsSold: (nextSalesMap[item.product_id]?.monthlyUnitsSold ?? 0) + item.quantity,
+            };
+          }
+        }
+      }
+      return {
+        ...prev,
+        salesHistory: updatedSales,
+        productSalesMap: nextSalesMap,
+      };
+    });
   }
 
   // Función auxiliar de cálculo de resumen y métricas de menú con filtros de período y canal
@@ -1096,10 +1232,10 @@ export function App({
       let incompleteReason: string | null = null;
       if (!res || res.status !== 'complete') {
         incompleteReason = (prod.components?.length ?? 0) === 0 && !prod.bakers_dough
-          ? 'Sin receta cargada (hacé clic en ✏️ Receta para armarla)'
-          : 'Falta costo o precio de compra de algún ingrediente';
+          ? t.recNoRecipeHint
+          : t.recSimIncompleteErr;
       } else if (!pricing || pricing.status !== 'complete' || evaluatedPrice <= 0) {
-        incompleteReason = 'Falta definir precio de venta sugerido o manual';
+        incompleteReason = t.recMissingPriceLabel;
       }
 
       return {
@@ -1142,30 +1278,30 @@ export function App({
         let matrixClass: 'star' | 'horse' | 'puzzle' | 'dog' | null = null;
         let matrixLabel = '—';
         if (!r.isComplete) {
-          matrixLabel = '⚠️ Incompleto';
+          matrixLabel = `⚠️ ${t.incompleteTag}`;
         } else if (r.hasSalesData) {
           if (r.units === 0) {
             matrixClass = 'dog';
-            matrixLabel = '0 ventas';
+            matrixLabel = loc === 'en' ? '0 sales' : loc === 'pt-BR' ? '0 vendas' : '0 ventas';
           } else {
             const highPop = (r.units ?? 0) >= avgUnits;
             const highMargin = r.unitGrossProfit >= avgUnitProfit;
             if (highPop && highMargin) {
               matrixClass = 'star';
-              matrixLabel = '⭐ Estrella';
+              matrixLabel = loc === 'en' ? '⭐ Star' : loc === 'pt-BR' ? '⭐ Estrela' : '⭐ Estrella';
             } else if (highPop && !highMargin) {
               matrixClass = 'horse';
-              matrixLabel = '🐎 Caballo';
+              matrixLabel = loc === 'en' ? '🐎 Plowhorse' : loc === 'pt-BR' ? '🐎 Cavalo' : '🐎 Caballo';
             } else if (!highPop && highMargin) {
               matrixClass = 'puzzle';
-              matrixLabel = '🧩 Rompecabezas';
+              matrixLabel = loc === 'en' ? '🧩 Puzzle' : loc === 'pt-BR' ? '🧩 Quebra-Cabeça' : '🧩 Rompecabezas';
             } else {
               matrixClass = 'dog';
-              matrixLabel = '🐕 Perro';
+              matrixLabel = loc === 'en' ? '🐕 Dog' : loc === 'pt-BR' ? '🐕 Cão' : '🐕 Perro';
             }
           }
         } else {
-          matrixLabel = '— Sin datos';
+          matrixLabel = `— ${t.noDataTag}`;
         }
         return { ...r, matrixClass, matrixLabel };
       }),
@@ -1380,11 +1516,11 @@ export function App({
   return (
     <div className="tools-shell">
       {workspaceConflict && (
-        <div style={{ backgroundColor: '#fef2f2', border: '1px solid #f87171', color: '#991b1b', padding: '12px 16px', borderRadius: '8px', margin: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+        <div style={{ backgroundColor: '#fef2f2', border: '1px solid #f87171', color: '#991b1b', padding: '12px 16px', borderRadius: '8px', margin: '14px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
           <div>
-            <strong>⚠️ Conflicto de versión detectado:</strong> {workspaceConflict}
+            <strong>{t.conflictTitle}</strong> {workspaceConflict}
           </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <button
               type="button"
               className="btn btn--secondary"
@@ -1393,19 +1529,19 @@ export function App({
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `pizzalog-tools-backup-${new Date().toISOString().slice(0, 10)}.json`;
+                a.download = `pizzalog-tools-backup-${todayLocalDateString()}.json`;
                 a.click();
                 URL.revokeObjectURL(url);
               }}
             >
-              💾 Descargar respaldo local (.json)
+              {t.downloadBackupJsonBtn}
             </button>
             <button
               type="button"
               className="btn btn--primary"
               onClick={() => window.location.reload()}
             >
-              🔄 Recargar versión del servidor
+              {t.reloadServerBtn}
             </button>
           </div>
         </div>
@@ -1413,7 +1549,8 @@ export function App({
       <header className="tools-header">
         <div>
           <h1 className="tools-brand">
-            Pizzalog Tools <span>Profit Kit v1</span>
+            Pizzalog Tools <span>Profit Kit v2</span>
+            {toolsEnvironment === 'staging' && <span className="env-pill--staging">STAGING</span>}
           </h1>
           <p className="tools-subtitle">{t.subtitle}</p>
         </div>
@@ -1430,7 +1567,6 @@ export function App({
             type="button"
             className="btn btn--ocre"
             onClick={() => downloadCustomProfitKitXlsx(state)}
-            title="Descarga tu propio archivo .xlsx con todos los insumos, recetas, ventas mensuales y alquileres que armaste en pantalla"
           >
             {t.exportCustomExcel}
           </button>
@@ -1456,31 +1592,34 @@ export function App({
                 className="btn btn--secondary"
                 style={{ color: 'var(--brand)', borderColor: 'var(--brand)', fontWeight: 700 }}
                 onClick={() => setShowPlansModal(true)}
-                title="Conocé nuestros planes y condiciones de acceso"
               >
-                ✨ Planes & Suscripción
+                {t.plansAndSubscription}
               </button>
               <button
                 type="button"
                 className="btn btn--secondary"
                 onClick={() => setShowReportModal(true)}
-                title="Ver reporte ejecutivo listo para imprimir o guardar como PDF"
               >
-                📄 Reporte Ejecutivo
+                {t.executiveReport}
               </button>
               <button
                 type="button"
                 className="btn btn--secondary"
                 onClick={() => { setHelpTopic('units'); setShowHelpModal(true); }}
-                title="Ayuda sobre unidades, densidades, mermas y fórmulas"
               >
-                ❓ Ayuda Contextual
+                {t.contextualHelp}
+              </button>
+              <button
+                type="button"
+                className="btn btn--secondary"
+                onClick={() => setShowExchangeRatesModal(true)}
+              >
+                {t.fxRatesBtn} ({state.catalog.exchange_rates?.length ?? 0})
               </button>
               <button
                 type="button"
                 className="btn"
-                onClick={() => downloadTemplateProfitKitXlsx(state.locale)}
-                title="Descargar planilla Excel v2 base autónoma (14 hojas con fórmulas en tu idioma)"
+                onClick={() => downloadTemplateProfitKitXlsx(loc)}
               >
                 {t.downloadTemplateExcel}
               </button>
@@ -1517,16 +1656,15 @@ export function App({
             type="button"
             className={`btn ${showMoreActions ? 'btn--secondary' : ''}`}
             onClick={() => setShowMoreActions((prev) => !prev)}
-            title={showMoreActions ? 'Ocultar opciones secundarias' : 'Mostrar más opciones (Planes, Reporte, Exportar/Importar JSON, Demo)'}
             style={{ fontWeight: 600 }}
           >
-            {showMoreActions ? '✕ Menos' : '➕ Más opciones'}
+            {showMoreActions ? t.lessOptions : t.moreOptions}
           </button>
         </div>
       </header>
 
-      {importError && <div className="alert-banner">⚠️ Error de validación al importar: {importError}</div>}
-      {workspaceSaveError && <div className="alert-banner">⚠️ No se pudieron guardar tus cambios: {workspaceSaveError}</div>}
+      {importError && <div className="alert-banner">⚠️ {importError}</div>}
+      {workspaceSaveError && <div className="alert-banner">⚠️ {workspaceSaveError}</div>}
       {importNotice && <div className="notice-banner">{importNotice}</div>}
       {snapshotNotice && <div className="notice-banner">{snapshotNotice}</div>}
 
@@ -1536,20 +1674,20 @@ export function App({
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ fontSize: '1.4rem' }}>🚀</span>
             <div>
-              <strong style={{ color: '#fff', fontSize: '0.96rem' }}>Estás probando la Demo Interactiva en vivo (Modo Invitado)</strong>
+              <strong style={{ color: '#fff', fontSize: '0.96rem' }}>{t.guestBannerTitle}</strong>
               <div style={{ fontSize: '0.82rem', color: '#fed7aa', marginTop: 2 }}>
-                Podés editar recetas, probar el simulador de rentabilidad y la matriz BCG. Los cambios se guardan localmente en tu navegador.
+                {t.guestBannerDesc}
               </div>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <button
               type="button"
               className="btn btn--primary"
               style={{ fontSize: '0.84rem', padding: '6px 14px', background: '#ea580c', borderColor: '#ea580c', color: '#fff', fontWeight: 700 }}
               onClick={() => setShowPlansModal(true)}
             >
-              ✨ Ver Planes & Suscribirme
+              {t.guestBannerPlansBtn}
             </button>
             <button
               type="button"
@@ -1557,7 +1695,7 @@ export function App({
               style={{ fontSize: '0.82rem', background: 'rgba(255,255,255,0.15)', color: '#fff', borderColor: 'transparent' }}
               onClick={onLogout}
             >
-              Iniciar sesión / Salir
+              {t.guestBannerExitBtn}
             </button>
           </div>
         </div>
@@ -1569,20 +1707,20 @@ export function App({
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ fontSize: '1.4rem' }}>🧪</span>
             <div>
-              <strong style={{ color: '#92400e', fontSize: '0.94rem' }}>Estás explorando los datos de ejemplo de «Pizzería Demo — Il Forno»</strong>
+              <strong style={{ color: '#92400e', fontSize: '0.94rem' }}>{t.demoBannerTitle}</strong>
               <div style={{ fontSize: '0.82rem', color: '#78350f', marginTop: 2 }}>
-                Podés experimentar libremente con recetas, simulaciones y precios. Cuando quieras empezar con tu restaurante real, limpiá el catálogo con un clic.
+                {t.demoBannerDesc}
               </div>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <button
               type="button"
               className="btn btn--secondary"
               style={{ fontSize: '0.82rem', background: '#fff', borderColor: '#d97706', color: '#92400e', fontWeight: 600 }}
               onClick={() => setShowClearDemoConfirm(true)}
             >
-              🗑️ Limpiar datos para empezar
+              {t.demoBannerClearBtn}
             </button>
             <button
               type="button"
@@ -1593,67 +1731,65 @@ export function App({
                 setState(createInitialDemoWorkspace());
               }}
             >
-              🔄 Restaurar demo
+              {t.restoreDemoBtn}
             </button>
           </div>
         </div>
       )}
 
-      {/* Experiencia Inicial Guiada (Onboarding Stepper) */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 8, margin: '0 0 16px' }}>
-        <button
-          type="button"
-          className={`btn ${activeTab === 'ingredients' ? 'btn--primary' : 'btn--secondary'}`}
-          style={{ justifyContent: 'center', padding: '8px 10px', fontSize: '0.82rem' }}
-          onClick={() => setActiveTab('ingredients')}
-        >
-          {t.stepIngredients}
-        </button>
-        <button
-          type="button"
-          className={`btn ${activeTab === 'subrecipes' ? 'btn--primary' : 'btn--secondary'}`}
-          style={{ justifyContent: 'center', padding: '8px 10px', fontSize: '0.82rem' }}
-          onClick={() => setActiveTab('subrecipes')}
-        >
-          {t.stepSubrecipes}
-        </button>
-        <button
-          type="button"
-          className={`btn ${activeTab === 'recipes' ? 'btn--primary' : 'btn--secondary'}`}
-          style={{ justifyContent: 'center', padding: '8px 10px', fontSize: '0.82rem' }}
-          onClick={() => setActiveTab('recipes')}
-        >
-          {t.stepRecipes}
-        </button>
-        <button
-          type="button"
-          className={`btn ${activeTab === 'expenses' ? 'btn--primary' : 'btn--secondary'}`}
-          style={{ justifyContent: 'center', padding: '8px 10px', fontSize: '0.82rem' }}
-          onClick={() => setActiveTab('expenses')}
-        >
-          {t.stepExpenses}
-        </button>
-        <button
-          type="button"
-          className={`btn ${activeTab === 'menu-engineering' ? 'btn--primary' : 'btn--secondary'}`}
-          style={{ justifyContent: 'center', padding: '8px 10px', fontSize: '0.82rem' }}
-          onClick={() => setActiveTab('menu-engineering')}
-        >
-          {t.stepMenuEngineering}
-        </button>
-        <button
-          type="button"
-          className={`btn ${activeTab === 'profit-simulator' ? 'btn--primary' : 'btn--secondary'}`}
-          style={{ justifyContent: 'center', padding: '8px 10px', fontSize: '0.82rem' }}
-          onClick={() => setActiveTab('profit-simulator')}
-        >
-          {t.stepProfitSimulator}
-        </button>
+      {/* Guía rápida inicial cuando el espacio está vacío */}
+      {!isDemoWorkspace(state) && state.catalog.ingredients.length === 0 && state.catalog.recipes.length === 0 && (
+        <div className="onboarding-card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+            <div>
+              <strong style={{ fontSize: '1rem', color: '#92400e' }}>{t.emptyOnboardingTitle}</strong>
+              <p style={{ margin: '4px 0 10px', fontSize: '0.84rem', color: '#78350f' }}>{t.emptyOnboardingDesc}</p>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 8, fontSize: '0.82rem', color: '#451a03' }}>
+                <div>{t.emptyOnboardingStep1}</div>
+                <div>{t.emptyOnboardingStep2}</div>
+                <div>{t.emptyOnboardingStep3}</div>
+                <div>{t.emptyOnboardingStep4}</div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button type="button" className="btn btn--primary btn--sm" onClick={() => { setActiveTab('ingredients'); addIngredient(); }}>
+                {t.ingNewBtn}
+              </button>
+              <button type="button" className="btn btn--secondary btn--sm" onClick={() => downloadTemplateProfitKitXlsx(loc)}>
+                {t.downloadTemplateExcel}
+              </button>
+              <button type="button" className="btn btn--secondary btn--sm" onClick={() => setState(createInitialDemoWorkspace())}>
+                {t.restoreDemoBtn}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Experiencia Inicial Guiada (Onboarding Stepper con progreso) */}
+      <div className="stepper-grid">
+        {([
+          ['ingredients', t.stepIngredients, state.catalog.ingredients.length > 0 && state.catalog.purchase_prices.some((p) => Number(p.purchase_price) > 0)],
+          ['subrecipes', t.stepSubrecipes, state.catalog.recipes.some((r) => r.recipe_type === 'subrecipe')],
+          ['recipes', t.stepRecipes, state.catalog.recipes.some((r) => r.recipe_type === 'product')],
+          ['expenses', t.stepExpenses, state.operatingExpenses.length > 0],
+          ['menu-engineering', t.stepMenuEngineering, monthlySummary.hasSalesData],
+          ['profit-simulator', t.stepProfitSimulator, monthlySummary.hasSalesData && state.operatingExpenses.length > 0],
+        ] as const).map(([tabKey, label, done]) => (
+          <button
+            key={tabKey}
+            type="button"
+            className={`btn step-pill ${activeTab === tabKey ? 'btn--primary' : 'btn--secondary'} ${done ? 'step-pill--done' : ''}`}
+            onClick={() => setActiveTab(tabKey)}
+          >
+            {label} {done ? '✓' : ''}
+          </button>
+        ))}
       </div>
 
       <section className="tools-toolbar">
         <label className="field">
-          <span>Local / Proyecto</span>
+          <span>{t.businessOrProject}</span>
           <input
             type="text"
             value={state.businessName}
@@ -1661,7 +1797,7 @@ export function App({
           />
         </label>
         <label className="field">
-          <span>Idioma / Locale</span>
+          <span>{t.languageLocale}</span>
           <select
             value={state.locale}
             onChange={(e) => setState((s) => ({ ...s, locale: e.target.value as LocaleCode }))}
@@ -1672,16 +1808,23 @@ export function App({
           </select>
         </label>
         <label className="field">
-          <span>Moneda</span>
+          <span>{t.currencyLabel}</span>
           <select
             value={state.currency}
             disabled={!canChangeCurrency}
-            title={canChangeCurrency ? undefined : 'No cambies la moneda mientras haya importes cargados; se necesita conversión explícita.'}
+            title={canChangeCurrency ? undefined : t.currencyLockedHint}
             onChange={(e) => {
               const curr = e.target.value;
               setState((s) => ({
                 ...s,
                 currency: curr,
+                catalog: {
+                  ...s.catalog,
+                  recipes: s.catalog.recipes.map((r) => ({ ...r, currency: curr })),
+                  purchase_prices: s.catalog.purchase_prices.map((p) =>
+                    !p.purchase_price ? { ...p, currency: curr } : p
+                  ),
+                },
               }));
             }}
           >
@@ -1691,10 +1834,27 @@ export function App({
             <option value="EUR">EUR (€)</option>
             <option value="MXN">MXN ($)</option>
           </select>
-          {!canChangeCurrency && <small>Para evitar reinterpretar importes, la moneda se fija cuando hay precios, recetas o gastos. La conversión cambiaria explícita todavía no está disponible en Tools.</small>}
+          {!canChangeCurrency && (
+            <small>
+              {t.currencyLockedHint}{' '}
+              <button type="button" className="link" style={{ fontSize: 'inherit' }} onClick={() => setShowExchangeRatesModal(true)}>
+                {t.fxRatesBtn}
+              </button>
+            </small>
+          )}
         </label>
         <label className="field">
-          <span>Food Cost Objetivo (%)</span>
+          <span>{t.unitSystemLabel}</span>
+          <select
+            value={state.unitSystem}
+            onChange={(e) => setState((s) => ({ ...s, unitSystem: e.target.value === 'us_customary' ? 'us_customary' : 'metric' }))}
+          >
+            <option value="metric">{t.unitSystemMetric}</option>
+            <option value="us_customary">{t.unitSystemUs}</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>{t.targetFoodCostLabel}</span>
           <input
             type="number"
             min={5}
@@ -1710,7 +1870,7 @@ export function App({
           />
         </label>
         <label className="field">
-          <span>Redondeo Precio ({state.currency})</span>
+          <span>{t.priceRoundingLabel} ({state.currency})</span>
           <input
             type="number"
             min={1}
@@ -1725,7 +1885,7 @@ export function App({
           />
         </label>
         <label className="field">
-          <span>Packaging Delivery ({state.currency})</span>
+          <span>{t.packagingDeliveryLabel} ({state.currency})</span>
           <input
             type="number"
             min={0}
@@ -1737,7 +1897,7 @@ export function App({
           />
         </label>
         <label className="field">
-          <span>Comisión App Delivery (%)</span>
+          <span>{t.appDeliveryFeeLabel}</span>
           <input
             type="number"
             min={0}
@@ -1807,15 +1967,15 @@ export function App({
 
       {activeTab === 'simulator' && (
         <section className="card">
-          <h2>Simulador de recetas y costos</h2>
-          <p className="lead">Probá cantidades de producción sin modificar la ficha guardada. El costo unitario se calcula con el Cost Engine y los precios vigentes.</p>
+          <h2>{t.recSimTitle}</h2>
+          <p className="lead">{t.recSimLead}</p>
           <div className="builder-grid">
-            <label className="field"><span>Producto o subreceta</span><select value={simulationRecipeId || state.catalog.recipes.find((r) => r.recipe_type === 'product')?.id || ''} onChange={(e) => setSimulationRecipeId(e.target.value)}><option value="">Seleccionar receta</option>{state.catalog.recipes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></label>
-            <label className="field"><span>Cantidad de tandas</span><input type="number" min="0.01" step="0.25" value={simulationBatches} onChange={(e) => setSimulationBatches(Math.max(0.01, Number(e.target.value) || 0.01))} /></label>
+            <label className="field"><span>{t.recSimSelectLabel}</span><select value={simulationRecipeId || state.catalog.recipes.find((r) => r.recipe_type === 'product')?.id || ''} onChange={(e) => setSimulationRecipeId(e.target.value)}><option value="">{t.recSimSelectPlaceholder}</option>{state.catalog.recipes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}</select></label>
+            <label className="field"><span>{t.recSimBatchesLabel}</span><input type="number" min="0.01" step="0.25" value={simulationBatches} onChange={(e) => setSimulationBatches(Math.max(0.01, Number(e.target.value) || 0.01))} /></label>
           </div>
           {(() => {
             const selected = state.catalog.recipes.find((r) => r.id === (simulationRecipeId || state.catalog.recipes.find((x) => x.recipe_type === 'product')?.id));
-            if (!selected) return <p className="empty-state">Todavía no hay recetas para simular. Creá una receta en la pestaña correspondiente.</p>;
+            if (!selected) return <div className="empty-state">{t.recSimEmpty}</div>;
             const result = recipeResults.get(selected.id);
             const adjustable = selected.components ?? [];
             const simulatedRecipes = state.catalog.recipes.map((recipe) => {
@@ -1835,32 +1995,32 @@ export function App({
             try {
               simulatedResult = new CostEngine({ ...state.catalog, recipes: simulatedRecipes }).calculateRecipeCost(selected.id);
             } catch { simulatedResult = null; }
-            if (!result || result.status !== 'complete') return <div className="alert-banner">No se puede calcular esta receta: faltan precios o componentes válidos. Revisá la ficha y los insumos.</div>;
+            if (!result || result.status !== 'complete') return <div className="alert-banner">{t.recSimIncompleteErr}</div>;
             const simulatedCost = simulatedResult?.status === 'complete' ? simulatedResult.raw_batch_cost : null;
             const total = (simulatedCost ?? 0) * simulationBatches;
             return <>
               {selected.bakers_dough ? (
                 <label className="field" style={{ maxWidth: 320, marginTop: 16 }}>
-                  <span>Hidratación simulada (%)</span>
+                  <span>{t.recSimHydrationLabel}</span>
                   <input type="number" min="0" max="250" step="0.5"
                     value={simulationHydrationPct[selected.id] ?? selected.bakers_dough.hydration_pct}
                     onChange={(e) => setSimulationHydrationPct((prev) => ({
                       ...prev, [selected.id]: Math.max(0, Math.min(250, Number(e.target.value) || 0)),
                     }))}
                   />
-                  <small>Recalcula la fórmula panadera completa sin modificar la receta guardada.</small>
+                  <small>{t.recSimHydrationHint}</small>
                 </label>
               ) : adjustable.length > 0 ? (
-                <div className="table-wrap" style={{ marginTop: 16 }}><table className="kit-table"><thead><tr><th>Componente</th><th>Cantidad original</th><th>Variación simulada (%)</th></tr></thead><tbody>
-                  {result.components.map((component, index) => <tr key={`${selected.id}:${index}`}><td>{component.name}</td><td>{formatDecimal(component.quantity, 3)} {component.unit}</td><td><input aria-label={`Variación de ${component.name}`} type="number" min="0" step="5" value={simulationComponentPct[`${selected.id}:${index}`] ?? 100} onChange={(e) => setSimulationComponentPct((prev) => ({ ...prev, [`${selected.id}:${index}`]: Math.max(0, Number(e.target.value) || 0) }))} /></td></tr>)}
+                <div className="table-wrap" style={{ marginTop: 16 }}><table className="kit-table"><thead><tr><th>{t.recSimColComponent}</th><th>{t.recSimColOrigQty}</th><th>{t.recSimColVarPct}</th></tr></thead><tbody>
+                  {result.components.map((component, index) => <tr key={`${selected.id}:${index}`}><td>{component.name}</td><td>{fmt(component.quantity, 3)} {component.unit}</td><td><input aria-label={component.name} type="number" min="0" step="5" value={simulationComponentPct[`${selected.id}:${index}`] ?? 100} onChange={(e) => setSimulationComponentPct((prev) => ({ ...prev, [`${selected.id}:${index}`]: Math.max(0, Number(e.target.value) || 0) }))} /></td></tr>)}
                 </tbody></table></div>
-              ) : <p className="lead">Esta receta no tiene componentes ajustables.</p>}
-              {simulatedCost === null && <div className="alert-banner">La variación produce un costo incompleto. Revisá unidades, cantidades y precios.</div>}
+              ) : null}
+              {simulatedCost === null && <div className="alert-banner">{t.recSimIncompleteErr}</div>}
               <div className="kpi-grid" style={{ marginTop: 16 }}>
-                <div className="kpi-card"><span>Costo original por tanda</span><strong>{state.currency} {formatDecimal(result.raw_batch_cost ?? 0, 2)}</strong></div>
-                <div className="kpi-card"><span>Costo simulado por tanda</span><strong>{simulatedCost === null ? 'Incompleto' : `${state.currency} ${formatDecimal(simulatedCost, 2)}`}</strong></div>
-                <div className="kpi-card"><span>Costo de la producción simulada</span><strong>{simulatedCost === null ? 'Incompleto' : `${state.currency} ${formatDecimal(total, 2)}`}</strong></div>
-                <div className="kpi-card"><span>Rendimiento total estimado</span><strong>{formatDecimal(selected.yield_quantity * simulationBatches, 2)} {selected.yield_unit}</strong></div>
+                <div className="kpi-card"><span>{t.recSimOrigBatch}</span><strong>{state.currency} {fmt(result.raw_batch_cost ?? 0, 2)}</strong></div>
+                <div className="kpi-card"><span>{t.recSimSimBatch}</span><strong>{simulatedCost === null ? t.incompleteTag : `${state.currency} ${fmt(simulatedCost, 2)}`}</strong></div>
+                <div className="kpi-card"><span>{t.recSimTotalProd}</span><strong>{simulatedCost === null ? t.incompleteTag : `${state.currency} ${fmt(total, 2)}`}</strong></div>
+                <div className="kpi-card"><span>{t.recSimEstYield}</span><strong>{fmt(selected.yield_quantity * simulationBatches, 2)} {selected.yield_unit}</strong></div>
               </div>
             </>;
           })()}
@@ -1871,21 +2031,21 @@ export function App({
         <section className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
             <div>
-              <h2>Evolución histórica de costos y rentabilidad</h2>
-              <p className="lead">Seguimiento cronológico de costos, precios y márgenes registrados en cada snapshot.</p>
+              <h2>{t.histTitle}</h2>
+              <p className="lead">{t.histLead}</p>
             </div>
             <button
               type="button"
               className="btn btn--secondary"
               onClick={() => { setHelpTopic('yield'); setShowHelpModal(true); }}
             >
-              ❓ Ayuda sobre mermas y costos
+              {t.histHelpBtn}
             </button>
           </div>
 
           {state.snapshots.length === 0 ? (
             <div className="empty-state">
-              Todavía no hay snapshots guardados. Tomá una captura desde el botón superior «📸 Guardar Snapshot» o en la pestaña «Snapshots» para comenzar el registro histórico.
+              {t.histEmpty}
             </div>
           ) : (() => {
             const products = state.catalog.recipes.filter((r) => r.recipe_type === 'product');
@@ -1897,7 +2057,6 @@ export function App({
             const currentResult = selectedProduct ? recipeResults.get(selectedProduct.id) : null;
             const lastEntry = entries.length ? entries[entries.length - 1] : null;
 
-            // Verificación de costo desactualizado (Stale Cost Alert)
             const isCostStale = Boolean(
               currentResult &&
               currentResult.status === 'complete' &&
@@ -1925,7 +2084,7 @@ export function App({
             return <>
               <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end', flexWrap: 'wrap', marginTop: 14 }}>
                 <label className="field" style={{ maxWidth: 420, margin: 0 }}>
-                  <span>Seleccionar Producto</span>
+                  <span>{t.histSelectProduct}</span>
                   <select value={selectedProduct?.id ?? ''} onChange={(e) => setHistoryRecipeId(e.target.value)}>
                     {products.map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.name}</option>)}
                   </select>
@@ -1933,19 +2092,18 @@ export function App({
               </div>
 
               {!selectedProduct ? (
-                <div className="empty-state">No hay productos cargados en el catálogo.</div>
+                <div className="empty-state">{t.recEmptyState}</div>
               ) : entries.length === 0 ? (
                 <div className="empty-state">
-                  Este producto todavía no tiene capturas registradas. Guardá un snapshot para iniciar el seguimiento de su evolución.
+                  {t.histNoProductSnaps}
                 </div>
               ) : <>
-                {/* Alerta de Costo Desactualizado */}
                 {isCostStale && (
                   <div style={{ background: '#fffbeb', border: '1px solid #f59e0b', borderRadius: 8, padding: '12px 16px', margin: '16px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
                     <div>
-                      <strong style={{ color: '#92400e' }}>⚠️ Costo desactualizado en el catálogo</strong>
+                      <strong style={{ color: '#92400e' }}>{t.histStaleTitle}</strong>
                       <div style={{ fontSize: '0.84rem', color: '#78350f', marginTop: 2 }}>
-                        El costo actual en catálogo es de <strong>{state.currency} {formatDecimal(currentResult!.raw_unit_cost!, 2)}</strong> ({staleDeltaPct > 0 ? '+' : ''}{formatDecimal(staleDeltaPct, 1)}% vs. tu última captura guardada de <strong>{state.currency} {formatDecimal(lastEntry!.cost_result.raw_unit_cost!, 2)}</strong>). Hubo modificaciones en los precios de los insumos.
+                        <strong>{state.currency} {fmt(currentResult!.raw_unit_cost!, 2)}</strong> ({staleDeltaPct > 0 ? '+' : ''}{fmt(staleDeltaPct, 1)}% vs. <strong>{state.currency} {fmt(lastEntry!.cost_result.raw_unit_cost!, 2)}</strong>)
                       </div>
                     </div>
                     <button
@@ -1961,45 +2119,45 @@ export function App({
                           channel_fee_pct: state.defaultChannelFeePct,
                         });
                         setState((s) => ({ ...s, snapshots: [...s.snapshots, snap] }));
-                        setSnapshotNotice(`Se guardó un nuevo snapshot con costos actualizados para «${selectedProduct.name}».`);
+                        setSnapshotNotice(`✓ ${selectedProduct.name}`);
                       }}
                     >
-                      📸 Guardar nuevo snapshot con costo vigente
+                      {t.histSaveUpdatedSnapBtn}
                     </button>
                   </div>
                 )}
 
                 <div className="kpi-grid" style={{ marginTop: 16 }}>
                   <div className="kpi-card">
-                    <span>Primer costo registrado</span>
-                    <strong>{firstCost == null ? 'Incompleto' : `${state.currency} ${formatDecimal(firstCost, 2)}`}</strong>
-                    <small>{new Date(entries[0].created_at).toLocaleDateString()}</small>
+                    <span>{t.histFirstCost}</span>
+                    <strong>{firstCost == null ? t.incompleteTag : `${state.currency} ${fmt(firstCost, 2)}`}</strong>
+                    <small>{fmtDate(entries[0].created_at)}</small>
                   </div>
                   <div className="kpi-card">
-                    <span>Último costo registrado</span>
-                    <strong>{lastCost == null ? 'Incompleto' : `${state.currency} ${formatDecimal(lastCost, 2)}`}</strong>
-                    <small>{new Date(entries[entries.length - 1].created_at).toLocaleDateString()}</small>
+                    <span>{t.histLastCost}</span>
+                    <strong>{lastCost == null ? t.incompleteTag : `${state.currency} ${fmt(lastCost, 2)}`}</strong>
+                    <small>{fmtDate(entries[entries.length - 1].created_at)}</small>
                   </div>
                   <div className="kpi-card">
-                    <span>Variación histórica acumulada</span>
+                    <span>{t.histAccumVar}</span>
                     <strong style={{ color: (totalVariationPct ?? 0) > 0 ? '#b91c1c' : '#15803d' }}>
-                      {totalVariationPct == null ? '—' : `${totalVariationPct > 0 ? '+' : ''}${formatDecimal(totalVariationPct, 1)}%`}
+                      {totalVariationPct == null ? '—' : `${totalVariationPct > 0 ? '+' : ''}${fmt(totalVariationPct, 1)}%`}
                     </strong>
-                    <small>{entries.length} capturas en el tiempo</small>
+                    <small>{entries.length}</small>
                   </div>
                   <div className="kpi-card">
-                    <span>Food Cost del último snapshot</span>
+                    <span>{t.histLastFc}</span>
                     <strong>
                       {lastEntry?.pricing_scenario?.food_cost_pct != null
-                        ? `${formatDecimal(lastEntry.pricing_scenario.food_cost_pct, 1)}%`
+                        ? `${fmt(lastEntry.pricing_scenario.food_cost_pct, 1)}%`
                         : '—'}
                     </strong>
-                    <small>Margen unitario: {lastEntry?.pricing_scenario?.raw_gross_profit != null ? `${state.currency} ${formatDecimal(lastEntry.pricing_scenario.raw_gross_profit, 2)}` : '—'}</small>
+                    <small>{t.histUnitContribLabel} {lastEntry?.pricing_scenario?.raw_gross_profit != null ? `${state.currency} ${fmt(lastEntry.pricing_scenario.raw_gross_profit, 2)}` : '—'}</small>
                   </div>
                 </div>
 
                 <div className="card" style={{ marginTop: 16 }}>
-                  <strong>Evolución cronológica del costo unitario</strong>
+                  <strong>{t.histChartTitle}</strong>
                   <div style={{ display: 'grid', gap: 12, marginTop: 14 }}>
                     {entries.map((entry, index) => {
                       const value = entry.cost_result.raw_unit_cost;
@@ -2009,15 +2167,15 @@ export function App({
                         : null;
                       const width = typeof value === 'number' ? (range === 0 ? 100 : Math.max(8, ((value - minValue) / range) * 100)) : 0;
                       return (
-                        <div key={entry.snapshot_id} style={{ display: 'grid', gridTemplateColumns: '110px 1fr 140px', alignItems: 'center', gap: 12 }}>
-                          <small>{new Date(entry.created_at).toLocaleDateString()}</small>
+                        <div key={entry.snapshot_id} className="history-bar-row">
+                          <small>{fmtDate(entry.created_at)}</small>
                           <div style={{ background: 'var(--border-color, #e5e7eb)', borderRadius: 6, height: 14, overflow: 'hidden' }}>
                             <div style={{ width: `${width}%`, height: '100%', background: 'var(--accent, #991b1b)', borderRadius: 6 }} />
                           </div>
                           <div style={{ textAlign: 'right' }}>
-                            <strong style={{ display: 'block' }}>{value == null ? 'Incompleto' : `${state.currency} ${formatDecimal(value, 2)}`}</strong>
+                            <strong style={{ display: 'block' }}>{value == null ? t.incompleteTag : `${state.currency} ${fmt(value, 2)}`}</strong>
                             <small style={{ color: (delta ?? 0) > 0 ? '#b91c1c' : '#15803d' }}>
-                              {delta == null ? 'Línea base' : `${delta > 0 ? '+' : ''}${formatDecimal(delta, 1)}%`}
+                              {delta == null ? t.histBaseline : `${delta > 0 ? '+' : ''}${fmt(delta, 1)}%`}
                             </small>
                           </div>
                         </div>
@@ -2030,13 +2188,13 @@ export function App({
                   <table className="kit-table">
                     <thead>
                       <tr>
-                        <th>Fecha</th>
-                        <th>Costo unitario</th>
-                        <th>Precio evaluado</th>
-                        <th>Food Cost %</th>
-                        <th>Margen de contribución</th>
-                        <th>Variación vs. anterior</th>
-                        <th>Estado</th>
+                        <th>{t.histColDate}</th>
+                        <th>{t.histColUnitCost}</th>
+                        <th>{t.histColEvalPrice}</th>
+                        <th>{t.histColFcPct}</th>
+                        <th>{t.histColMargin}</th>
+                        <th>{t.histColVarPrev}</th>
+                        <th>{t.histColStatus}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2052,15 +2210,15 @@ export function App({
 
                         return (
                           <tr key={entry.snapshot_id}>
-                            <td>{new Date(entry.created_at).toLocaleString()}</td>
-                            <td><strong>{value == null ? '—' : `${state.currency} ${formatDecimal(value, 2)}`}</strong></td>
-                            <td>{price == null ? '—' : `${state.currency} ${formatDecimal(price, 2)}`}</td>
-                            <td>{fc == null ? '—' : `${formatDecimal(fc, 1)}%`}</td>
-                            <td>{profit == null ? '—' : `${state.currency} ${formatDecimal(profit, 2)}`}</td>
+                            <td>{fmtDateTime(entry.created_at)}</td>
+                            <td><strong>{value == null ? '—' : `${state.currency} ${fmt(value, 2)}`}</strong></td>
+                            <td>{price == null ? '—' : `${state.currency} ${fmt(price, 2)}`}</td>
+                            <td>{fc == null ? '—' : `${fmt(fc, 1)}%`}</td>
+                            <td>{profit == null ? '—' : `${state.currency} ${fmt(profit, 2)}`}</td>
                             <td style={{ color: delta && delta > 0 ? '#b91c1c' : '#15803d', fontWeight: delta ? 600 : 400 }}>
-                              {delta == null ? '—' : `${delta > 0 ? '+' : ''}${formatDecimal(delta, 1)}%`}
+                              {delta == null ? '—' : `${delta > 0 ? '+' : ''}${fmt(delta, 1)}%`}
                             </td>
-                            <td>{entry.cost_result.status === 'complete' ? 'Completo' : 'Incompleto'}</td>
+                            <td>{entry.cost_result.status === 'complete' ? t.statusComplete : t.incompleteTag}</td>
                           </tr>
                         );
                       })}
@@ -2077,36 +2235,33 @@ export function App({
         <section className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
             <div>
-              <h2>Ingeniería de Menú (Matriz Kasavana & Smith / BCG)</h2>
-              <p className="lead">
-                Análisis estratégico cruzando popularidad (volumen de ventas) y contribución marginal ($ de ganancia por plato).
-              </p>
+              <h2>{t.menuTitle}</h2>
+              <p className="lead">{t.menuLead}</p>
             </div>
             <button
               type="button"
               className="btn btn--secondary"
               onClick={() => { setHelpTopic('matrix'); setShowHelpModal(true); }}
             >
-              ❓ ¿Cómo interpretar los cuadrantes?
+              {t.menuHelpBtn}
             </button>
           </div>
 
-          {/* Barra de Filtros por Período y Canal */}
           <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end', flexWrap: 'wrap', margin: '16px 0', padding: '14px', background: 'var(--surface-alt)', borderRadius: 10 }}>
             <label className="field" style={{ minWidth: 200, margin: 0 }}>
-              <span>Período de Ventas</span>
+              <span>{t.menuPeriodLabel}</span>
               <select value={menuPeriodFilter} onChange={(e) => setMenuPeriodFilter(e.target.value)}>
-                <option value="all">Todos los períodos acumulados</option>
+                <option value="all">{t.menuAllPeriods}</option>
                 {availablePeriods.map((p) => (
-                  <option key={p} value={p}>{p} (Mensual)</option>
+                  <option key={p} value={p}>{p} {t.menuMonthlySuffix}</option>
                 ))}
               </select>
             </label>
 
             <label className="field" style={{ minWidth: 200, margin: 0 }}>
-              <span>Canal de Venta</span>
+              <span>{t.menuChannelLabel}</span>
               <select value={menuChannelFilter} onChange={(e) => setMenuChannelFilter(e.target.value)}>
-                <option value="all">Todos los canales combinados</option>
+                <option value="all">{t.menuAllChannels}</option>
                 {availableChannels.map((c) => (
                   <option key={c} value={c}>{c}</option>
                 ))}
@@ -2126,15 +2281,15 @@ export function App({
                     }
                   }}
                 />
-                Comparar con otro período
+                {t.menuCompareCheck}
               </label>
             </div>
 
             {menuCompareMode && (
               <label className="field" style={{ minWidth: 200, margin: 0 }}>
-                <span>Comparar contra:</span>
+                <span>{t.menuCompareSelectLabel}</span>
                 <select value={menuComparePeriod} onChange={(e) => setMenuComparePeriod(e.target.value)}>
-                  <option value="">Seleccionar período a comparar</option>
+                  <option value="">{t.menuComparePlaceholder}</option>
                   {availablePeriods.filter((p) => p !== menuPeriodFilter).map((p) => (
                     <option key={p} value={p}>{p}</option>
                   ))}
@@ -2145,35 +2300,33 @@ export function App({
 
           {!monthlySummary.hasSalesData ? (
             <div className="empty-state">
-              No hay ventas registradas para el período y canal seleccionados. Probá seleccionando «Todos los períodos» o cargá ventas en la pestaña «Ventas importadas».
+              {t.menuNoSalesEmpty}
             </div>
           ) : (
             <>
-              {/* KPIs del período filtrado */}
               <div className="kpi-grid" style={{ marginBottom: 16 }}>
                 <div className="kpi-card">
-                  <span>Facturación {menuChannelFilter !== 'all' ? `(${menuChannelFilter})` : 'del período'}</span>
-                  <strong>{state.currency} {formatDecimal(monthlySummary.totalRevenue, 2)}</strong>
-                  <small>{formatDecimal(monthlySummary.totalUnits, 0)} unidades vendidas</small>
+                  <span>{t.recKpiRevenue} {menuChannelFilter !== 'all' ? `(${menuChannelFilter})` : ''}</span>
+                  <strong>{state.currency} {fmt(monthlySummary.totalRevenue, 2)}</strong>
+                  <small>{fmt(monthlySummary.totalUnits, 0)}</small>
                 </div>
                 <div className="kpi-card">
-                  <span>Costo de Insumos (CMV)</span>
-                  <strong style={{ color: '#b91c1c' }}>{state.currency} {formatDecimal(monthlySummary.totalCogs, 2)}</strong>
-                  <small>Food Cost: {monthlySummary.totalRevenue > 0 ? formatDecimal((monthlySummary.totalCogs / monthlySummary.totalRevenue) * 100, 1) : 0}%</small>
+                  <span>{t.simCogs.replace(':', '')}</span>
+                  <strong style={{ color: '#b91c1c' }}>{state.currency} {fmt(monthlySummary.totalCogs, 2)}</strong>
+                  <small>Food Cost: {monthlySummary.totalRevenue > 0 ? fmt((monthlySummary.totalCogs / monthlySummary.totalRevenue) * 100, 1) : fmt(0, 1)}%</small>
                 </div>
                 <div className="kpi-card">
-                  <span>Contribución Marginal Total</span>
-                  <strong style={{ color: '#15803d' }}>{state.currency} {formatDecimal(monthlySummary.totalContribution, 2)}</strong>
-                  <small>Margen ponderado: {formatDecimal(monthlySummary.weightedMarginPct, 1)}%</small>
+                  <span>{t.recKpiContribution}</span>
+                  <strong style={{ color: '#15803d' }}>{state.currency} {fmt(monthlySummary.totalContribution, 2)}</strong>
+                  <small>{fmt(monthlySummary.weightedMarginPct, 1)}%</small>
                 </div>
                 <div className="kpi-card">
-                  <span>Punto de Equilibrio</span>
-                  <strong>{breakEvenRevenue > 0 ? `${state.currency} ${formatDecimal(breakEvenRevenue, 2)}` : '—'}</strong>
-                  <small>{(netOperatingProfit ?? 0) >= 0 ? '🟢 Zona de Ganancia Neta' : '🔴 Zona de Déficit'}</small>
+                  <span>{t.simBreakEvenRevKpi}</span>
+                  <strong>{breakEvenRevenue > 0 ? `${state.currency} ${fmt(breakEvenRevenue, 2)}` : '—'}</strong>
+                  <small>{(netOperatingProfit ?? 0) >= 0 ? t.simZoneProfit : t.simZoneLoss}</small>
                 </div>
               </div>
 
-              {/* Comparación entre dos períodos (si está activada) */}
               {menuCompareMode && compareSummary && (() => {
                 const diffUnits = monthlySummary.totalUnits - compareSummary.totalUnits;
                 const diffUnitsPct = compareSummary.totalUnits > 0 ? (diffUnits / compareSummary.totalUnits) * 100 : 0;
@@ -2184,32 +2337,32 @@ export function App({
 
                 return (
                   <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10, padding: '14px 18px', marginBottom: 20 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
                       <strong style={{ color: '#1e40af' }}>
-                        📊 Comparativa: {menuPeriodFilter === 'all' ? 'Actual' : menuPeriodFilter} vs. {menuComparePeriod}
+                        📊 {menuPeriodFilter === 'all' ? t.simBaseTitle : menuPeriodFilter} vs. {menuComparePeriod}
                       </strong>
-                      <span style={{ fontSize: '0.8rem', color: '#3b82f6' }}>Canal: {menuChannelFilter === 'all' ? 'Todos' : menuChannelFilter}</span>
+                      <span style={{ fontSize: '0.8rem', color: '#3b82f6' }}>{t.salesColChannel}: {menuChannelFilter === 'all' ? t.menuAllChannels : menuChannelFilter}</span>
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
                       <div>
-                        <span style={{ fontSize: '0.8rem', color: '#1e40af', display: 'block' }}>Variación de Unidades:</span>
+                        <span style={{ fontSize: '0.8rem', color: '#1e40af', display: 'block' }}>{t.salesColUnits}:</span>
                         <strong style={{ fontSize: '1.1rem', color: diffUnits >= 0 ? '#15803d' : '#b91c1c' }}>
-                          {diffUnits >= 0 ? `+${formatDecimal(diffUnits, 0)} u.` : `${formatDecimal(diffUnits, 0)} u.`}
-                          {' '}({diffUnitsPct >= 0 ? `+${formatDecimal(diffUnitsPct, 1)}%` : `${formatDecimal(diffUnitsPct, 1)}%`})
+                          {diffUnits >= 0 ? `+${fmt(diffUnits, 0)}` : fmt(diffUnits, 0)}
+                          {' '}({diffUnitsPct >= 0 ? `+${fmt(diffUnitsPct, 1)}%` : `${fmt(diffUnitsPct, 1)}%`})
                         </strong>
                       </div>
                       <div>
-                        <span style={{ fontSize: '0.8rem', color: '#1e40af', display: 'block' }}>Variación de Facturación:</span>
+                        <span style={{ fontSize: '0.8rem', color: '#1e40af', display: 'block' }}>{t.recKpiRevenue}:</span>
                         <strong style={{ fontSize: '1.1rem', color: diffRev >= 0 ? '#15803d' : '#b91c1c' }}>
-                          {diffRev >= 0 ? `+${state.currency} ${formatDecimal(diffRev, 0)}` : `${state.currency} ${formatDecimal(diffRev, 0)}`}
-                          {' '}({diffRevPct >= 0 ? `+${formatDecimal(diffRevPct, 1)}%` : `${formatDecimal(diffRevPct, 1)}%`})
+                          {diffRev >= 0 ? `+${state.currency} ${fmt(diffRev, 0)}` : `${state.currency} ${fmt(diffRev, 0)}`}
+                          {' '}({diffRevPct >= 0 ? `+${fmt(diffRevPct, 1)}%` : `${fmt(diffRevPct, 1)}%`})
                         </strong>
                       </div>
                       <div>
-                        <span style={{ fontSize: '0.8rem', color: '#1e40af', display: 'block' }}>Variación de Contribución:</span>
+                        <span style={{ fontSize: '0.8rem', color: '#1e40af', display: 'block' }}>{t.recKpiContribution}:</span>
                         <strong style={{ fontSize: '1.1rem', color: diffContrib >= 0 ? '#15803d' : '#b91c1c' }}>
-                          {diffContrib >= 0 ? `+${state.currency} ${formatDecimal(diffContrib, 0)}` : `${state.currency} ${formatDecimal(diffContrib, 0)}`}
-                          {' '}({diffContribPct >= 0 ? `+${formatDecimal(diffContribPct, 1)}%` : `${formatDecimal(diffContribPct, 1)}%`})
+                          {diffContrib >= 0 ? `+${state.currency} ${fmt(diffContrib, 0)}` : `${state.currency} ${fmt(diffContrib, 0)}`}
+                          {' '}({diffContribPct >= 0 ? `+${fmt(diffContribPct, 1)}%` : `${fmt(diffContribPct, 1)}%`})
                         </strong>
                       </div>
                     </div>
@@ -2217,29 +2370,28 @@ export function App({
                 );
               })()}
 
-              {/* Alerta de Productos con Datos Faltantes (Diferenciación estricta de falta de datos vs resultado desfavorable) */}
               {(() => {
                 const incompleteProducts = monthlySummary.rows.filter((r) => !r.isComplete);
                 if (incompleteProducts.length === 0) return null;
                 return (
                   <div style={{ background: '#fffbeb', border: '1px solid #f59e0b', borderRadius: 8, padding: '12px 16px', marginBottom: 18 }}>
                     <strong style={{ color: '#92400e', display: 'block', marginBottom: 4 }}>
-                      ⚠️ {incompleteProducts.length} producto(s) no clasificados por datos incompletos:
+                      ⚠️ {incompleteProducts.length} {t.menuIncompleteWarnSuffix}
                     </strong>
                     <div style={{ fontSize: '0.84rem', color: '#78350f', marginBottom: 8 }}>
-                      Estos productos tienen ventas registradas pero les falta el precio de algún insumo o su precio de venta. No son clasificados como «Perros» para no falsear tus decisiones:
+                      {t.menuIncompleteWarnDesc}
                     </div>
                     <ul style={{ margin: 0, paddingLeft: 18, fontSize: '0.84rem', color: '#92400e' }}>
                       {incompleteProducts.map((p) => (
                         <li key={p.prod.id} style={{ margin: '4px 0' }}>
-                          <strong>{p.prod.name}</strong> ({formatDecimal(p.units ?? 0, 0)} u. vendidas): {p.incompleteReason}
+                          <strong>{p.prod.name}</strong> ({fmt(p.units ?? 0, 0)}): {p.incompleteReason}
                           <button
                             type="button"
                             className="btn btn--sm"
                             style={{ marginLeft: 8, fontSize: '0.74rem', padding: '2px 8px' }}
                             onClick={() => setActiveTab('recipes')}
                           >
-                            Ir a recetas
+                            {t.menuGoToRecipesBtn}
                           </button>
                         </li>
                       ))}
@@ -2248,47 +2400,46 @@ export function App({
                 );
               })()}
 
-              {/* Los 4 Cuadrantes Estratégicos con Recomendaciones */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14, margin: '16px 0' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14, margin: '16px 0' }}>
                 {([
                   {
                     key: 'puzzle',
-                    title: '🧩 Rompecabezas (Puzzles)',
-                    badge: 'Baja popularidad · Alta contribución',
+                    title: t.menuPuzzleTitle,
+                    badge: t.menuPuzzleBadge,
                     color: '#6b21a8',
                     bg: '#f3e8ff',
                     border: '#d8b4fe',
-                    actionTip: '💡 Oportunidad de margen: Dejan excelente ganancia pero tienen baja rotación. Recomendación: Creá promociones 2x1 en días flojos, sumalos a combos o colocálos en el centro visual de la carta.',
+                    actionTip: t.menuPuzzleTip,
                     rows: monthlySummary.rows.filter((r) => r.matrixClass === 'puzzle'),
                   },
                   {
                     key: 'star',
-                    title: '⭐ Estrellas (Stars)',
-                    badge: 'Alta popularidad · Alta contribución',
+                    title: t.menuStarTitle,
+                    badge: t.menuStarBadge,
                     color: '#92400e',
                     bg: '#fef3c7',
                     border: '#fde047',
-                    actionTip: '✨ Pilares de rentabilidad: Alta rotación y excelente margen. Recomendación: Proteger la calidad estricta de la receta y mantenerlos en el punto focal del menú.',
+                    actionTip: t.menuStarTip,
                     rows: monthlySummary.rows.filter((r) => r.matrixClass === 'star'),
                   },
                   {
                     key: 'dog',
-                    title: '🐕 Perros (Dogs)',
-                    badge: 'Baja popularidad · Baja contribución',
+                    title: t.menuDogTitle,
+                    badge: t.menuDogBadge,
                     color: '#991b1b',
                     bg: '#fee2e2',
                     border: '#fca5a5',
-                    actionTip: '⚠️ Bajo rendimiento: Tienen baja rotación y escaso margen. Recomendación: Evaluar si sus insumos inmovilizan stock; reemplazarlos o reformularlos a fondo.',
+                    actionTip: t.menuDogTip,
                     rows: monthlySummary.rows.filter((r) => r.matrixClass === 'dog'),
                   },
                   {
                     key: 'horse',
-                    title: '🐎 Caballos de Batalla (Plowhorses)',
-                    badge: 'Alta popularidad · Baja contribución',
+                    title: t.menuHorseTitle,
+                    badge: t.menuHorseBadge,
                     color: '#1e40af',
                     bg: '#dbeafe',
                     border: '#93c5fd',
-                    actionTip: '💡 Oportunidad de volumen: Muy pedidos pero dejan poco margen. Recomendación: Un ajuste de apenas +3% a +5% en el precio, o una optimización de gramaje, tendrá un impacto masivo en tu ganancia neta.',
+                    actionTip: t.menuHorseTip,
                     rows: monthlySummary.rows.filter((r) => r.matrixClass === 'horse'),
                   },
                 ]).map((quadrant) => (
@@ -2317,31 +2468,30 @@ export function App({
                         {quadrant.rows.map((r) => (
                           <li key={r.prod.id} style={{ margin: '3px 0' }}>
                             <strong>{r.prod.name}</strong>{' '}
-                            <small>({formatDecimal(r.units ?? 0, 0)} u. · Contrib. {state.currency} {formatDecimal(r.unitGrossProfit, 0)})</small>
+                            <small>({fmt(r.units ?? 0, 0)} · {state.currency} {fmt(r.unitGrossProfit, 0)})</small>
                           </li>
                         ))}
                       </ul>
                     ) : (
-                      <small style={{ color: '#6b7280', fontStyle: 'italic' }}>Sin productos en este cuadrante</small>
+                      <small style={{ color: '#6b7280', fontStyle: 'italic' }}>{t.menuEmptyQuadrant}</small>
                     )}
                   </div>
                 ))}
               </div>
 
-              {/* Tabla Detallada de Productos */}
               <div className="table-wrap">
                 <table className="kit-table">
                   <thead>
                     <tr>
-                      <th>Producto</th>
-                      <th style={{ textAlign: 'right' }}>Unidades vendidas</th>
-                      <th style={{ textAlign: 'right' }}>Precio venta</th>
-                      <th style={{ textAlign: 'right' }}>Costo unitario</th>
-                      <th style={{ textAlign: 'right' }}>Contribución unitaria</th>
-                      <th style={{ textAlign: 'right' }}>Contribución total</th>
-                      <th style={{ textAlign: 'right' }}>Margen %</th>
-                      <th style={{ textAlign: 'center' }}>Clasificación BCG</th>
-                      <th>Estrategia recomendada</th>
+                      <th>{t.recColProduct}</th>
+                      <th style={{ textAlign: 'right' }}>{t.salesColUnits}</th>
+                      <th style={{ textAlign: 'right' }}>{t.recColMenuPrice}</th>
+                      <th style={{ textAlign: 'right' }}>{t.recColCost}</th>
+                      <th style={{ textAlign: 'right' }}>{t.recColUnitMargin}</th>
+                      <th style={{ textAlign: 'right' }}>{t.recColContribMonth}</th>
+                      <th style={{ textAlign: 'right' }}>{t.recColMarginPct}</th>
+                      <th style={{ textAlign: 'center' }}>{t.recColMatrix}</th>
+                      <th>{t.menuColStrategy}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -2350,30 +2500,30 @@ export function App({
                       .sort((a, b) => (b.units ?? 0) - (a.units ?? 0))
                       .map((r) => {
                         let strategyTip = '—';
-                        if (r.matrixClass === 'star') strategyTip = 'Proteger calidad y visibilidad';
-                        else if (r.matrixClass === 'horse') strategyTip = 'Subir precio +3% a +5% o ajustar gramaje';
-                        else if (r.matrixClass === 'puzzle') strategyTip = 'Impulsar en combos o promociones';
-                        else if (r.matrixClass === 'dog') strategyTip = 'Evaluar reemplazo o reformulación';
-                        else if (!r.isComplete) strategyTip = 'Completar costo de insumos faltantes';
+                        if (r.matrixClass === 'star') strategyTip = t.menuStarTip;
+                        else if (r.matrixClass === 'horse') strategyTip = t.menuHorseTip;
+                        else if (r.matrixClass === 'puzzle') strategyTip = t.menuPuzzleTip;
+                        else if (r.matrixClass === 'dog') strategyTip = t.menuDogTip;
+                        else if (!r.isComplete) strategyTip = t.recSimIncompleteErr;
 
                         return (
                           <tr key={r.prod.id}>
                             <td><strong>{r.prod.name}</strong></td>
-                            <td style={{ textAlign: 'right' }}>{r.units !== null ? formatDecimal(r.units, 0) : '—'}</td>
+                            <td style={{ textAlign: 'right' }}>{r.units !== null ? fmt(r.units, 0) : '—'}</td>
                             <td style={{ textAlign: 'right' }}>
-                              {r.isComplete ? `${state.currency} ${formatDecimal(r.evaluatedPrice, 2)}` : '—'}
+                              {r.isComplete ? `${state.currency} ${fmt(r.evaluatedPrice, 2)}` : '—'}
                             </td>
                             <td style={{ textAlign: 'right' }}>
-                              {r.isComplete ? `${state.currency} ${formatDecimal(r.unitCost, 2)}` : 'Incompleto'}
+                              {r.isComplete ? `${state.currency} ${fmt(r.unitCost, 2)}` : t.incompleteTag}
                             </td>
                             <td style={{ textAlign: 'right', fontWeight: 600 }}>
-                              {r.isComplete ? `${state.currency} ${formatDecimal(r.unitGrossProfit, 2)}` : '—'}
+                              {r.isComplete ? `${state.currency} ${fmt(r.unitGrossProfit, 2)}` : '—'}
                             </td>
                             <td style={{ textAlign: 'right', fontWeight: 700, color: '#15803d' }}>
-                              {r.monthlyContribution !== null ? `${state.currency} ${formatDecimal(r.monthlyContribution, 2)}` : '—'}
+                              {r.monthlyContribution !== null ? `${state.currency} ${fmt(r.monthlyContribution, 2)}` : '—'}
                             </td>
                             <td style={{ textAlign: 'right' }}>
-                              {r.evaluatedPrice > 0 ? `${formatDecimal((r.unitGrossProfit / r.evaluatedPrice) * 100, 1)}%` : '—'}
+                              {r.evaluatedPrice > 0 ? `${fmt((r.unitGrossProfit / r.evaluatedPrice) * 100, 1)}%` : '—'}
                             </td>
                             <td style={{ textAlign: 'center' }}>
                               {r.matrixLabel}
@@ -2394,31 +2544,31 @@ export function App({
 
       {activeTab === 'production' && (
         <section className="card">
-          <h2>Calculadora de producción</h2>
-          <p className="lead">Indicá cuántas unidades querés producir. Se calculan los rendimientos de las recetas seleccionadas; la explosión detallada de insumos se habilita cuando la receta tiene componentes validados.</p>
-          {state.catalog.recipes.filter((r) => r.recipe_type === 'product').length === 0 ? <div className="empty-state">No hay productos de carta cargados.</div> : <>
-            <div className="table-wrap"><table className="kit-table"><thead><tr><th>Producto</th><th>Unidades a producir</th><th>Rendimiento de receta</th><th>Estado del costo</th></tr></thead><tbody>
-              {state.catalog.recipes.filter((r) => r.recipe_type === 'product').map((r) => <tr key={r.id}><td>{r.name}</td><td><input aria-label={`Unidades de ${r.name}`} type="number" min="0" step="1" value={productionUnits[r.id] ?? 0} onChange={(e) => setProductionUnits((prev) => ({ ...prev, [r.id]: Math.max(0, Number(e.target.value) || 0) }))} /></td><td>{formatDecimal(r.yield_quantity, 2)} {r.yield_unit}</td><td>{recipeResults.get(r.id)?.status === 'complete' ? 'Costo validado' : 'Revisar receta / precios'}</td></tr>)}
+          <h2>{t.prodTitle}</h2>
+          <p className="lead">{t.prodLead}</p>
+          {state.catalog.recipes.filter((r) => r.recipe_type === 'product').length === 0 ? <div className="empty-state">{t.prodEmpty}</div> : <>
+            <div className="table-wrap"><table className="kit-table"><thead><tr><th>{t.recColProduct}</th><th>{t.prodColToProduce}</th><th>{t.prodColYield}</th><th>{t.prodColCostState}</th></tr></thead><tbody>
+              {state.catalog.recipes.filter((r) => r.recipe_type === 'product').map((r) => <tr key={r.id}><td>{r.name}</td><td><input aria-label={r.name} type="number" min="0" step="1" value={productionUnits[r.id] ?? 0} onChange={(e) => setProductionUnits((prev) => ({ ...prev, [r.id]: Math.max(0, Number(e.target.value) || 0) }))} /></td><td>{fmt(r.yield_quantity, 2)} {r.yield_unit}</td><td>{recipeResults.get(r.id)?.status === 'complete' ? t.prodValidated : t.prodCheckRecipe}</td></tr>)}
             </tbody></table></div>
             {(() => {
               const ingredientTotals = new Map<string, { name: string; unit: string; quantity: number }>();
               const warnings = new Set<string>();
               const expandRecipe = (recipeId: string, requestedYield: number, path: string[] = []) => {
                 if (path.includes(recipeId)) {
-                  warnings.add('Se detectó una referencia circular y se omitió esa rama.');
+                  warnings.add('Cycle detected.');
                   return;
                 }
                 const recipe = state.catalog.recipes.find((item) => item.id === recipeId);
                 const result = recipeResults.get(recipeId);
                 const effectiveYield = result?.raw_yield_quantity && result.raw_yield_quantity > 0 ? result.raw_yield_quantity : (recipe?.yield_quantity ?? 0);
                 if (!recipe || !result || result.status !== 'complete' || !(effectiveYield > 0)) {
-                  warnings.add(`No se pudo explotar ${recipe?.name ?? recipeId}: receta o costo incompleto.`);
+                  warnings.add(`${recipe?.name ?? recipeId}: ${t.prodCheckRecipe}`);
                   return;
                 }
                 const batches = requestedYield / effectiveYield;
                 for (const component of result.components) {
                   if (component.status !== 'complete' || component.normalized_quantity == null) {
-                    warnings.add(`Componente incompleto en ${recipe.name}.`);
+                    warnings.add(`${recipe.name}: ${t.prodCheckRecipe}`);
                     continue;
                   }
                   const quantity = component.normalized_quantity * batches;
@@ -2441,9 +2591,9 @@ export function App({
               const totalUnits = Object.values(productionUnits).reduce((sum, n) => sum + n, 0);
               const ingredients = [...ingredientTotals.values()].sort((a, b) => a.name.localeCompare(b.name));
               return <div style={{ marginTop: 18 }}>
-                <p className="lead">Producción solicitada: <strong>{formatDecimal(totalUnits, 0)} unidades</strong>. La explosión recorre las subrecetas reutilizables y consolida los insumos por unidad base. Es un escenario: no modifica recetas ni ventas.</p>
+                <p className="lead">{t.prodColToProduce}: <strong>{fmt(totalUnits, 0)}</strong></p>
                 {warnings.size > 0 && <div className="alert-banner">{[...warnings].join(' ')}</div>}
-                {ingredients.length === 0 ? <div className="empty-state">Ingresá cantidades y verificá que las recetas y sus subrecetas tengan componentes y costos completos para calcular la demanda de insumos.</div> : <div className="table-wrap"><table className="kit-table"><thead><tr><th>Insumo requerido</th><th>Cantidad total</th><th>Unidad base</th></tr></thead><tbody>{ingredients.map((item) => <tr key={item.name}><td>{item.name}</td><td><strong>{formatDecimal(item.quantity, 3)}</strong></td><td>{item.unit}</td></tr>)}</tbody></table></div>}
+                {ingredients.length === 0 ? <div className="empty-state">{t.prodNoExplosionEmpty}</div> : <div className="table-wrap"><table className="kit-table"><thead><tr><th>{t.prodColIngredient}</th><th>{t.prodColTotalQty}</th><th>{t.prodColBaseUnit}</th></tr></thead><tbody>{ingredients.map((item) => <tr key={item.name}><td>{item.name}</td><td><strong>{fmt(item.quantity, 3)}</strong></td><td>{item.unit}</td></tr>)}</tbody></table></div>}
               </div>;
             })()}
           </>}
@@ -2479,13 +2629,20 @@ export function App({
 
           {simMode === 'business' ? (
             <div style={{ marginTop: 16 }}>
-              {/* Bloque de Gastos Fijos y Punto de Equilibrio */}
+              {simulatedBusinessResult.custom.rows.length === 0 && (
+                <div className="empty-state">
+                  <span>{t.simEmptyCompleteRows}</span>
+                  <button type="button" className="btn btn--primary btn--sm" onClick={() => setActiveTab('recipes')}>
+                    {t.menuGoToRecipesBtn}
+                  </button>
+                </div>
+              )}
               <div style={{ background: 'var(--surface-alt)', border: '1px solid var(--line)', borderRadius: 10, padding: '16px', marginBottom: 20 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 12 }}>
                   <div>
-                    <strong style={{ fontSize: '1.05rem' }}>Estructura de Costos Fijos y Punto de Equilibrio</strong>
+                    <strong style={{ fontSize: '1.05rem' }}>{t.simFixedBlockTitle}</strong>
                     <div style={{ fontSize: '0.82rem', color: 'var(--muted)' }}>
-                      Alimentado automáticamente desde tus gastos operativos mensuales (Alquiler, Sueldos, Suministros, Software).
+                      {t.simFixedBlockDesc}
                     </div>
                   </div>
                   <button
@@ -2493,65 +2650,63 @@ export function App({
                     className="btn btn--sm btn--secondary"
                     onClick={() => setActiveTab('expenses')}
                   >
-                    ✏️ Editar gastos fijos ({state.currency} {formatDecimal(totalMonthlyExpenses, 0)}/mes)
+                    {t.simEditExpensesBtn} ({state.currency} {fmt(totalMonthlyExpenses, 0)})
                   </button>
                 </div>
 
                 <div className="kpi-grid">
                   <div className="kpi-card">
-                    <span>Gastos Fijos Mensuales</span>
-                    <strong>{state.currency} {formatDecimal(totalMonthlyExpenses, 2)}</strong>
-                    <small>{state.operatingExpenses.length} conceptos cargados</small>
+                    <span>{t.simMonthlyFixedKpi}</span>
+                    <strong>{state.currency} {fmt(totalMonthlyExpenses, 2)}</strong>
+                    <small>{state.operatingExpenses.length}</small>
                   </div>
                   <div className="kpi-card">
-                    <span>Facturación de Equilibrio (Break-Even)</span>
+                    <span>{t.simBreakEvenRevKpi}</span>
                     <strong style={{ color: '#d97706' }}>
                       {simulatedBusinessResult.custom.breakEven > 0
-                        ? `${state.currency} ${formatDecimal(simulatedBusinessResult.custom.breakEven, 2)}`
+                        ? `${state.currency} ${fmt(simulatedBusinessResult.custom.breakEven, 2)}`
                         : '—'}
                     </strong>
-                    <small>Mínimo mensual para no perder dinero</small>
+                    <small>{t.simBreakEvenRevKpi}</small>
                   </div>
                   <div className="kpi-card">
-                    <span>Unidades de Equilibrio</span>
+                    <span>{t.simBreakEvenUnitsKpi}</span>
                     <strong>
                       {simulatedBusinessResult.custom.breakEvenUnits > 0
-                        ? `${formatDecimal(simulatedBusinessResult.custom.breakEvenUnits, 0)} u.`
+                        ? fmt(simulatedBusinessResult.custom.breakEvenUnits, 0)
                         : '—'}
                     </strong>
-                    <small>Venta mensual promedio necesaria</small>
+                    <small>{t.simBreakEvenUnitsKpi}</small>
                   </div>
                   <div className="kpi-card">
-                    <span>Margen de Seguridad</span>
+                    <span>{t.simSafetyMarginKpi}</span>
                     <strong style={{ color: simulatedBusinessResult.custom.safetyMarginPct >= 0 ? '#15803d' : '#b91c1c' }}>
                       {simulatedBusinessResult.custom.safetyMarginPct >= 0 ? '+' : ''}
-                      {formatDecimal(simulatedBusinessResult.custom.safetyMarginPct, 1)}%
+                      {fmt(simulatedBusinessResult.custom.safetyMarginPct, 1)}%
                     </strong>
                     <small>
-                      {simulatedBusinessResult.custom.safetyMarginPct >= 0 ? '🟢 Operando en Zona de Ganancia' : '🔴 Operando por debajo del punto de equilibrio'}
+                      {simulatedBusinessResult.custom.safetyMarginPct >= 0 ? t.simZoneProfit : t.simZoneLoss}
                     </small>
                   </div>
                 </div>
               </div>
 
-              {/* Controles de Sensibilidad Interactivos */}
               <div style={{ background: '#fff', border: '1px solid var(--line)', borderRadius: 10, padding: 18, marginBottom: 20 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-                  <h3 style={{ margin: 0, fontSize: '1rem' }}>🎛️ Controles de Simulación en Vivo</h3>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
+                  <h3 style={{ margin: 0, fontSize: '1rem' }}>{t.simControlsTitle}</h3>
                   <button
                     type="button"
                     className="btn btn--sm btn--secondary"
                     onClick={() => { setSimPriceDelta(0); setSimCostDelta(0); setSimVolumeDelta(0); setSimCategoryFilter('all'); }}
                   >
-                    Restablecer simulación a 0%
+                    {t.simResetBtn}
                   </button>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 18 }}>
-                  {/* Slider Variación de Precios de Venta */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 18 }}>
                   <div style={{ background: 'var(--surface-alt)', padding: 14, borderRadius: 8 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                      <span style={{ fontSize: '0.86rem', fontWeight: 600 }}>Variación de Precios de Venta</span>
+                      <span style={{ fontSize: '0.86rem', fontWeight: 600 }}>{t.simPriceDeltaLabel}</span>
                       <strong style={{ color: simPriceDelta >= 0 ? '#15803d' : '#b91c1c' }}>
                         {simPriceDelta >= 0 ? `+${simPriceDelta}%` : `${simPriceDelta}%`}
                       </strong>
@@ -2565,7 +2720,7 @@ export function App({
                       onChange={(e) => setSimPriceDelta(Number(e.target.value))}
                       style={{ width: '100%', cursor: 'pointer' }}
                     />
-                    <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 6 }}>
                       {[-5, 0, 3, 5, 10, 15].map((val) => (
                         <button
                           key={val}
@@ -2580,25 +2735,24 @@ export function App({
                     </div>
                   </div>
 
-                  {/* Slider Inflación / Aumento de Insumos */}
                   <div style={{ background: 'var(--surface-alt)', padding: 14, borderRadius: 8 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                      <span style={{ fontSize: '0.86rem', fontWeight: 600 }}>Aumento de Costo de Insumos</span>
+                      <span style={{ fontSize: '0.86rem', fontWeight: 600 }}>{t.simCostDeltaLabel}</span>
                       <strong style={{ color: simCostDelta > 0 ? '#b91c1c' : '#15803d' }}>
                         {simCostDelta > 0 ? `+${simCostDelta}%` : `${simCostDelta}%`}
                       </strong>
                     </div>
                     <input
                       type="range"
-                      min={0}
-                      max={50}
+                      min={-30}
+                      max={100}
                       step={1}
                       value={simCostDelta}
                       onChange={(e) => setSimCostDelta(Number(e.target.value))}
                       style={{ width: '100%', cursor: 'pointer' }}
                     />
-                    <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
-                      {[0, 5, 10, 15, 20, 25].map((val) => (
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 6 }}>
+                      {[-15, -5, 0, 10, 15, 25].map((val) => (
                         <button
                           key={val}
                           type="button"
@@ -2612,7 +2766,6 @@ export function App({
                     </div>
                   </div>
 
-                  {/* Filtro de Categoría de Insumos para Aumento Focalizado */}
                   <div style={{ background: 'var(--surface-alt)', padding: 14, borderRadius: 8 }}>
                     <label className="field" style={{ margin: 0 }}>
                       <span style={{ fontSize: '0.86rem', fontWeight: 600 }}>{t.simAffectedSuppliesLabel}</span>
@@ -2629,10 +2782,9 @@ export function App({
                     </small>
                   </div>
 
-                  {/* Slider Variación de Volumen de Ventas */}
                   <div style={{ background: 'var(--surface-alt)', padding: 14, borderRadius: 8 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                      <span style={{ fontSize: '0.86rem', fontWeight: 600 }}>Variación de Volumen de Ventas</span>
+                      <span style={{ fontSize: '0.86rem', fontWeight: 600 }}>{t.simVolumeDeltaLabel}</span>
                       <strong style={{ color: simVolumeDelta >= 0 ? '#15803d' : '#b91c1c' }}>
                         {simVolumeDelta >= 0 ? `+${simVolumeDelta}%` : `${simVolumeDelta}%`}
                       </strong>
@@ -2646,7 +2798,7 @@ export function App({
                       onChange={(e) => setSimVolumeDelta(Number(e.target.value))}
                       style={{ width: '100%', cursor: 'pointer' }}
                     />
-                    <div style={{ display: 'flex', gap: 4, marginTop: 6 }}>
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 6 }}>
                       {[-15, -10, 0, 10, 15, 20].map((val) => (
                         <button
                           key={val}
@@ -2663,138 +2815,133 @@ export function App({
                 </div>
               </div>
 
-              {/* Comparación de los 3 Escenarios Lado a Lado */}
               <h3 style={{ margin: '0 0 12px', fontSize: '1.05rem' }}>
-                ⚖️ Comparativa Estratégica de Escenarios (Pesimista · Base · Optimista)
+                {t.simScenariosTitle}
               </h3>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14, marginBottom: 24 }}>
-                {/* Escenario Pesimista */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14, marginBottom: 24 }}>
                 <div style={{ border: '2px solid #f87171', borderRadius: 10, padding: 16, background: '#fef2f2' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                    <strong style={{ color: '#991b1b', fontSize: '1.05rem' }}>🔴 Escenario Pesimista</strong>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, flexWrap: 'wrap', gap: 4 }}>
+                    <strong style={{ color: '#991b1b', fontSize: '1.05rem' }}>{t.simPessimisticTitle}</strong>
                     <span style={{ fontSize: '0.72rem', background: '#fee2e2', color: '#991b1b', padding: '2px 6px', borderRadius: 4, fontWeight: 700 }}>
-                      -15% ventas · +12% insumos
+                      -15% · +12%
                     </span>
                   </div>
                   <p style={{ fontSize: '0.8rem', color: '#6b7280', margin: '0 0 12px' }}>
-                    Caída de demanda e inflación de costos sin ajuste de precios.
+                    {t.simPessimisticDesc}
                   </p>
                   <div style={{ display: 'grid', gap: 6, fontSize: '0.84rem' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Facturación mensual:</span>
-                      <strong>{state.currency} {formatDecimal(simulatedBusinessResult.pessimistic.totRev, 0)}</strong>
+                      <span>{t.simMonthlyRevenue}</span>
+                      <strong>{state.currency} {fmt(simulatedBusinessResult.pessimistic.totRev, 0)}</strong>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Costo insumos (CMV):</span>
-                      <span style={{ color: '#b91c1c' }}>{state.currency} {formatDecimal(simulatedBusinessResult.pessimistic.totCogs, 0)}</span>
+                      <span>{t.simCogs}</span>
+                      <span style={{ color: '#b91c1c' }}>{state.currency} {fmt(simulatedBusinessResult.pessimistic.totCogs, 0)}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Gastos variables:</span>
-                      <span>{state.currency} {formatDecimal(simulatedBusinessResult.pessimistic.totVarCosts, 0)}</span>
+                      <span>{t.simVariableCosts}</span>
+                      <span>{state.currency} {fmt(simulatedBusinessResult.pessimistic.totVarCosts, 0)}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Contribución marginal:</span>
-                      <strong style={{ color: '#15803d' }}>{state.currency} {formatDecimal(simulatedBusinessResult.pessimistic.totContribution, 0)} ({formatDecimal(simulatedBusinessResult.pessimistic.marginPct, 1)}%)</strong>
+                      <span>{t.simContributionMargin}</span>
+                      <strong style={{ color: '#15803d' }}>{state.currency} {fmt(simulatedBusinessResult.pessimistic.totContribution, 0)} ({fmt(simulatedBusinessResult.pessimistic.marginPct, 1)}%)</strong>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #fecaca', paddingTop: 6, marginTop: 4 }}>
-                      <span>Gastos fijos:</span>
-                      <span>{state.currency} {formatDecimal(totalMonthlyExpenses, 0)}</span>
+                      <span>{t.simFixedExpenses}</span>
+                      <span>{state.currency} {fmt(totalMonthlyExpenses, 0)}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.94rem', fontWeight: 800 }}>
-                      <span>Ganancia neta:</span>
+                      <span>{t.simNetProfit}</span>
                       <span style={{ color: simulatedBusinessResult.pessimistic.netProfit >= 0 ? '#15803d' : '#b91c1c' }}>
-                        {state.currency} {formatDecimal(simulatedBusinessResult.pessimistic.netProfit, 0)}
+                        {state.currency} {fmt(simulatedBusinessResult.pessimistic.netProfit, 0)}
                       </span>
                     </div>
                   </div>
                 </div>
 
-                {/* Escenario Base (Actual) */}
                 <div style={{ border: '2px solid var(--line)', borderRadius: 10, padding: 16, background: 'var(--surface)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                    <strong style={{ fontSize: '1.05rem' }}>⚪ Escenario Base</strong>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, flexWrap: 'wrap', gap: 4 }}>
+                    <strong style={{ fontSize: '1.05rem' }}>{t.simBaseTitle}</strong>
                     <span style={{ fontSize: '0.72rem', background: 'var(--surface-alt)', color: 'var(--ink)', padding: '2px 6px', borderRadius: 4, fontWeight: 700 }}>
-                      Actual vigente
+                      0%
                     </span>
                   </div>
                   <p style={{ fontSize: '0.8rem', color: '#6b7280', margin: '0 0 12px' }}>
-                    Tu volumen de ventas y precios actuales según tu catálogo.
+                    {t.simBaseDesc}
                   </p>
                   <div style={{ display: 'grid', gap: 6, fontSize: '0.84rem' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Facturación mensual:</span>
-                      <strong>{state.currency} {formatDecimal(simulatedBusinessResult.base.totRev, 0)}</strong>
+                      <span>{t.simMonthlyRevenue}</span>
+                      <strong>{state.currency} {fmt(simulatedBusinessResult.base.totRev, 0)}</strong>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Costo insumos (CMV):</span>
-                      <span style={{ color: '#b91c1c' }}>{state.currency} {formatDecimal(simulatedBusinessResult.base.totCogs, 0)}</span>
+                      <span>{t.simCogs}</span>
+                      <span style={{ color: '#b91c1c' }}>{state.currency} {fmt(simulatedBusinessResult.base.totCogs, 0)}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Gastos variables:</span>
-                      <span>{state.currency} {formatDecimal(simulatedBusinessResult.base.totVarCosts, 0)}</span>
+                      <span>{t.simVariableCosts}</span>
+                      <span>{state.currency} {fmt(simulatedBusinessResult.base.totVarCosts, 0)}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Contribución marginal:</span>
-                      <strong style={{ color: '#15803d' }}>{state.currency} {formatDecimal(simulatedBusinessResult.base.totContribution, 0)} ({formatDecimal(simulatedBusinessResult.base.marginPct, 1)}%)</strong>
+                      <span>{t.simContributionMargin}</span>
+                      <strong style={{ color: '#15803d' }}>{state.currency} {fmt(simulatedBusinessResult.base.totContribution, 0)} ({fmt(simulatedBusinessResult.base.marginPct, 1)}%)</strong>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--line)', paddingTop: 6, marginTop: 4 }}>
-                      <span>Gastos fijos:</span>
-                      <span>{state.currency} {formatDecimal(totalMonthlyExpenses, 0)}</span>
+                      <span>{t.simFixedExpenses}</span>
+                      <span>{state.currency} {fmt(totalMonthlyExpenses, 0)}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.94rem', fontWeight: 800 }}>
-                      <span>Ganancia neta:</span>
+                      <span>{t.simNetProfit}</span>
                       <span style={{ color: simulatedBusinessResult.base.netProfit >= 0 ? '#15803d' : '#b91c1c' }}>
-                        {state.currency} {formatDecimal(simulatedBusinessResult.base.netProfit, 0)}
+                        {state.currency} {fmt(simulatedBusinessResult.base.netProfit, 0)}
                       </span>
                     </div>
                   </div>
                 </div>
 
-                {/* Escenario Optimista */}
                 <div style={{ border: '2px solid #86efac', borderRadius: 10, padding: 16, background: '#f0fdf4' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                    <strong style={{ color: '#15803d', fontSize: '1.05rem' }}>🟢 Escenario Optimista</strong>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, flexWrap: 'wrap', gap: 4 }}>
+                    <strong style={{ color: '#15803d', fontSize: '1.05rem' }}>{t.simOptimisticTitle}</strong>
                     <span style={{ fontSize: '0.72rem', background: '#dcfce7', color: '#15803d', padding: '2px 6px', borderRadius: 4, fontWeight: 700 }}>
-                      +15% ventas · +5% precio
+                      +15% · +5%
                     </span>
                   </div>
                   <p style={{ fontSize: '0.8rem', color: '#6b7280', margin: '0 0 12px' }}>
-                    Aumento moderado de precios y expansión del volumen de ventas.
+                    {t.simOptimisticDesc}
                   </p>
                   <div style={{ display: 'grid', gap: 6, fontSize: '0.84rem' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Facturación mensual:</span>
-                      <strong>{state.currency} {formatDecimal(simulatedBusinessResult.optimistic.totRev, 0)}</strong>
+                      <span>{t.simMonthlyRevenue}</span>
+                      <strong>{state.currency} {fmt(simulatedBusinessResult.optimistic.totRev, 0)}</strong>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Costo insumos (CMV):</span>
-                      <span style={{ color: '#b91c1c' }}>{state.currency} {formatDecimal(simulatedBusinessResult.optimistic.totCogs, 0)}</span>
+                      <span>{t.simCogs}</span>
+                      <span style={{ color: '#b91c1c' }}>{state.currency} {fmt(simulatedBusinessResult.optimistic.totCogs, 0)}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Gastos variables:</span>
-                      <span>{state.currency} {formatDecimal(simulatedBusinessResult.optimistic.totVarCosts, 0)}</span>
+                      <span>{t.simVariableCosts}</span>
+                      <span>{state.currency} {fmt(simulatedBusinessResult.optimistic.totVarCosts, 0)}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Contribución marginal:</span>
-                      <strong style={{ color: '#15803d' }}>{state.currency} {formatDecimal(simulatedBusinessResult.optimistic.totContribution, 0)} ({formatDecimal(simulatedBusinessResult.optimistic.marginPct, 1)}%)</strong>
+                      <span>{t.simContributionMargin}</span>
+                      <strong style={{ color: '#15803d' }}>{state.currency} {fmt(simulatedBusinessResult.optimistic.totContribution, 0)} ({fmt(simulatedBusinessResult.optimistic.marginPct, 1)}%)</strong>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #bbf7d0', paddingTop: 6, marginTop: 4 }}>
-                      <span>Gastos fijos:</span>
-                      <span>{state.currency} {formatDecimal(totalMonthlyExpenses, 0)}</span>
+                      <span>{t.simFixedExpenses}</span>
+                      <span>{state.currency} {fmt(totalMonthlyExpenses, 0)}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.94rem', fontWeight: 800 }}>
-                      <span>Ganancia neta:</span>
+                      <span>{t.simNetProfit}</span>
                       <span style={{ color: '#15803d' }}>
-                        {state.currency} {formatDecimal(simulatedBusinessResult.optimistic.netProfit, 0)}
+                        {state.currency} {fmt(simulatedBusinessResult.optimistic.netProfit, 0)}
                       </span>
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* Desglose de Impacto por Producto con los Controles Actuales */}
               <h3 style={{ margin: '0 0 12px', fontSize: '1.05rem' }}>
-                📋 Impacto Proyectado por Producto en el Escenario Simulado ({simPriceDelta >= 0 ? `+${simPriceDelta}%` : `${simPriceDelta}%`} precio · {simCostDelta > 0 ? `+${simCostDelta}%` : `${simCostDelta}%`} insumo · {simVolumeDelta >= 0 ? `+${simVolumeDelta}%` : `${simVolumeDelta}%`} ventas)
+                {t.simProductBreakdownTitle} ({simPriceDelta >= 0 ? `+${simPriceDelta}%` : `${simPriceDelta}%`} · {simCostDelta >= 0 ? `+${simCostDelta}%` : `${simCostDelta}%`} · {simVolumeDelta >= 0 ? `+${simVolumeDelta}%` : `${simVolumeDelta}%`})
               </h3>
               <div className="table-wrap">
                 <table className="kit-table">
@@ -2814,43 +2961,43 @@ export function App({
                       <tr key={row.prod.id}>
                         <td><strong>{row.prod.name}</strong></td>
                         <td style={{ textAlign: 'right' }}>
-                          {formatDecimal(row.simUnits, 0)} u.
+                          {fmt(row.simUnits, 0)}
                           {row.simUnits !== row.baseUnits && (
                             <small style={{ display: 'block', color: row.simUnits > row.baseUnits ? '#15803d' : '#b91c1c' }}>
-                              (Base: {formatDecimal(row.baseUnits, 0)} u.)
+                              ({fmt(row.baseUnits, 0)})
                             </small>
                           )}
                         </td>
                         <td style={{ textAlign: 'right' }}>
-                          {state.currency} {formatDecimal(row.simPrice, 0)}
+                          {state.currency} {fmt(row.simPrice, 0)}
                           {row.simPrice !== row.basePrice && (
                             <small style={{ display: 'block', color: 'var(--muted)' }}>
-                              (Base: {state.currency} {formatDecimal(row.basePrice, 0)})
+                              ({state.currency} {fmt(row.basePrice, 0)})
                             </small>
                           )}
                         </td>
                         <td style={{ textAlign: 'right' }}>
-                          {state.currency} {formatDecimal(row.affectedCostShare, 2)}
+                          {state.currency} {fmt(row.affectedCostShare, 2)}
                           <small style={{ display: 'block', color: 'var(--muted)' }}>
-                            ({formatDecimal(row.affectedSharePct, 1)}% del costo)
+                            ({fmt(row.affectedSharePct, 1)}%)
                           </small>
                         </td>
                         <td style={{ textAlign: 'right' }}>
-                          {state.currency} {formatDecimal(row.simCost, 2)}
+                          {state.currency} {fmt(row.simCost, 2)}
                           {Math.abs(row.simCost - row.baseCost) > 0.005 && (
-                            <small style={{ display: 'block', color: '#b91c1c' }}>
-                              (Base: {state.currency} {formatDecimal(row.baseCost, 2)} · +{state.currency} {formatDecimal(row.simCost - row.baseCost, 2)})
+                            <small style={{ display: 'block', color: row.simCost > row.baseCost ? '#b91c1c' : '#15803d' }}>
+                              ({state.currency} {fmt(row.baseCost, 2)} · {row.simCost >= row.baseCost ? '+' : ''}{state.currency} {fmt(row.simCost - row.baseCost, 2)})
                             </small>
                           )}
                         </td>
                         <td style={{ textAlign: 'right', fontWeight: 600 }}>
-                          {state.currency} {formatDecimal(row.simProfit, 2)}
+                          {state.currency} {fmt(row.simProfit, 2)}
                           <small style={{ display: 'block', color: 'var(--muted)' }}>
-                            {row.simPrice > 0 ? `${formatDecimal((row.simProfit / row.simPrice) * 100, 1)}%` : '—'}
+                            {row.simPrice > 0 ? `${fmt((row.simProfit / row.simPrice) * 100, 1)}%` : '—'}
                           </small>
                         </td>
                         <td style={{ textAlign: 'right', fontWeight: 700, color: '#15803d' }}>
-                          {state.currency} {formatDecimal(row.simContribution, 0)}
+                          {state.currency} {fmt(row.simContribution, 0)}
                         </td>
                       </tr>
                     ))}
@@ -2859,32 +3006,31 @@ export function App({
               </div>
             </div>
           ) : (
-            /* Modo Calculadora Unitaria Manual */
             <div style={{ marginTop: 16 }}>
               <div className="builder-grid">
                 <label className="field">
-                  <span>Vincular producto del catálogo</span>
+                  <span>{t.simUnitLinkProduct}</span>
                   <select value={profitProductId} onChange={(e) => setProfitProductId(e.target.value)}>
-                    <option value="">Escenario manual</option>
+                    <option value="">{t.simUnitManualOption}</option>
                     {state.catalog.recipes.filter((r) => r.recipe_type === 'product').map((r) => (
                       <option key={r.id} value={r.id}>{r.name}</option>
                     ))}
                   </select>
                 </label>
                 <label className="field">
-                  <span>Unidades por mes</span>
+                  <span>{t.simUnitUnitsMonth}</span>
                   <input type="number" min="0" value={profitScenario.units} onChange={(e) => setProfitScenario((p) => ({ ...p, units: Math.max(0, Number(e.target.value) || 0) }))} />
                 </label>
                 <label className="field">
-                  <span>Precio de venta unitario ({state.currency})</span>
+                  <span>{t.simUnitPriceLabel} ({state.currency})</span>
                   <input type="number" min="0" value={profitScenario.price} onChange={(e) => setProfitScenario((p) => ({ ...p, price: Math.max(0, Number(e.target.value) || 0) }))} />
                 </label>
                 <label className="field">
-                  <span>Costo variable unitario ({state.currency})</span>
+                  <span>{t.simUnitVarCostLabel} ({state.currency})</span>
                   <input type="number" min="0" value={profitScenario.variableCost} onChange={(e) => setProfitScenario((p) => ({ ...p, variableCost: Math.max(0, Number(e.target.value) || 0) }))} />
                 </label>
                 <label className="field">
-                  <span>Gastos fijos mensuales ({state.currency})</span>
+                  <span>{t.simUnitFixedLabel} ({state.currency})</span>
                   <input type="number" min="0" value={profitScenario.fixedCosts || totalMonthlyExpenses} onChange={(e) => setProfitScenario((p) => ({ ...p, fixedCosts: Math.max(0, Number(e.target.value) || 0) }))} />
                 </label>
               </div>
@@ -2907,9 +3053,9 @@ export function App({
                         fixedCosts: totalMonthlyExpenses,
                       }))}
                     >
-                      Cargar precio, costo y gastos fijos del catálogo
+                      {t.simUnitLoadBtn}
                     </button>
-                    {!canUse && <small style={{ display: 'block', marginTop: 6 }}>Para vincularlo necesitás costo completo y precio de venta cargado en el catálogo. El costo variable incluye packaging y comisión configurados.</small>}
+                    {!canUse && <small style={{ display: 'block', marginTop: 6 }}>{t.simUnitCannotLinkHint}</small>}
                   </div>
                 );
               })()}
@@ -2923,10 +3069,10 @@ export function App({
                 const breakEven = margin && margin > 0 ? effectiveFixed / (margin / 100) : 0;
                 return (
                   <div className="kpi-grid" style={{ marginTop: 16 }}>
-                    <div className="kpi-card"><span>Facturación escenario</span><strong>{state.currency} {formatDecimal(revenue, 2)}</strong></div>
-                    <div className="kpi-card"><span>Contribución marginal</span><strong>{state.currency} {formatDecimal(contribution, 2)}</strong></div>
-                    <div className="kpi-card"><span>Resultado operativo</span><strong style={{ color: result >= 0 ? '#15803d' : '#b91c1c' }}>{state.currency} {formatDecimal(result, 2)}</strong></div>
-                    <div className="kpi-card"><span>Punto de equilibrio</span><strong>{breakEven > 0 ? `${state.currency} ${formatDecimal(breakEven, 2)}` : '—'}</strong><small>Margen: {margin == null ? 'Sin datos' : `${formatDecimal(margin, 1)}%`}</small></div>
+                    <div className="kpi-card"><span>{t.simMonthlyRevenue.replace(':', '')}</span><strong>{state.currency} {fmt(revenue, 2)}</strong></div>
+                    <div className="kpi-card"><span>{t.simContributionMargin.replace(':', '')}</span><strong>{state.currency} {fmt(contribution, 2)}</strong></div>
+                    <div className="kpi-card"><span>{t.simNetProfit.replace(':', '')}</span><strong style={{ color: result >= 0 ? '#15803d' : '#b91c1c' }}>{state.currency} {fmt(result, 2)}</strong></div>
+                    <div className="kpi-card"><span>{t.simBreakEvenRevKpi}</span><strong>{breakEven > 0 ? `${state.currency} ${fmt(breakEven, 2)}` : '—'}</strong><small>{margin == null ? t.noDataTag : `${fmt(margin, 1)}%`}</small></div>
                   </div>
                 );
               })()}
@@ -2937,50 +3083,53 @@ export function App({
 
       {activeTab === 'sync' && (
         <section className="card">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
             <div>
-              <h2>Sincronización 1-Click con Pizzalog App</h2>
-              <p className="lead">
-                Conectá tu espacio de trabajo de Tools con tu restaurante en Pizzalog App para exportar o importar insumos, precios y recetas con un solo clic.
-              </p>
+              <h2>{t.syncTitle}</h2>
+              <p className="lead">{t.syncLead}</p>
             </div>
             {syncStatus?.linked && (
-              <span className="badge" style={{ background: '#e8f5e9', color: '#2e7d32', padding: '6px 12px', borderRadius: 16, fontWeight: 600 }}>
-                🟢 Vinculado: {syncStatus.business_name}
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span className="badge" style={{ background: '#e8f5e9', color: '#2e7d32', padding: '6px 12px', borderRadius: 16, fontWeight: 600 }}>
+                  {t.syncLinkedBadge} {syncStatus.business_name}
+                </span>
+                <button type="button" className="btn btn--sm btn--secondary" disabled={syncLoading} onClick={handleUnlinkApp}>
+                  {t.syncUnlinkBtn}
+                </button>
+              </div>
             )}
           </div>
 
           {syncNotice && (
-            <div className="alert-banner" style={{ background: '#e8f5e9', color: '#2e7d32', marginBottom: 16 }}>
+            <div className="alert-banner" style={{ background: '#e8f5e9', color: '#2e7d32', borderColor: '#86efac', marginBottom: 16 }}>
               {syncNotice}
             </div>
           )}
           {syncError && (
-            <div className="alert-banner" style={{ background: '#ffebee', color: '#c62828', marginBottom: 16 }}>
+            <div className="alert-banner" style={{ marginBottom: 16 }}>
               {syncError}
             </div>
           )}
 
           {!syncStatus?.linked ? (
             <div style={{ maxWidth: 520, padding: 20, border: '1px solid #e0e0e0', borderRadius: 8, background: '#fafafa' }}>
-              <h3 style={{ marginTop: 0 }}>Vincular con tu cuenta de Pizzalog App</h3>
+              <h3 style={{ marginTop: 0 }}>{t.syncLinkCardTitle}</h3>
               <p style={{ fontSize: '0.88rem', color: '#666' }}>
-                Ingresá las credenciales de tu usuario administrador en Pizzalog App para habilitar la sincronización directa.
+                {t.syncLinkCardLead}
               </p>
               <form onSubmit={handleLinkApp} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 <label className="field">
-                  <span>Usuario o Email en Pizzalog App</span>
+                  <span>{t.syncLinkEmailLabel}</span>
                   <input
                     type="text"
                     required
                     value={syncLinkEmail}
                     onChange={(e) => setSyncLinkEmail(e.target.value)}
-                    placeholder="admin o admin@mitienda.com"
+                    placeholder="admin@mitienda.com"
                   />
                 </label>
                 <label className="field">
-                  <span>Contraseña en Pizzalog App</span>
+                  <span>{t.syncLinkPassLabel}</span>
                   <input
                     type="password"
                     required
@@ -2989,58 +3138,32 @@ export function App({
                   />
                 </label>
                 <button type="submit" className="btn btn--primary" disabled={syncLoading} style={{ alignSelf: 'flex-start' }}>
-                  {syncLoading ? 'Verificando...' : 'Vincular Restaurante'}
+                  {syncLoading ? '…' : t.syncLinkSubmitBtn}
                 </button>
               </form>
             </div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 20 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 20 }}>
               <div style={{ padding: 20, border: '1px solid #e2e8f0', borderRadius: 8, background: '#fff' }}>
-                <h3 style={{ marginTop: 0 }}>📤 Exportar a Pizzalog App (Tools → App)</h3>
-                <p style={{ fontSize: '0.88rem', color: '#555', lineHeight: 1.5 }}>
-                  Envía los insumos creados en Tools y sus precios calculados directamente a tu catálogo de insumos de Pizzalog App. Si cambian costos, conservadoramente se invalidan los costos calculados de tus pizzas para que el sistema los recalcule.
-                </p>
-                <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-                  <button
-                    type="button"
-                    className="btn btn--secondary"
-                    disabled={syncLoading}
-                    onClick={() => handleSyncPreview('to_app')}
-                  >
-                    Previsualizar
+                <h3 style={{ marginTop: 0 }}>{t.syncExportTitle}</h3>
+                <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
+                  <button type="button" className="btn btn--secondary" disabled={syncLoading} onClick={() => handleSyncPreview('to_app')}>
+                    {t.syncPreviewBtn}
                   </button>
-                  <button
-                    type="button"
-                    className="btn btn--primary"
-                    disabled={syncLoading}
-                    onClick={() => handleSyncApply('to_app')}
-                  >
-                    {syncLoading ? 'Sincronizando...' : 'Exportar a App ahora'}
+                  <button type="button" className="btn btn--primary" disabled={syncLoading} onClick={() => handleSyncApply('to_app')}>
+                    {syncLoading ? '…' : t.syncExportTitle}
                   </button>
                 </div>
               </div>
 
               <div style={{ padding: 20, border: '1px solid #e2e8f0', borderRadius: 8, background: '#fff' }}>
-                <h3 style={{ marginTop: 0 }}>📥 Importar desde Pizzalog App (App → Tools)</h3>
-                <p style={{ fontSize: '0.88rem', color: '#555', lineHeight: 1.5 }}>
-                  Trae todos tus insumos, recetas, productos activos, precios de venta y el historial mensual de ventas por canal desde Pizzalog App para analizar la rentabilidad real, simular escenarios y proyectar márgenes sin afectar el sistema en vivo.
-                </p>
-                <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-                  <button
-                    type="button"
-                    className="btn btn--secondary"
-                    disabled={syncLoading}
-                    onClick={() => handleSyncPreview('from_app')}
-                  >
-                    Previsualizar
+                <h3 style={{ marginTop: 0 }}>{t.syncImportTitle}</h3>
+                <div style={{ display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' }}>
+                  <button type="button" className="btn btn--secondary" disabled={syncLoading} onClick={() => handleSyncPreview('from_app')}>
+                    {t.syncPreviewBtn}
                   </button>
-                  <button
-                    type="button"
-                    className="btn btn--ocre"
-                    disabled={syncLoading}
-                    onClick={() => handleSyncApply('from_app')}
-                  >
-                    {syncLoading ? 'Importando...' : 'Traer catálogo desde App'}
+                  <button type="button" className="btn btn--ocre" disabled={syncLoading} onClick={() => handleSyncApply('from_app')}>
+                    {syncLoading ? '…' : t.syncImportTitle}
                   </button>
                 </div>
               </div>
@@ -3049,20 +3172,18 @@ export function App({
 
           {syncPreviewData && (
             <div style={{ marginTop: 20, padding: 16, background: '#f8fafc', border: '1px solid #cbd5e1', borderRadius: 8 }}>
-              <h4 style={{ margin: '0 0 10px 0' }}>Resumen de cambios detectados ({syncPreviewData.direction === 'to_app' ? 'Tools → App' : 'App → Tools'})</h4>
+              <h4 style={{ margin: '0 0 10px 0' }}>{syncPreviewData.direction === 'to_app' ? 'Tools → App' : 'App → Tools'}</h4>
               {syncPreviewData.direction === 'from_app' ? (
                 <ul style={{ margin: 0, paddingLeft: 20, fontSize: '0.88rem' }}>
-                  <li>Insumos activos en App: <strong>{syncPreviewData.summary?.app_supplies_count ?? 0}</strong></li>
-                  <li>Productos activos y precios en App: <strong>{syncPreviewData.summary?.app_products_count ?? 0}</strong></li>
-                  <li>Tickets de venta completados en App: <strong>{syncPreviewData.summary?.app_sales_tickets ?? 0}</strong></li>
-                  <li>Registros mensuales de ventas por canal: <strong>{syncPreviewData.summary?.app_sales_history_rows ?? 0}</strong></li>
+                  <li>{t.ingTitle}: <strong>{syncPreviewData.summary?.app_supplies_count ?? 0}</strong></li>
+                  <li>{t.recColProduct}: <strong>{syncPreviewData.summary?.app_products_count ?? 0}</strong></li>
+                  <li>{t.salesTitle}: <strong>{syncPreviewData.summary?.app_sales_tickets ?? 0}</strong></li>
                 </ul>
               ) : (
                 <ul style={{ margin: 0, paddingLeft: 20, fontSize: '0.88rem' }}>
-                  <li>Insumos nuevos para dar de alta en App: <strong>{syncPreviewData.summary?.supplies_to_create ?? 0}</strong></li>
-                  <li>Precios de insumos existentes a actualizar: <strong>{syncPreviewData.summary?.supplies_to_update_cost ?? 0}</strong></li>
-                  <li>Insumos sin cambios: <strong>{syncPreviewData.summary?.supplies_unchanged ?? 0}</strong></li>
-                  <li>Recetas en catálogo de Tools: <strong>{syncPreviewData.summary?.recipes_count ?? 0}</strong></li>
+                  <li>+ {t.ingColName}: <strong>{syncPreviewData.summary?.supplies_to_create ?? 0}</strong></li>
+                  <li>Δ {t.ingColPrice}: <strong>{syncPreviewData.summary?.supplies_to_update_cost ?? 0}</strong></li>
+                  <li>{t.recColProduct}: <strong>{syncPreviewData.summary?.recipes_count ?? 0}</strong></li>
                 </ul>
               )}
             </div>
@@ -3074,14 +3195,12 @@ export function App({
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
             <div>
-              <h2>Catálogo de Insumos, Presentaciones y Rendimiento Utilizable (Merma)</h2>
-              <p className="lead">
-                La merma se aplica una única vez como rendimiento utilizable. Si falta el precio de compra, el insumo se marca INCOMPLETO (nunca $0 silencioso).
-              </p>
+              <h2>{t.ingTitle}</h2>
+              <p className="lead">{t.ingLead}</p>
             </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <label className="btn btn--secondary" style={{ cursor: 'pointer', margin: 0 }}>
-                📋 Actualizar por lista de proveedor
+                {t.ingPriceListBtn}
                 <input
                   type="file"
                   accept=".xlsx,.csv"
@@ -3090,7 +3209,7 @@ export function App({
                 />
               </label>
               <button type="button" className="btn btn--primary" onClick={addIngredient}>
-                + Nuevo Insumo
+                {t.ingNewBtn}
               </button>
             </div>
           </div>
@@ -3098,21 +3217,27 @@ export function App({
             <table className="kit-table">
               <thead>
                 <tr>
-                  <th>Ingrediente</th>
-                  <th>Dimensión / Base <button type="button" className="btn btn--sm" style={{ padding: '0 4px', fontSize: '0.72rem', border: 'none', background: 'transparent', cursor: 'pointer' }} onClick={() => { setHelpTopic('units'); setShowHelpModal(true); }} title="Ver guía de unidades">❓</button></th>
-                  <th>Densidad (g/ml) <button type="button" className="btn btn--sm" style={{ padding: '0 4px', fontSize: '0.72rem', border: 'none', background: 'transparent', cursor: 'pointer' }} onClick={() => { setHelpTopic('density'); setShowHelpModal(true); }} title="Ver densidades comunes">❓</button></th>
-                  <th>Precio Compra ({state.currency})</th>
-                  <th>Cant. Envase</th>
-                  <th>Unidad Envase</th>
-                  <th>Rendimiento (%) <button type="button" className="btn btn--sm" style={{ padding: '0 4px', fontSize: '0.72rem', border: 'none', background: 'transparent', cursor: 'pointer' }} onClick={() => { setHelpTopic('yield'); setShowHelpModal(true); }} title="Ver cómo impacta la merma">❓</button></th>
-                  <th>Costo Utilizable / Base</th>
-                  <th>Costo por kg / L</th>
-                  <th>Estado</th>
+                  <th>{t.ingColName}</th>
+                  <th>{t.ingColDimBase} <button type="button" className="btn btn--sm" style={{ padding: '0 4px', fontSize: '0.72rem', border: 'none', background: 'transparent', cursor: 'pointer' }} onClick={() => { setHelpTopic('units'); setShowHelpModal(true); }} title={t.contextualHelp}>❓</button></th>
+                  <th>{t.ingColDensity} <button type="button" className="btn btn--sm" style={{ padding: '0 4px', fontSize: '0.72rem', border: 'none', background: 'transparent', cursor: 'pointer' }} onClick={() => { setHelpTopic('density'); setShowHelpModal(true); }} title={t.contextualHelp}>❓</button></th>
+                  <th>{t.ingColUnitWeight}</th>
+                  <th>{t.ingColPrice} ({state.currency})</th>
+                  <th>{t.ingColPackQty}</th>
+                  <th>{t.ingColPackUnit}</th>
+                  <th>{t.ingColYield} <button type="button" className="btn btn--sm" style={{ padding: '0 4px', fontSize: '0.72rem', border: 'none', background: 'transparent', cursor: 'pointer' }} onClick={() => { setHelpTopic('yield'); setShowHelpModal(true); }} title={t.contextualHelp}>❓</button></th>
+                  <th>{t.ingColUsableUnit}</th>
+                  <th>{state.unitSystem === 'us_customary' ? t.ingColRefUnitUs : t.ingColRefUnit}</th>
+                  <th>{t.ingColStatus}</th>
+                  <th>{t.ingColHistory}</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
-                {state.catalog.ingredients.map((ing) => {
+                {state.catalog.ingredients.length === 0 ? (
+                  <tr className="empty-state">
+                    <td colSpan={13}>{t.ingEmptyState}</td>
+                  </tr>
+                ) : state.catalog.ingredients.map((ing) => {
                   const priceRec = selectEffectivePurchasePrice(
                     ing.id,
                     state.catalog.purchase_prices,
@@ -3130,16 +3255,22 @@ export function App({
                     );
                   } catch (error) {
                     calcInfo = null;
-                    calcError = error instanceof Error ? error.message : 'No se pudo validar la moneda o unidad.';
+                    calcError = error instanceof Error ? error.message : t.ingCheckCurrencyUnit;
                   }
                   const isComplete = calcInfo?.status === 'complete';
+                  const targetRefUnit: UnitCode =
+                    state.unitSystem === 'us_customary'
+                      ? (ing.base_dimension === 'mass' ? 'lb' : ing.base_dimension === 'volume' ? 'fl_oz_us' : 'unit')
+                      : (ing.base_dimension === 'mass' ? 'kg' : ing.base_dimension === 'volume' ? 'L' : 'unit');
                   let refUnitFactor = 1;
                   try {
-                    const targetRefUnit = ing.base_dimension === 'mass' ? 'kg' : ing.base_dimension === 'volume' ? 'L' : 'unit';
                     refUnitFactor = convertQuantity(1, targetRefUnit, ing.base_unit, ing);
                   } catch {
                     refUnitFactor = ing.base_unit === 'g' || ing.base_unit === 'ml' ? 1000 : 1;
                   }
+                  const massWord = state.locale === 'en' ? 'Mass' : state.locale === 'pt-BR' ? 'Massa' : 'Masa';
+                  const volWord = state.locale === 'en' ? 'Volume' : state.locale === 'pt-BR' ? 'Volume' : 'Volumen';
+                  const countWord = state.locale === 'en' ? 'Count' : state.locale === 'pt-BR' ? 'Contagem' : 'Conteo';
 
                   return (
                     <tr key={ing.id}>
@@ -3166,6 +3297,7 @@ export function App({
                           value={`${ing.base_dimension}:${ing.base_unit}`}
                           onChange={(e) => {
                             const [dim, unit] = e.target.value.split(':') as [Dimension, UnitCode];
+                            const nextIng = { ...ing, base_dimension: dim, base_unit: unit };
                             setState((prev) => ({
                               ...prev,
                               catalog: {
@@ -3175,13 +3307,19 @@ export function App({
                                 ),
                               },
                             }));
+                            if (priceRec && !areUnitsCompatible(priceRec.pack_unit, unit, nextIng)) {
+                              updatePurchasePrice(ing.id, { pack_unit: unit });
+                            }
                           }}
                         >
-                          <option value="mass:g">Masa (g)</option>
-                          <option value="mass:kg">Masa (kg)</option>
-                          <option value="volume:ml">Volumen (ml)</option>
-                          <option value="volume:L">Volumen (L)</option>
-                          <option value="count:unit">Conteo (unit)</option>
+                          <option value="mass:g">{massWord} (g)</option>
+                          <option value="mass:kg">{massWord} (kg)</option>
+                          <option value="mass:oz">{massWord} (oz)</option>
+                          <option value="mass:lb">{massWord} (lb)</option>
+                          <option value="volume:ml">{volWord} (ml)</option>
+                          <option value="volume:L">{volWord} (L)</option>
+                          <option value="volume:fl_oz_us">{volWord} (fl_oz_us)</option>
+                          <option value="count:unit">{countWord} (unit)</option>
                         </select>
                       </td>
                       <td>
@@ -3189,7 +3327,7 @@ export function App({
                           type="number"
                           min={0}
                           step={0.05}
-                          placeholder="Opcional"
+                          placeholder={t.ingOptionalPlaceholder}
                           value={ing.density_g_per_ml ?? ''}
                           onChange={(e) => {
                             const raw = e.target.value;
@@ -3208,14 +3346,37 @@ export function App({
                         />
                       </td>
                       <td>
+                        <input
+                          type="number"
+                          min={0}
+                          step={5}
+                          placeholder={t.ingOptionalPlaceholder}
+                          value={ing.unit_weight_g ?? ''}
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            setState((prev) => ({
+                              ...prev,
+                              catalog: {
+                                ...prev.catalog,
+                                ingredients: prev.catalog.ingredients.map((x) =>
+                                  x.id === ing.id
+                                    ? { ...x, unit_weight_g: raw === '' ? null : Number(raw) }
+                                    : x
+                                ),
+                              },
+                            }));
+                          }}
+                        />
+                      </td>
+                      <td>
                         {ing.is_free ? (
-                          <span className="badge badge--ok">Gratis Explícito</span>
+                          <span className="badge badge--ok">{t.ingFreeExplicit}</span>
                         ) : (
                           <input
                             type="number"
                             min={0}
                             step={50}
-                            placeholder="Sin precio"
+                            placeholder={t.ingNoPricePlaceholder}
                             value={priceRec?.purchase_price ?? ''}
                             onChange={(e) => {
                               const raw = e.target.value;
@@ -3268,17 +3429,17 @@ export function App({
                         />
                       </td>
                       <td>
-                        {isComplete && calcInfo?.usableUnitCostInBase !== null ? (
+                        {isComplete && calcInfo && calcInfo.usableUnitCostInBase !== null ? (
                           <strong>
-                            {state.currency} {formatDecimal(calcInfo!.usableUnitCostInBase, 4)} / {ing.base_unit}
+                            {state.currency} {fmt(calcInfo.usableUnitCostInBase, 4)} / {ing.base_unit}
                           </strong>
                         ) : (
                           '—'
                         )}
                       </td>
                       <td>
-                        {isComplete && calcInfo?.usableUnitCostInBase !== null
-                          ? `${state.currency} ${formatDecimal(calcInfo!.usableUnitCostInBase * refUnitFactor, 2)}`
+                        {isComplete && calcInfo && calcInfo.usableUnitCostInBase !== null
+                          ? `${state.currency} ${fmt(calcInfo.usableUnitCostInBase * refUnitFactor, 2)} / ${targetRefUnit}`
                           : '—'}
                       </td>
                       <td>
@@ -3286,16 +3447,26 @@ export function App({
                           <span className="badge badge--ok">{t.statusComplete}</span>
                         ) : (
                           <span className="badge badge--warn" title={calcError ?? undefined}>
-                            {calcError ? 'Revisar moneda/unidad' : t.statusIncomplete}
+                            {calcError ? t.ingCheckCurrencyUnit : t.statusIncomplete}
                           </span>
                         )}
                       </td>
                       <td>
                         <button
                           type="button"
+                          className="btn btn--sm btn--secondary"
+                          onClick={() => setPriceHistoryIngredientId(ing.id)}
+                          title={t.ingHistoryTitle}
+                        >
+                          {t.ingHistoryBtn}
+                        </button>
+                      </td>
+                      <td>
+                        <button
+                          type="button"
                           className="btn btn--sm btn--danger"
                           onClick={() => deleteIngredient(ing.id)}
-                          title="Eliminar insumo"
+                          title={t.deleteTitle}
                         >
                           ✕
                         </button>
@@ -3313,25 +3484,23 @@ export function App({
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
             <div>
-              <h2>Masas Panaderas (Biga / Poolish) y Subrecetas Reutilizables</h2>
-              <p className="lead">
-                Creá o editá masas con porcentaje panadero o subrecetas por lote (salsas, rellenos) usando el constructor visual.
-              </p>
+              <h2>{t.subTitle}</h2>
+              <p className="lead">{t.subLead}</p>
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button
                 type="button"
                 className="btn btn--ocre"
                 onClick={() => openNewRecipeBuilder('subrecipe', true)}
               >
-                + Nueva Masa Panadera (Biga/Poolish)
+                {t.subNewDoughBtn}
               </button>
               <button
                 type="button"
                 className="btn btn--primary"
                 onClick={() => openNewRecipeBuilder('subrecipe', false)}
               >
-                + Nueva Subreceta / Salsa
+                {t.subNewSubrecipeBtn}
               </button>
             </div>
           </div>
@@ -3339,20 +3508,27 @@ export function App({
             <table className="kit-table">
               <thead>
                 <tr>
-                  <th>Subreceta</th>
-                  <th>Tipo de Cálculo</th>
-                  <th>Rendimiento del Batch</th>
-                  <th>Costo Total Batch</th>
-                  <th>Costo por Unidad Rendimiento</th>
-                  <th>Costo por kg</th>
-                  <th>Estado</th>
-                  <th>Acciones</th>
+                  <th>{t.subColName}</th>
+                  <th>{t.subColCalcType}</th>
+                  <th>{t.subColYield}</th>
+                  <th>{t.subColBatchCost}</th>
+                  <th>{t.subColUnitCost}</th>
+                  <th>{t.subColCostPerKg}</th>
+                  <th>{t.subColStatus}</th>
+                  <th>{t.subColActions}</th>
                 </tr>
               </thead>
               <tbody>
-                {state.catalog.recipes
-                  .filter((r) => r.recipe_type === 'subrecipe')
-                  .map((sub) => {
+                {(() => {
+                  const subrecipes = state.catalog.recipes.filter((r) => r.recipe_type === 'subrecipe');
+                  if (subrecipes.length === 0) {
+                    return (
+                      <tr className="empty-state">
+                        <td colSpan={8}>{t.subEmptyState}</td>
+                      </tr>
+                    );
+                  }
+                  return subrecipes.map((sub) => {
                     const res = recipeResults.get(sub.id);
                     const isComplete = res?.status === 'complete';
                     return (
@@ -3362,25 +3538,25 @@ export function App({
                         </td>
                         <td>
                           {sub.bakers_dough
-                            ? `Panificación (${sub.bakers_dough.hydration_pct}% hidr · ${sub.bakers_dough.yield_basis})`
-                            : `Subreceta (${sub.components?.length ?? 0} componentes)`}
+                            ? `${fmt(sub.bakers_dough.hydration_pct, 1)}% · ${sub.bakers_dough.yield_basis}`
+                            : `${t.builderTypeSubrecipe} (${sub.components?.length ?? 0})`}
                         </td>
                         <td>
-                          {sub.yield_quantity} {sub.yield_unit}
+                          {fmt(sub.yield_quantity, 2)} {sub.yield_unit}
                         </td>
                         <td>
-                          {isComplete && res?.batch_cost
-                            ? `${state.currency} ${res.batch_cost}`
-                            : 'INCOMPLETO'}
+                          {isComplete && res?.raw_batch_cost != null
+                            ? `${state.currency} ${fmt(res.raw_batch_cost, 2)}`
+                            : t.incompleteTag}
                         </td>
                         <td>
                           {isComplete && res?.raw_unit_cost !== null && res?.raw_unit_cost !== undefined
-                            ? `${state.currency} ${formatDecimal(res.raw_unit_cost, 4)} / ${sub.yield_unit}`
+                            ? `${state.currency} ${fmt(res.raw_unit_cost, 4)} / ${sub.yield_unit}`
                             : '—'}
                         </td>
                         <td>
-                          {isComplete && res?.cost_per_kg
-                            ? `${state.currency} ${formatDecimal(res.cost_per_kg, 2)} / kg`
+                          {isComplete && res?.cost_per_kg != null
+                            ? `${state.currency} ${fmt(res.cost_per_kg, 2)} / kg`
                             : '—'}
                         </td>
                         <td>
@@ -3388,25 +3564,29 @@ export function App({
                             {isComplete ? t.statusComplete : t.statusIncomplete}
                           </span>
                         </td>
-                        <td style={{ display: 'flex', gap: 6 }}>
-                          <button
-                            type="button"
-                            className="btn btn--sm"
-                            onClick={() => openEditRecipeBuilder(sub)}
-                          >
-                            ✏️ Editar
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn--sm btn--danger"
-                            onClick={() => deleteRecipe(sub.id)}
-                          >
-                            ✕
-                          </button>
+                        <td>
+                          <div className="row-actions">
+                            <button
+                              type="button"
+                              className="btn btn--sm"
+                              onClick={() => openEditRecipeBuilder(sub)}
+                            >
+                              {t.subEditBtn}
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn--sm btn--danger"
+                              onClick={() => deleteRecipe(sub.id)}
+                              title={t.deleteTitle}
+                            >
+                              ✕
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
-                  })}
+                  });
+                })()}
               </tbody>
             </table>
           </div>
@@ -3417,17 +3597,15 @@ export function App({
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
             <div>
-              <h2>Constructor de Recetas, Precios, Unidades Vendidas / Mes e Ingeniería de Menú</h2>
-              <p className="lead">
-                Cargá las <strong>Unidades Vendidas / Mes</strong> de cada producto para proyectar tu Contribución Marginal Mensual, clasificar platos en la Matriz de Ingeniería de Menú y calcular tu Ganancia Neta descontando alquileres y costos fijos.
-              </p>
+              <h2>{t.recTitle}</h2>
+              <p className="lead">{t.recLead}</p>
             </div>
             <button
               type="button"
               className="btn btn--primary"
               onClick={() => openNewRecipeBuilder('product', false)}
             >
-              + Nueva Receta de Producto
+              {t.recNewBtn}
             </button>
           </div>
 
@@ -3435,22 +3613,26 @@ export function App({
             <table className="kit-table">
               <thead>
                 <tr>
-                  <th>Producto</th>
-                  <th>Matriz Menú</th>
-                  <th>Costo Ingred.</th>
-                  <th>Precio Sugerido</th>
-                  <th>Precio Carta ({state.currency})</th>
-                  <th>Food Cost %</th>
-                  <th>Margen Unit. ($)</th>
-                  <th>Margen %</th>
-                  <th>Markup %</th>
-                  <th>Unidades / Mes</th>
-                  <th>Contribución Mes ($)</th>
-                  <th>Acciones</th>
+                  <th>{t.recColProduct}</th>
+                  <th>{t.recColMatrix}</th>
+                  <th>{t.recColCost}</th>
+                  <th>{t.recColSuggested}</th>
+                  <th>{t.recColMenuPrice} ({state.currency})</th>
+                  <th>{t.recColFcPct}</th>
+                  <th>{t.recColUnitMargin} ({state.currency})</th>
+                  <th>{t.recColMarginPct}</th>
+                  <th>{t.recColMarkupPct}</th>
+                  <th>{t.recColUnitsMonth}</th>
+                  <th>{t.recColContribMonth} ({state.currency})</th>
+                  <th>{t.recColActions}</th>
                 </tr>
               </thead>
               <tbody>
-                {monthlySummary.rows.map((row) => {
+                {monthlySummary.rows.length === 0 ? (
+                  <tr className="empty-state">
+                    <td colSpan={12}>{t.recEmptyState}</td>
+                  </tr>
+                ) : monthlySummary.rows.map((row) => {
                   const { prod, res, pricing, isComplete, units, customPrice, monthlyContribution, matrixClass, matrixLabel } = row;
                   const hasNoRecipeYet = (prod.components?.length ?? 0) === 0 && !prod.bakers_dough;
                   return (
@@ -3459,13 +3641,13 @@ export function App({
                         <strong>{prod.name}</strong>
                         {!isComplete && hasNoRecipeYet && (
                           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-                            📋 Sin receta cargada — hacé clic en «✏️ Receta» para asignar insumos
+                            {t.recNoRecipeHint}
                           </div>
                         )}
                         {!isComplete && !hasNoRecipeYet && res && res.missing_inputs.length > 0 && (
                           <div style={{ fontSize: 11, color: 'var(--warn)', marginTop: 4 }}>
-                            ⚠️ Falta precio:{' '}
-                            {res.missing_inputs.map((m) => m.ingredient_name).join(', ')} (Parcial: {state.currency} {res.partial_batch_cost})
+                            {t.recMissingPriceLabel}{' '}
+                            {res.missing_inputs.map((m) => m.ingredient_name).join(', ')} ({t.recPartialLabel} {state.currency} {fmt(res.raw_partial_batch_cost, 2)})
                           </div>
                         )}
                       </td>
@@ -3473,67 +3655,90 @@ export function App({
                         {isComplete && matrixClass ? (
                           <span className={`badge badge--${matrixClass}`}>{matrixLabel}</span>
                         ) : (
-                          <span className="badge badge--warn">{hasNoRecipeYet ? 'SIN RECETA' : t.statusIncomplete}</span>
+                          <span className="badge badge--warn">{hasNoRecipeYet ? t.noRecipeTag : t.statusIncomplete}</span>
                         )}
                       </td>
                       <td>
-                        {isComplete && res?.unit_cost ? (
+                        {isComplete && res?.raw_unit_cost != null ? (
                           <strong>
-                            {state.currency} {res.unit_cost}
+                            {state.currency} {fmt(res.raw_unit_cost, 2)}
                           </strong>
                         ) : (
-                          <span style={{ color: 'var(--warn)', fontWeight: 700 }}>{hasNoRecipeYet ? 'SIN RECETA' : 'INCOMPLETO'}</span>
+                          <span style={{ color: 'var(--warn)', fontWeight: 700 }}>{hasNoRecipeYet ? t.noRecipeTag : t.incompleteTag}</span>
                         )}
                       </td>
                       <td>
-                        {isComplete && pricing?.suggested_price ? (
+                        {isComplete && pricing?.raw_suggested_price != null ? (
                           <strong style={{ color: 'var(--brand)' }}>
-                            {state.currency} {pricing.suggested_price}
+                            {state.currency} {fmt(pricing.raw_suggested_price, 0)}
                           </strong>
                         ) : (
-                          <span className="badge badge--warn">BLOQUEADO</span>
+                          <span className="badge badge--warn">{t.blockedTag}</span>
                         )}
                       </td>
                       <td>
-                        <input
-                          type="number"
-                          min={0}
-                          step={100}
-                          placeholder={pricing?.suggested_price ?? 'Sugerido'}
-                          value={customPrice ?? ''}
-                          onChange={(e) => {
-                            const raw = e.target.value;
-                            setState((prev) => ({
-                              ...prev,
-                              productSalesMap: {
-                                ...prev.productSalesMap,
-                                [prod.id]: {
-                                  monthlyUnitsSold: prev.productSalesMap?.[prod.id]?.monthlyUnitsSold,
-                                  sellingPrice: raw === '' ? null : Number(raw),
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <input
+                            type="number"
+                            min={0}
+                            step={100}
+                            placeholder={pricing?.raw_suggested_price != null ? fmt(pricing.raw_suggested_price, 0) : t.recSuggestedPlaceholder}
+                            value={customPrice ?? ''}
+                            onChange={(e) => {
+                              const raw = e.target.value;
+                              setState((prev) => ({
+                                ...prev,
+                                productSalesMap: {
+                                  ...prev.productSalesMap,
+                                  [prod.id]: {
+                                    monthlyUnitsSold: prev.productSalesMap?.[prod.id]?.monthlyUnitsSold,
+                                    sellingPrice: raw === '' ? null : Number(raw),
+                                  },
                                 },
-                              },
-                            }));
-                          }}
-                        />
+                              }));
+                            }}
+                          />
+                          {customPrice != null && (
+                            <button
+                              type="button"
+                              className="btn btn--sm btn--secondary"
+                              title={t.recUseSuggestedBtn}
+                              onClick={() =>
+                                setState((prev) => ({
+                                  ...prev,
+                                  productSalesMap: {
+                                    ...prev.productSalesMap,
+                                    [prod.id]: {
+                                      ...prev.productSalesMap?.[prod.id],
+                                      sellingPrice: null,
+                                    },
+                                  },
+                                }))
+                              }
+                            >
+                              {t.recUseSuggestedBtn}
+                            </button>
+                          )}
+                        </div>
                       </td>
                       <td>
                         {isComplete && pricing?.food_cost_pct !== null && pricing?.food_cost_pct !== undefined
-                          ? `${formatDecimal(pricing.food_cost_pct, 1)}%`
+                          ? `${fmt(pricing.food_cost_pct, 1)}%`
                           : '—'}
                       </td>
                       <td>
-                        {isComplete && pricing?.gross_profit
-                          ? `${state.currency} ${pricing.gross_profit}`
+                        {isComplete && pricing?.raw_gross_profit != null
+                          ? `${state.currency} ${fmt(pricing.raw_gross_profit, 0)}`
                           : '—'}
                       </td>
                       <td>
                         {isComplete && pricing?.gross_margin_pct !== null && pricing?.gross_margin_pct !== undefined
-                          ? `${formatDecimal(pricing.gross_margin_pct, 1)}%`
+                          ? `${fmt(pricing.gross_margin_pct, 1)}%`
                           : '—'}
                       </td>
                       <td>
                         {isComplete && pricing?.markup_pct !== null && pricing?.markup_pct !== undefined
-                          ? `${formatDecimal(pricing.markup_pct, 1)}%`
+                          ? `${fmt(pricing.markup_pct, 1)}%`
                           : '—'}
                       </td>
                       <td>
@@ -3542,7 +3747,7 @@ export function App({
                           min={0}
                           step={10}
                           value={units ?? ''}
-                          placeholder="Sin datos"
+                          placeholder={t.noDataTag}
                           onChange={(e) => {
                             const raw = e.target.value;
                             const nextUnits = raw === '' ? null : Math.max(0, Number(raw) || 0);
@@ -3562,27 +3767,30 @@ export function App({
                       <td>
                         {isComplete && monthlyContribution !== null ? (
                           <strong>
-                            {state.currency} {formatDecimal(monthlyContribution, 0)}
+                            {state.currency} {fmt(monthlyContribution, 0)}
                           </strong>
                         ) : (
                           '—'
                         )}
                       </td>
-                      <td style={{ display: 'flex', gap: 6 }}>
-                        <button
-                          type="button"
-                          className="btn btn--sm"
-                          onClick={() => openEditRecipeBuilder(prod)}
-                        >
-                          ✏️ Receta
-                        </button>
-                        <button
-                          type="button"
-                          className="btn btn--sm btn--danger"
-                          onClick={() => deleteRecipe(prod.id)}
-                        >
-                          ✕
-                        </button>
+                      <td>
+                        <div className="row-actions">
+                          <button
+                            type="button"
+                            className="btn btn--sm"
+                            onClick={() => openEditRecipeBuilder(prod)}
+                          >
+                            {t.recEditRecipeBtn}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn--sm btn--danger"
+                            onClick={() => deleteRecipe(prod.id)}
+                            title={t.deleteTitle}
+                          >
+                            ✕
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -3593,44 +3801,44 @@ export function App({
 
           <div className="kpi-grid">
             <div className="kpi-box">
-              <div className="kpi-box__label">Unidades Mensuales Totales</div>
-              <div className="kpi-box__value">{monthlySummary.hasSalesData ? String(monthlySummary.totalUnits) + ' u/mes' : 'Sin datos'}</div>
-              <div className="kpi-box__sub">{state.salesPeriod ? `Ventas importadas para ${state.salesPeriod}` : 'Suma de productos con ventas cargadas'}</div>
+              <div className="kpi-box__label">{t.recKpiTotalUnits}</div>
+              <div className="kpi-box__value">{monthlySummary.hasSalesData ? `${fmt(monthlySummary.totalUnits, 0)} u` : t.noDataTag}</div>
+              <div className="kpi-box__sub">{state.salesPeriod ? state.salesPeriod : t.recKpiTotalUnits}</div>
             </div>
             <div className="kpi-box">
-              <div className="kpi-box__label">Facturación del período</div>
+              <div className="kpi-box__label">{t.recKpiRevenue}</div>
               <div className="kpi-box__value">
-                {monthlySummary.hasSalesData ? `${state.currency} ${formatDecimal(monthlySummary.totalRevenue, 0)}` : 'Sin datos'}
+                {monthlySummary.hasSalesData ? `${state.currency} ${fmt(monthlySummary.totalRevenue, 0)}` : t.noDataTag}
               </div>
               <div className="kpi-box__sub">
                 {monthlySummary.hasSalesData
-                  ? `CMV de ingredientes: ${state.currency} ${formatDecimal(monthlySummary.totalCogs, 0)}`
-                  : 'Importá ventas o cargá unidades por producto'}
+                  ? `${t.simCogs} ${state.currency} ${fmt(monthlySummary.totalCogs, 0)}`
+                  : t.recKpiNetHintMissing}
               </div>
             </div>
             <div className="kpi-box">
-              <div className="kpi-box__label">Contribución marginal del período</div>
+              <div className="kpi-box__label">{t.recKpiContribution}</div>
               <div className="kpi-box__value">
-                {monthlySummary.hasSalesData ? `${state.currency} ${formatDecimal(monthlySummary.totalContribution, 0)}` : 'Sin datos'}
+                {monthlySummary.hasSalesData ? `${state.currency} ${fmt(monthlySummary.totalContribution, 0)}` : t.noDataTag}
               </div>
               <div className="kpi-box__sub">
                 {monthlySummary.hasSalesData
-                  ? `Margen de contribución ponderado: ${formatDecimal(monthlySummary.weightedMarginPct, 1)}%`
-                  : 'Se calcula cuando hay ventas registradas'}
+                  ? `${fmt(monthlySummary.weightedMarginPct, 1)}%`
+                  : t.recKpiNetHintMissing}
               </div>
             </div>
             <div className="kpi-box kpi-box--highlight">
-              <div className="kpi-box__label">Resultado operativo estimado</div>
+              <div className="kpi-box__label">{t.recKpiNetResult}</div>
               <div
                 className="kpi-box__value"
                 style={{ color: netOperatingProfit === null ? 'inherit' : netOperatingProfit >= 0 ? '#4ade80' : '#f87171' }}
               >
-                {netOperatingProfit === null ? 'Sin datos' : `${state.currency} ${formatDecimal(netOperatingProfit, 0)}`}
+                {netOperatingProfit === null ? t.noDataTag : `${state.currency} ${fmt(netOperatingProfit, 0)}`}
               </div>
               <div className="kpi-box__sub">
                 {netOperatingProfit === null
-                  ? 'Requiere ventas registradas y gastos cargados'
-                  : `Contribución menos ${state.currency} ${formatDecimal(totalMonthlyExpenses, 0)} de gastos registrados. No incluye impuestos ni costos omitidos.`}
+                  ? t.recKpiNetHintMissing
+                  : `${t.simFixedExpenses} ${state.currency} ${fmt(totalMonthlyExpenses, 0)}`}
               </div>
             </div>
           </div>
@@ -3641,28 +3849,30 @@ export function App({
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
             <div>
-              <h2>Gastos Operativos Mensuales (Alquiler, Sueldos, Servicios) y Rentabilidad Neta</h2>
-              <p className="lead">
-                Los costos fijos no distorsionan el Food Cost del plato: se cubren con la Contribución Marginal Mensual generada por las unidades vendidas en la Pestaña 3.
-              </p>
+              <h2>{t.expTitle}</h2>
+              <p className="lead">{t.expLead}</p>
             </div>
             <button type="button" className="btn btn--primary" onClick={addOperatingExpense}>
-              + Agregar Costo Fijo
+              {t.expAddBtn}
             </button>
           </div>
           <div className="table-wrap">
             <table className="kit-table">
               <thead>
                 <tr>
-                  <th>Concepto Operativo</th>
-                  <th>Categoría</th>
-                  <th>Frecuencia</th>
-                  <th>Importe ({state.currency})</th>
+                  <th>{t.expColName}</th>
+                  <th>{t.expColCategory}</th>
+                  <th>{t.expColPeriod}</th>
+                  <th>{t.expColAmount} ({state.currency})</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
-                {state.operatingExpenses.map((exp) => (
+                {state.operatingExpenses.length === 0 ? (
+                  <tr className="empty-state">
+                    <td colSpan={5}>{t.expEmptyState}</td>
+                  </tr>
+                ) : state.operatingExpenses.map((exp) => (
                   <tr key={exp.id}>
                     <td>
                       <input
@@ -3692,12 +3902,12 @@ export function App({
                           }));
                         }}
                       >
-                        <option value="rent">Alquiler</option>
-                        <option value="payroll">Personal / Sueldos</option>
-                        <option value="utilities">Servicios (Luz/Gas/Agua)</option>
-                        <option value="software">Software / Contabilidad</option>
-                        <option value="taxes">Impuestos / Tasas</option>
-                        <option value="other">Otros Fijos</option>
+                        <option value="rent">{t.expCatRent}</option>
+                        <option value="payroll">{t.expCatPayroll}</option>
+                        <option value="utilities">{t.expCatUtilities}</option>
+                        <option value="software">{t.expCatSoftware}</option>
+                        <option value="taxes">{t.expCatTaxes}</option>
+                        <option value="other">{t.expCatOther}</option>
                       </select>
                     </td>
                     <td>
@@ -3713,9 +3923,9 @@ export function App({
                           }));
                         }}
                       >
-                        <option value="monthly">Mensual</option>
-                        <option value="weekly">Semanal</option>
-                        <option value="yearly">Anual</option>
+                        <option value="monthly">{t.expPeriodMonthly}</option>
+                        <option value="weekly">{t.expPeriodWeekly}</option>
+                        <option value="yearly">{t.expPeriodYearly}</option>
                       </select>
                     </td>
                     <td>
@@ -3740,6 +3950,7 @@ export function App({
                         type="button"
                         className="btn btn--sm btn--danger"
                         onClick={() => deleteOperatingExpense(exp.id)}
+                        title={t.deleteTitle}
                       >
                         ✕
                       </button>
@@ -3752,48 +3963,48 @@ export function App({
 
           <div className="kpi-grid">
             <div className="kpi-box">
-              <div className="kpi-box__label">Total Costos Fijos Mensuales</div>
+              <div className="kpi-box__label">{t.expKpiTotalFixed}</div>
               <div className="kpi-box__value">
-                {state.currency} {formatDecimal(totalMonthlyExpenses, 0)}
+                {state.currency} {fmt(totalMonthlyExpenses, 0)}
               </div>
-              <div className="kpi-box__sub">Alquiler + Nómina + Servicios</div>
+              <div className="kpi-box__sub">{t.expCatRent} + {t.expCatPayroll} + {t.expCatUtilities}</div>
             </div>
             <div className="kpi-box">
-              <div className="kpi-box__label">Contribución Marginal (Ventas Mes)</div>
+              <div className="kpi-box__label">{t.expKpiContrib}</div>
               <div className="kpi-box__value">
-                {monthlySummary.hasSalesData ? `${state.currency} ${formatDecimal(monthlySummary.totalContribution, 0)}` : 'Sin datos'}
+                {monthlySummary.hasSalesData ? `${state.currency} ${fmt(monthlySummary.totalContribution, 0)}` : t.noDataTag}
               </div>
               <div className="kpi-box__sub">
-                {monthlySummary.hasSalesData ? `Por ${monthlySummary.totalUnits} unidades vendidas/mes` : 'Sin ventas registradas'}
+                {monthlySummary.hasSalesData ? `${fmt(monthlySummary.totalUnits, 0)} u` : t.noDataTag}
               </div>
             </div>
             <div className="kpi-box">
-              <div className="kpi-box__label">Venta de equilibrio estimada</div>
+              <div className="kpi-box__label">{t.expKpiBreakEven}</div>
               <div className="kpi-box__value">
                 {monthlySummary.hasSalesData && monthlySummary.weightedMarginPct > 0
-                  ? `${state.currency} ${formatDecimal(breakEvenRevenue, 0)}`
-                  : 'Sin datos'}
+                  ? `${state.currency} ${fmt(breakEvenRevenue, 0)}`
+                  : t.noDataTag}
               </div>
               <div className="kpi-box__sub">
                 {monthlySummary.hasSalesData && monthlySummary.weightedMarginPct > 0
-                  ? `Con margen de contribución ponderado del ${formatDecimal(monthlySummary.weightedMarginPct, 1)}%`
-                  : 'Requiere ventas registradas y margen calculable'}
+                  ? `${fmt(monthlySummary.weightedMarginPct, 1)}%`
+                  : t.recKpiNetHintMissing}
               </div>
             </div>
             <div className="kpi-box kpi-box--highlight">
-              <div className="kpi-box__label">Resultado operativo estimado</div>
+              <div className="kpi-box__label">{t.expKpiNetResult}</div>
               <div
                 className="kpi-box__value"
                 style={{ color: netOperatingProfit === null ? 'inherit' : netOperatingProfit >= 0 ? '#4ade80' : '#f87171' }}
               >
-                {netOperatingProfit === null ? 'Sin datos' : `${state.currency} ${formatDecimal(netOperatingProfit, 0)}`}
+                {netOperatingProfit === null ? t.noDataTag : `${state.currency} ${fmt(netOperatingProfit, 0)}`}
               </div>
               <div className="kpi-box__sub">
                 {netOperatingProfit === null
-                  ? 'Requiere ventas registradas'
+                  ? t.recKpiNetHintMissing
                   : monthlySummary.totalRevenue > 0
-                    ? `${formatDecimal((netOperatingProfit / monthlySummary.totalRevenue) * 100, 1)}% sobre facturación; antes de impuestos y costos no registrados`
-                    : 'Sin facturación registrada'}
+                    ? `${fmt((netOperatingProfit / monthlySummary.totalRevenue) * 100, 1)}%`
+                    : t.noDataTag}
               </div>
             </div>
           </div>
@@ -3802,26 +4013,100 @@ export function App({
 
       {activeTab === 'sales' && (
         <div className="card">
-          <h2>Historial de ventas importado</h2>
+          <h2>{t.salesTitle}</h2>
           <p className="lead">
-            Se conservan el período, el canal y el archivo de origen. Las filas sin coincidencia con un producto de carta quedan pendientes de vinculación; no se descartan ni se mezclan silenciosamente.
-            {state.salesPeriod ? ` El resumen de ventas usa el período ${state.salesPeriod}.` : ''}
+            {t.salesLead}
+            {state.salesPeriod ? ` (${state.salesPeriod})` : ''}
           </p>
+
+          <div className="card" style={{ marginBottom: 14, background: 'var(--surface-alt)' }}>
+            <h4 style={{ margin: '0 0 10px' }}>{t.salesManualTitle}</h4>
+            <div className="builder-grid">
+              <label className="field">
+                <span>{t.recColProduct}</span>
+                <select
+                  value={manualSaleForm.productId || state.catalog.recipes.find((r) => r.recipe_type === 'product')?.id || ''}
+                  onChange={(e) => setManualSaleForm((prev) => ({ ...prev, productId: e.target.value }))}
+                >
+                  {state.catalog.recipes
+                    .filter((r) => r.recipe_type === 'product')
+                    .map((r) => (
+                      <option key={r.id} value={r.id}>{r.name}</option>
+                    ))}
+                </select>
+              </label>
+              <label className="field">
+                <span>{t.salesColUnits}</span>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={manualSaleForm.quantity}
+                  onChange={(e) => setManualSaleForm((prev) => ({ ...prev, quantity: Math.max(0, Number(e.target.value) || 0) }))}
+                />
+              </label>
+              <label className="field">
+                <span>{t.salesColChannel}</span>
+                <input
+                  type="text"
+                  value={manualSaleForm.channel}
+                  onChange={(e) => setManualSaleForm((prev) => ({ ...prev, channel: e.target.value }))}
+                />
+              </label>
+              <label className="field">
+                <span>{t.salesColPeriod} (Inicio)</span>
+                <input
+                  type="date"
+                  value={manualSaleForm.periodStart}
+                  onChange={(e) => setManualSaleForm((prev) => ({ ...prev, periodStart: e.target.value }))}
+                />
+              </label>
+              <label className="field">
+                <span>{t.salesColPeriod} (Fin)</span>
+                <input
+                  type="date"
+                  value={manualSaleForm.periodEnd}
+                  onChange={(e) => setManualSaleForm((prev) => ({ ...prev, periodEnd: e.target.value }))}
+                />
+              </label>
+              <label className="field">
+                <span>{t.salesColGrossRev} ({state.currency})</span>
+                <input
+                  type="text"
+                  placeholder={t.ingOptionalPlaceholder}
+                  value={manualSaleForm.grossRevenue}
+                  onChange={(e) => setManualSaleForm((prev) => ({ ...prev, grossRevenue: e.target.value }))}
+                />
+              </label>
+            </div>
+            <div style={{ marginTop: 10, display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={state.catalog.recipes.filter((r) => r.recipe_type === 'product').length === 0 || manualSaleForm.quantity <= 0}
+                onClick={addManualSale}
+              >
+                {t.salesAddBtn}
+              </button>
+            </div>
+          </div>
+
           {(state.salesHistory?.length ?? 0) === 0 ? (
-            <p className="notice-banner">Todavía no hay ventas importadas. Usá «Importar XLSX / CSV» y asigná una hoja al tipo «Ventas».</p>
+            <div className="empty-state">{t.salesEmptyState}</div>
           ) : (
             <div className="table-wrap">
               <table className="kit-table">
                 <thead>
                   <tr>
-                    <th>Producto del TPV</th>
-                    <th>Producto vinculado</th>
-                    <th>Unidades</th>
-                    <th>Período</th>
-                    <th>Canal</th>
-                    <th>Venta bruta</th>
-                    <th>Venta neta</th>
-                    <th>Origen</th>
+                    <th>{t.salesColPosProduct}</th>
+                    <th>{t.salesColLinkedProduct}</th>
+                    <th>{t.salesColUnits}</th>
+                    <th>{t.salesColPeriod}</th>
+                    <th>{t.salesColChannel}</th>
+                    <th>{t.salesColGrossRev}</th>
+                    <th>{t.salesColNetRev}</th>
+                    <th>{t.salesColSource}</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -3832,7 +4117,7 @@ export function App({
                         <td>{sale.product_name}</td>
                         <td>
                           <select
-                            aria-label={`Vincular ${sale.product_name}`}
+                            aria-label={`${t.salesColLinkedProduct} ${sale.product_name}`}
                             value={sale.product_id ?? ''}
                             onChange={(e) => {
                               const nextProductId = e.target.value || null;
@@ -3874,7 +4159,7 @@ export function App({
                               });
                             }}
                           >
-                            <option value="">Pendiente de vincular</option>
+                            <option value="">{t.salesPendingLink}</option>
                             {state.catalog.recipes
                               .filter((recipe) => recipe.recipe_type === 'product')
                               .map((recipe) => (
@@ -3884,12 +4169,22 @@ export function App({
                               ))}
                           </select>
                         </td>
-                        <td>{formatDecimal(sale.quantity, 2)}</td>
-                        <td>{sale.period_start === sale.period_end ? sale.period_start : `${sale.period_start} → ${sale.period_end}`}</td>
+                        <td>{fmt(sale.quantity, 2)}</td>
+                        <td>{sale.period_start === sale.period_end ? fmtDate(sale.period_start) : `${fmtDate(sale.period_start)} → ${fmtDate(sale.period_end)}`}</td>
                         <td>{sale.channel || '—'}</td>
-                        <td>{sale.gross_revenue == null ? '—' : `${state.currency} ${formatDecimal(sale.gross_revenue, 0)}`}</td>
-                        <td>{sale.net_revenue == null ? '—' : `${state.currency} ${formatDecimal(sale.net_revenue, 0)}`}</td>
+                        <td>{sale.gross_revenue == null ? '—' : `${state.currency} ${fmt(sale.gross_revenue, 0)}`}</td>
+                        <td>{sale.net_revenue == null ? '—' : `${state.currency} ${fmt(sale.net_revenue, 0)}`}</td>
                         <td>{sale.source}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="btn btn--sm btn--danger"
+                            onClick={() => deleteSalesRecord(sale.id)}
+                            title={t.deleteTitle}
+                          >
+                            ✕
+                          </button>
+                        </td>
                       </tr>
                     ))}
                 </tbody>
@@ -3902,31 +4197,27 @@ export function App({
       {activeTab === 'snapshots' && (
         <>
           <div className="card">
-            <h2>Snapshots Históricos Inmutables</h2>
-            <p className="lead">
-              Cada snapshot congela los precios de compra, rendimientos, fórmula y hash de entrada. Cambiar precios hoy recalcula el menú actual sin sobrescribir snapshots anteriores.
-            </p>
+            <h2>{t.snapTitle}</h2>
+            <p className="lead">{t.snapLead}</p>
             {state.snapshots.length === 0 ? (
-              <p className="lead">
-                Aún no guardaste snapshots en esta sesión. Hacé clic en <strong>"📸 {t.saveSnapshot}"</strong> arriba a la derecha.
-              </p>
+              <div className="empty-state">{t.snapEmpty}</div>
             ) : (
               <div className="table-wrap">
                 <table className="kit-table">
                   <thead>
                     <tr>
-                      <th>Fecha</th>
-                      <th>Receta</th>
-                      <th>Hash Snapshot</th>
-                      <th>Estado</th>
-                      <th>Costo Unitario Congelado</th>
-                      <th>Precio Sugerido Congelado</th>
+                      <th>{t.snapColDate}</th>
+                      <th>{t.snapColRecipe}</th>
+                      <th>{t.snapColHash}</th>
+                      <th>{t.snapColStatus}</th>
+                      <th>{t.snapColUnitCost}</th>
+                      <th>{t.snapColSuggestedPrice}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {state.snapshots.map((snap, idx) => (
                       <tr key={`${snap.snapshot_id}_${idx}`}>
-                        <td>{new Date(snap.created_at).toLocaleString()}</td>
+                        <td>{fmtDateTime(snap.created_at)}</td>
                         <td>
                           <strong>{snap.cost_result.recipe_name}</strong>
                         </td>
@@ -3939,16 +4230,20 @@ export function App({
                               snap.cost_result.status === 'complete' ? 'badge--ok' : 'badge--warn'
                             }`}
                           >
-                            {snap.cost_result.status.toUpperCase()}
+                            {snap.cost_result.status === 'complete' ? t.statusComplete : t.incompleteTag}
                           </span>
                         </td>
                         <td>
-                          {snap.cost_result.unit_cost
+                          {snap.cost_result.raw_unit_cost != null
+                            ? `${snap.cost_result.currency} ${fmt(snap.cost_result.raw_unit_cost, 2)}`
+                            : snap.cost_result.unit_cost
                             ? `${snap.cost_result.currency} ${snap.cost_result.unit_cost}`
-                            : 'INCOMPLETO'}
+                            : t.incompleteTag}
                         </td>
                         <td>
-                          {snap.pricing_scenario?.suggested_price
+                          {snap.pricing_scenario?.raw_suggested_price != null
+                            ? `${snap.cost_result.currency} ${fmt(snap.pricing_scenario.raw_suggested_price, 0)}`
+                            : snap.pricing_scenario?.suggested_price
                             ? `${snap.cost_result.currency} ${snap.pricing_scenario.suggested_price}`
                             : '—'}
                         </td>
@@ -4067,15 +4362,102 @@ export function App({
       )}
 
       {/* Modal de Actualizador Rápido de Precios por Lista de Proveedor */}
-      {showPriceListModal && (
+      {showPriceListModal && (() => {
+        const pl = state.locale === 'en'
+          ? {
+              title: 'Update Prices from Supplier List',
+              detected: 'products detected in list',
+              total: 'Total in list:',
+              matched: 'Matched:',
+              unmatched: 'Unmatched:',
+              inc: 'Increases:',
+              dec: 'Decreases:',
+              avgVar: 'Avg change:',
+              all: 'All',
+              matchedBtn: 'Matched',
+              unmatchedBtn: 'Unmatched',
+              warnBtn: 'With warnings',
+              colItem: 'Supplier list item',
+              colTools: 'Ingredient in Tools',
+              colListPrice: 'List price',
+              colCurrPrice: 'Current price',
+              colNewUnit: 'New unit cost',
+              colVar: 'Change',
+              pack: 'Pack:',
+              unlinkedOpt: '— Unlinked —',
+              exactMatch: 'Exact',
+              similarMatch: 'Similar',
+              footerNote: 'New purchase records will be added dated today. Existing snapshots and historical calculations stay unchanged.',
+              applyOne: 'price',
+              applyMany: 'prices',
+              applyPrefix: 'Apply',
+            }
+          : state.locale === 'pt-BR'
+          ? {
+              title: 'Atualizar Preços por Lista de Fornecedor',
+              detected: 'produtos detectados na lista',
+              total: 'Total na lista:',
+              matched: 'Vinculados:',
+              unmatched: 'Sem vínculo:',
+              inc: 'Altas:',
+              dec: 'Quedas:',
+              avgVar: 'Var. média:',
+              all: 'Todos',
+              matchedBtn: 'Vinculados',
+              unmatchedBtn: 'Sem vínculo',
+              warnBtn: 'Com alertas',
+              colItem: 'Item na lista do fornecedor',
+              colTools: 'Insumo no Tools',
+              colListPrice: 'Preço lista',
+              colCurrPrice: 'Preço atual',
+              colNewUnit: 'Novo unitário',
+              colVar: 'Variação',
+              pack: 'Embalagem:',
+              unlinkedOpt: '— Sem vínculo —',
+              exactMatch: 'Exato',
+              similarMatch: 'Semelhante',
+              footerNote: 'Serão adicionados novos registros de compra com a data de hoje. Snapshots e cálculos anteriores permanecem intactos.',
+              applyOne: 'preço',
+              applyMany: 'preços',
+              applyPrefix: 'Aplicar',
+            }
+          : {
+              title: 'Actualizar Precios por Lista de Proveedor',
+              detected: 'productos detectados en la lista',
+              total: 'Total en lista:',
+              matched: 'Vinculados:',
+              unmatched: 'Sin vincular:',
+              inc: 'Subas:',
+              dec: 'Bajas:',
+              avgVar: 'Var. promedio:',
+              all: 'Todos',
+              matchedBtn: 'Vinculados',
+              unmatchedBtn: 'Sin vincular',
+              warnBtn: 'Con advertencias',
+              colItem: 'Ítem en lista de proveedor',
+              colTools: 'Insumo en Tools',
+              colListPrice: 'Precio lista',
+              colCurrPrice: 'Precio actual',
+              colNewUnit: 'Nuevo unitario',
+              colVar: 'Variación',
+              pack: 'Envase:',
+              unlinkedOpt: '— Sin vincular —',
+              exactMatch: 'Exacto',
+              similarMatch: 'Similar',
+              footerNote: 'Se agregarán nuevos registros de compra con fecha de hoy. Tus snapshots y cálculos históricos permanecen inalterados.',
+              applyOne: 'precio',
+              applyMany: 'precios',
+              applyPrefix: 'Aplicar',
+            };
+        return (
         <div className="modal-backdrop">
           <div className="modal-panel" style={{ maxWidth: '960px', width: '95%' }}>
             <div className="modal-header">
               <div>
-                <h3>Actualizar Precios por Lista de Proveedor</h3>
-                <small>{priceListFileName} · {priceListMatches.length} productos detectados en la lista</small>
+                <h3>{pl.title}</h3>
+                <small>{priceListFileName} · {priceListMatches.length} {pl.detected}</small>
               </div>
-              <button type="button" className="btn" onClick={() => setShowPriceListModal(false)}>Cerrar</button>
+              <button type="button" className="btn" onClick={() => setShowPriceListModal(false)}>{t.closeBtn}</button>
             </div>
 
             {(() => {
@@ -4102,37 +4484,37 @@ export function App({
                     fontSize: '0.85rem',
                     alignItems: 'center',
                   }}>
-                    <span>Total en lista: <strong>{summary.total}</strong></span>
-                    <span>Vinculados: <strong style={{ color: '#2e7d32' }}>{summary.matched}</strong></span>
-                    <span>Sin vincular: <strong style={{ color: summary.unmatched ? '#d32f2f' : '#666' }}>{summary.unmatched}</strong></span>
-                    <span>Subas: <strong style={{ color: '#c62828' }}>+{summary.increases}</strong></span>
-                    <span>Bajas: <strong style={{ color: '#2e7d32' }}>-{summary.decreases}</strong></span>
+                    <span>{pl.total} <strong>{summary.total}</strong></span>
+                    <span>{pl.matched} <strong style={{ color: '#2e7d32' }}>{summary.matched}</strong></span>
+                    <span>{pl.unmatched} <strong style={{ color: summary.unmatched ? '#d32f2f' : '#666' }}>{summary.unmatched}</strong></span>
+                    <span>{pl.inc} <strong style={{ color: '#c62828' }}>+{summary.increases}</strong></span>
+                    <span>{pl.dec} <strong style={{ color: '#2e7d32' }}>-{summary.decreases}</strong></span>
                     {summary.average_variation_pct != null && (
-                      <span>Var. promedio: <strong>{summary.average_variation_pct > 0 ? `+${summary.average_variation_pct}%` : `${summary.average_variation_pct}%`}</strong></span>
+                      <span>{pl.avgVar} <strong>{summary.average_variation_pct > 0 ? `+${fmt(summary.average_variation_pct, 1)}%` : `${fmt(summary.average_variation_pct, 1)}%`}</strong></span>
                     )}
                   </div>
 
-                  <div style={{ display: 'flex', gap: 8, fontSize: '0.8rem' }}>
+                  <div style={{ display: 'flex', gap: 8, fontSize: '0.8rem', flexWrap: 'wrap' }}>
                     <button
                       type="button"
                       className={`btn btn--sm ${priceListFilter === 'all' ? 'btn--primary' : 'btn--secondary'}`}
                       onClick={() => setPriceListFilter('all')}
                     >
-                      Todos ({priceListMatches.length})
+                      {pl.all} ({priceListMatches.length})
                     </button>
                     <button
                       type="button"
                       className={`btn btn--sm ${priceListFilter === 'matched' ? 'btn--primary' : 'btn--secondary'}`}
                       onClick={() => setPriceListFilter('matched')}
                     >
-                      Vinculados ({summary.matched})
+                      {pl.matchedBtn} ({summary.matched})
                     </button>
                     <button
                       type="button"
                       className={`btn btn--sm ${priceListFilter === 'unmatched' ? 'btn--primary' : 'btn--secondary'}`}
                       onClick={() => setPriceListFilter('unmatched')}
                     >
-                      Sin vincular ({summary.unmatched})
+                      {pl.unmatchedBtn} ({summary.unmatched})
                     </button>
                     {summary.with_warnings > 0 && (
                       <button
@@ -4141,7 +4523,7 @@ export function App({
                         style={{ color: '#e65100', borderColor: '#ffb74d' }}
                         onClick={() => setPriceListFilter('warnings')}
                       >
-                        ⚠️ Con advertencias ({summary.with_warnings})
+                        ⚠️ {pl.warnBtn} ({summary.with_warnings})
                       </button>
                     )}
                   </div>
@@ -4164,12 +4546,12 @@ export function App({
                               }}
                             />
                           </th>
-                          <th>Ítem en lista de proveedor</th>
-                          <th>Insumo en Tools</th>
-                          <th style={{ textAlign: 'right' }}>Precio lista</th>
-                          <th style={{ textAlign: 'right' }}>Precio actual</th>
-                          <th style={{ textAlign: 'right' }}>Nuevo unitario</th>
-                          <th style={{ textAlign: 'center' }}>Variación</th>
+                          <th>{pl.colItem}</th>
+                          <th>{pl.colTools}</th>
+                          <th style={{ textAlign: 'right' }}>{pl.colListPrice}</th>
+                          <th style={{ textAlign: 'right' }}>{pl.colCurrPrice}</th>
+                          <th style={{ textAlign: 'right' }}>{pl.colNewUnit}</th>
+                          <th style={{ textAlign: 'center' }}>{pl.colVar}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -4198,7 +4580,7 @@ export function App({
                                 <div style={{ fontWeight: 600 }}>{match.item.raw_name}</div>
                                 {match.presentation && (
                                   <div style={{ fontSize: '0.74rem', color: '#666' }}>
-                                    Envase: {match.presentation.quantity} {match.presentation.unit}
+                                    {pl.pack} {fmt(match.presentation.quantity, 2)} {match.presentation.unit}
                                   </div>
                                 )}
                                 {match.warnings.map((w, i) => (
@@ -4220,7 +4602,7 @@ export function App({
                                     maxWidth: '220px',
                                   }}
                                 >
-                                  <option value="">— Sin vincular —</option>
+                                  <option value="">{pl.unlinkedOpt}</option>
                                   {state.catalog.ingredients.map((i) => (
                                     <option key={i.id} value={i.id}>
                                       {i.name} ({i.base_unit})
@@ -4229,19 +4611,19 @@ export function App({
                                 </select>
                                 {match.target_id && (
                                   <div style={{ fontSize: '0.7rem', color: '#777', marginTop: 2 }}>
-                                    Match: {match.source === 'exact' ? 'Exacto' : `Similar (${Math.round(match.confidence * 100)}%)`}
+                                    Match: {match.source === 'exact' ? pl.exactMatch : `${pl.similarMatch} (${Math.round(match.confidence * 100)}%)`}
                                   </div>
                                 )}
                               </td>
                               <td style={{ textAlign: 'right' }}>
-                                {state.currency} {formatDecimal(match.item.price, 2)}
+                                {state.currency} {fmt(match.item.price, 2)}
                               </td>
                               <td style={{ textAlign: 'right', color: '#666' }}>
-                                {match.old_price_per_unit != null ? `${state.currency} ${formatDecimal(match.old_price_per_unit, 2)}` : '—'}
+                                {match.old_price_per_unit != null ? `${state.currency} ${fmt(match.old_price_per_unit, 2)}` : '—'}
                               </td>
                               <td style={{ textAlign: 'right', fontWeight: 600 }}>
                                 {match.new_price_per_unit != null && ing
-                                  ? `${state.currency} ${formatDecimal(match.new_price_per_unit, 2)} / ${ing.base_unit}`
+                                  ? `${state.currency} ${fmt(match.new_price_per_unit, 2)} / ${ing.base_unit}`
                                   : '—'}
                               </td>
                               <td style={{ textAlign: 'center' }}>
@@ -4256,7 +4638,7 @@ export function App({
                                       color: isInc ? '#c62828' : isDec ? '#2e7d32' : '#616161',
                                     }}
                                   >
-                                    {match.variation_pct > 0 ? `+${match.variation_pct}%` : `${match.variation_pct}%`}
+                                    {match.variation_pct > 0 ? `+${fmt(match.variation_pct, 1)}%` : `${fmt(match.variation_pct, 1)}%`}
                                   </span>
                                 ) : (
                                   '—'
@@ -4269,13 +4651,13 @@ export function App({
                     </table>
                   </div>
 
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, flexWrap: 'wrap', gap: 10 }}>
                     <small style={{ color: '#666' }}>
-                      Se agregarán nuevos registros de compra con fecha de hoy. Tus snapshots y cálculos históricos permanecen inalterados.
+                      {pl.footerNote}
                     </small>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button type="button" className="btn btn--secondary" onClick={() => setShowPriceListModal(false)}>
-                        Cancelar
+                        {t.cancelBtn}
                       </button>
                       <button
                         type="button"
@@ -4283,7 +4665,7 @@ export function App({
                         disabled={selectedCount === 0}
                         onClick={confirmPriceListApply}
                       >
-                        Aplicar {selectedCount} {selectedCount === 1 ? 'precio' : 'precios'}
+                        {pl.applyPrefix} {selectedCount} {selectedCount === 1 ? pl.applyOne : pl.applyMany}
                       </button>
                     </div>
                   </div>
@@ -4292,35 +4674,102 @@ export function App({
             })()}
           </div>
         </div>
-      )}
+        );
+      })()}
 
-      {/* Modal del Constructor Visual Interactivo de Recetas, Subrecetas y Masas */}
-      {smartImportPreview && (
+      {/* Modal de Revisión de Importación XLSX / CSV */}
+      {smartImportPreview && (() => {
+        const imp = state.locale === 'en'
+          ? {
+              aiRem: 'AI previews remaining today',
+              noteLocal: 'Mapping was performed locally on the server. No external services received your data. Review columns, units and warnings before confirming.',
+              noteAi: 'Up to 20 sample rows per sheet are reviewed to suggest column mappings. Nothing is saved until you confirm.',
+              confidence: 'confidence',
+              rows: 'rows',
+              kindIng: 'Ingredients',
+              kindPrices: 'Purchase prices',
+              kindRecipes: 'Recipes',
+              kindExpenses: 'Operating expenses',
+              kindSales: 'Sales',
+              kindSkip: 'Do not import this sheet',
+              rowPrefix: 'Row',
+              noText: '(empty)',
+              unassigned: 'Unassigned',
+              colPrefix: 'Column',
+              unmatchedTitle: 'Recipe ingredients not matched in catalog',
+              unmatchedDesc: 'Link them to an existing catalog ingredient or leave them to be created as new ingredients.',
+              linkTo: 'Link to:',
+              createNewOpt: 'Create as new ingredient',
+            }
+          : state.locale === 'pt-BR'
+          ? {
+              aiRem: 'pré-visualizações com IA restantes hoje',
+              noteLocal: 'O mapeamento foi feito localmente no servidor sem enviar dados a serviços externos. Revise colunas, unidades e alertas antes de confirmar.',
+              noteAi: 'Amostra de até 20 linhas por aba analisada para sugerir colunas. Nada é salvo até sua confirmação.',
+              confidence: 'confiança',
+              rows: 'linhas',
+              kindIng: 'Insumos',
+              kindPrices: 'Preços de compra',
+              kindRecipes: 'Receitas',
+              kindExpenses: 'Despesas operacionais',
+              kindSales: 'Vendas',
+              kindSkip: 'Não importar esta aba',
+              rowPrefix: 'Linha',
+              noText: '(sem texto)',
+              unassigned: 'Sem atribuição',
+              colPrefix: 'Coluna',
+              unmatchedTitle: 'Insumos em receitas sem correspondência exata no catálogo',
+              unmatchedDesc: 'Vincule a um insumo existente do catálogo ou deixe em branco para criar um novo insumo.',
+              linkTo: 'Vincular a:',
+              createNewOpt: 'Criar como novo insumo',
+            }
+          : {
+              aiRem: 'previsualizaciones con IA restantes hoy',
+              noteLocal: 'El mapeo se realizó localmente en el servidor. No se envió información a servicios externos. Revisá las columnas, unidades y advertencias; nada se guarda hasta tu confirmación.',
+              noteAi: 'Se revisa una muestra de hasta 20 filas por hoja para proponer el mapeo de columnas. Nada se guarda hasta tu confirmación.',
+              confidence: 'confianza',
+              rows: 'filas',
+              kindIng: 'Insumos',
+              kindPrices: 'Precios de compra',
+              kindRecipes: 'Recetas',
+              kindExpenses: 'Gastos operativos',
+              kindSales: 'Ventas',
+              kindSkip: 'No importar esta hoja',
+              rowPrefix: 'Fila',
+              noText: '(sin texto)',
+              unassigned: 'Sin asignar',
+              colPrefix: 'Columna',
+              unmatchedTitle: 'Insumos en recetas sin coincidencia exacta en el catálogo',
+              unmatchedDesc: 'Asociarlos a un insumo existente para costearlos automáticamente o dejarlos para crear como nuevos insumos.',
+              linkTo: 'Vincular a:',
+              createNewOpt: 'Crear como nuevo insumo',
+            };
+        return (
         <div className="modal-backdrop">
           <div className="modal-panel smart-import-panel">
             <div className="modal-header">
               <div>
-                <h3>Revisar importación</h3>
-                <small>{smartImportPreview.fileName} · {smartImportPreview.mappingMode === 'local' ? 'mapeo local, sin IA' : `${smartImportPreview.remaining} previsualizaciones con IA restantes hoy`}</small>
+                <h3>{t.impReviewTitle}</h3>
+                <small>{smartImportPreview.fileName} · {smartImportPreview.mappingMode === 'local' ? t.impLocalModeLabel : `${smartImportPreview.remaining} ${imp.aiRem}`}</small>
               </div>
-              <button type="button" className="btn" onClick={() => setSmartImportPreview(null)}>Cerrar</button>
+              <button type="button" className="btn" onClick={() => setSmartImportPreview(null)}>{t.closeBtn}</button>
             </div>
             {importError && <p className="smart-import-note" role="alert">{importError}</p>}
             <p className="smart-import-note">
               {smartImportPreview.mappingMode === 'local'
-                ? (smartImportPreview.note || 'El mapeo se realizó localmente en el servidor. No se envió información a servicios externos. Revisá las columnas, unidades y advertencias; nada se guarda hasta tu confirmación.')
-                : (smartImportPreview.note || 'Se envían a DeepSeek hasta 20 filas por hoja para proponer el mapeo de columnas. Revisá que esa muestra no incluya información sensible. Los valores no se modifican y nada se guarda hasta tu confirmación.')}
+                ? (smartImportPreview.note || imp.noteLocal)
+                : (smartImportPreview.note || imp.noteAi)}
             </p>
             {smartImportPreview.mappings.map((mapping) => {
               const sheet = smartImportPreview.sheets[mapping.sheet_index];
               if (!sheet) return null;
-              const fieldLabels = IMPORT_FIELD_LABELS[mapping.kind];
+              const fieldLabels = importFieldLabels[mapping.kind];
               const previewRows = sheet.rows.slice(mapping.header_row_index + 1, mapping.header_row_index + 4);
               return (
                 <section className="smart-import-sheet" key={mapping.sheet_index}>
                   <div className="smart-import-sheet__heading">
                     <strong>{mapping.name}</strong>
-                    <span>{Math.round(mapping.confidence * 100)}% confianza · {mapping.row_count} filas</span>
+                    <span>{Math.round(mapping.confidence * 100)}% {imp.confidence} · {mapping.row_count} {imp.rows}</span>
                   </div>
                   {sheet.warnings?.map((warning, index) => (
                     <p className="smart-import-warning-note" key={index}>{warning}</p>
@@ -4332,7 +4781,7 @@ export function App({
                   )}
                   <div className="smart-import-edit-grid">
                     <label className="field">
-                      <span>Tipo de hoja</span>
+                      <span>{t.impSheetKindLabel}</span>
                       <select
                         value={mapping.kind}
                         onChange={(e) => updateSmartImportMapping(mapping.sheet_index, (current) => ({
@@ -4340,16 +4789,16 @@ export function App({
                           kind: e.target.value as ImportSheetMapping['kind'],
                         }))}
                       >
-                        <option value="ingredients">Insumos</option>
-                        <option value="purchase_prices">Precios de compra</option>
-                        <option value="recipes">Recetas</option>
-                        <option value="operating_expenses">Gastos operativos</option>
-                        <option value="sales">Ventas</option>
-                        <option value="unknown">No importar esta hoja</option>
+                        <option value="ingredients">{imp.kindIng}</option>
+                        <option value="purchase_prices">{imp.kindPrices}</option>
+                        <option value="recipes">{imp.kindRecipes}</option>
+                        <option value="operating_expenses">{imp.kindExpenses}</option>
+                        <option value="sales">{imp.kindSales}</option>
+                        <option value="unknown">{imp.kindSkip}</option>
                       </select>
                     </label>
                     <label className="field">
-                      <span>Fila de encabezados</span>
+                      <span>{t.impHeaderRowLabel}</span>
                       <select
                         value={mapping.header_row_index}
                         onChange={(e) => {
@@ -4364,7 +4813,7 @@ export function App({
                       >
                         {sheet.rows.slice(0, 50).map((row, index) => (
                           <option key={index} value={index}>
-                            Fila {index + 1}: {row.slice(0, 3).filter(Boolean).join(' · ').slice(0, 70) || '(sin texto)'}
+                            {imp.rowPrefix} {index + 1}: {row.slice(0, 3).filter(Boolean).join(' · ').slice(0, 70) || imp.noText}
                           </option>
                         ))}
                       </select>
@@ -4385,10 +4834,10 @@ export function App({
                               }));
                             }}
                           >
-                            <option value="">Sin asignar</option>
+                            <option value="">{imp.unassigned}</option>
                             {mapping.headers.map((header, index) => (
                               <option key={index} value={index}>
-                                {header || `Columna ${index + 1}`}
+                                {header || `${imp.colPrefix} ${index + 1}`}
                               </option>
                             ))}
                           </select>
@@ -4419,17 +4868,17 @@ export function App({
               return (
                 <div style={{ background: '#fffbeb', border: '1px solid #f59e0b', borderRadius: 8, padding: 14, margin: '14px 0' }}>
                   <strong style={{ color: '#92400e', display: 'block', marginBottom: 6 }}>
-                    🔍 Insumos en recetas sin coincidencia exacta en el catálogo ({unmatched.length})
+                    🔍 {imp.unmatchedTitle} ({unmatched.length})
                   </strong>
                   <p style={{ fontSize: '0.84rem', color: '#78350f', margin: '0 0 10px' }}>
-                    Las recetas importadas mencionan los siguientes ingredientes que no existen con el mismo nombre en tu lista de insumos. Podés asociarlos a un insumo existente para costearlos automáticamente o dejarlos como nuevos insumos.
+                    {imp.unmatchedDesc}
                   </p>
                   <div style={{ display: 'grid', gap: 8, maxHeight: 180, overflowY: 'auto' }}>
                     {unmatched.map((name) => (
                       <div key={name} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, background: '#fff', padding: '6px 10px', borderRadius: 6, border: '1px solid #fed7aa' }}>
                         <span style={{ fontSize: '0.86rem', fontWeight: 600 }}>{name}</span>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <span style={{ fontSize: '0.78rem', color: '#9a3412' }}>Vincular a:</span>
+                          <span style={{ fontSize: '0.78rem', color: '#9a3412' }}>{imp.linkTo}</span>
                           <select
                             style={{ fontSize: '0.82rem', padding: '3px 6px' }}
                             value={importEquivalences[name.toLowerCase()] ?? ''}
@@ -4443,7 +4892,7 @@ export function App({
                               });
                             }}
                           >
-                            <option value="">Crear como nuevo insumo</option>
+                            <option value="">{imp.createNewOpt}</option>
                             {state.catalog.ingredients.map((ing) => (
                               <option key={ing.id} value={ing.name}>
                                 {ing.name} ({ing.base_unit})
@@ -4459,7 +4908,7 @@ export function App({
             })()}
 
             <div style={{ background: 'var(--surface-alt)', border: '1px solid var(--line)', borderRadius: 10, padding: 16, marginTop: 16 }}>
-              <div style={{ fontWeight: 600, marginBottom: 8, fontSize: '0.94rem' }}>Modalidad de Importación</div>
+              <div style={{ fontWeight: 600, marginBottom: 8, fontSize: '0.94rem' }}>{t.impModeTitle}</div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12 }}>
                 <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: 10, borderRadius: 8, border: !replaceWorkspaceOnImport ? '2px solid var(--brand)' : '1px solid var(--line)', background: !replaceWorkspaceOnImport ? '#fff' : 'transparent', cursor: 'pointer' }}>
                   <input
@@ -4470,9 +4919,9 @@ export function App({
                     style={{ marginTop: 3 }}
                   />
                   <div>
-                    <strong style={{ display: 'block', fontSize: '0.88rem' }}>🔗 Combinar con datos existentes</strong>
+                    <strong style={{ display: 'block', fontSize: '0.88rem' }}>{t.impModeMergeTitle}</strong>
                     <span style={{ fontSize: '0.8rem', color: 'var(--muted)', display: 'block', marginTop: 2 }}>
-                      Conserva recetas, insumos y precios actuales. Detecta duplicados para evitar registros repetidos.
+                      {t.impModeMergeDesc}
                     </span>
                   </div>
                 </label>
@@ -4485,9 +4934,9 @@ export function App({
                     style={{ marginTop: 3 }}
                   />
                   <div>
-                    <strong style={{ display: 'block', fontSize: '0.88rem', color: '#9a3412' }}>🔄 Reemplazar espacio de trabajo</strong>
+                    <strong style={{ display: 'block', fontSize: '0.88rem', color: '#9a3412' }}>{t.impModeReplaceTitle}</strong>
                     <span style={{ fontSize: '0.8rem', color: '#7c2d12', display: 'block', marginTop: 2 }}>
-                      Sustituye recetas, insumos y gastos por los datos de la planilla. Se descargará una copia de seguridad JSON.
+                      {t.impModeReplaceDesc}
                     </span>
                   </div>
                 </label>
@@ -4501,39 +4950,192 @@ export function App({
                       checked={replaceConfirmed}
                       onChange={(e) => setReplaceConfirmed(e.target.checked)}
                     />
-                    <span>Confirmo que deseo reemplazar mi catálogo actual por los datos importados (se descargará respaldo JSON).</span>
+                    <span>{t.impReplaceConfirmCheck}</span>
                   </label>
                 </div>
               )}
             </div>
 
             <div className="smart-import-footer">
-              <button type="button" className="btn" onClick={() => { setSmartImportPreview(null); setImportEquivalences({}); setReplaceConfirmed(false); }}>Cancelar</button>
+              <button type="button" className="btn" onClick={() => { setSmartImportPreview(null); setImportEquivalences({}); setReplaceConfirmed(false); }}>{t.cancelBtn}</button>
               <button
                 type="button"
                 className="btn btn--primary"
                 disabled={replaceWorkspaceOnImport && !replaceConfirmed}
                 onClick={confirmSmartImport}
               >
-                Confirmar e incorporar datos
+                {t.impConfirmBtn}
               </button>
             </div>
           </div>
         </div>
-      )}
-      {editingRecipe && (
+        );
+      })()}
+      {editingRecipe && (() => {
+        const b = state.locale === 'en'
+          ? {
+              howBakers: '🍞 How do baker percentages work?',
+              totalFlour: 'Total batch flour (g)',
+              totalHydr: 'Total hydration (% water / flour)',
+              saltPct: 'Salt (% over flour)',
+              yieldBasis: 'Yield basis',
+              basisMeasured: 'Measured final yield',
+              basisFlourWater: 'Flour + water',
+              basisTotal: 'Total formula',
+              measuredYield: 'Measured yield (g)',
+              flourBlend: 'Flour blend',
+              addFlour: '+ Add flour',
+              blendTotal: 'Blend total:',
+              sum100Err: '· Sum must be 100%.',
+              okLabel: '· Valid.',
+              preferment: 'Preferment',
+              typeLabel: 'Type',
+              prefNone: 'No preferment',
+              prefFlour: 'Preferment flour (%)',
+              prefHydr: 'Preferment hydration (%)',
+              prefYeast: 'Preferment yeast (%)',
+              prefYeastIng: 'Yeast ingredient',
+              liveEngine: '⚖️ Live Cost Engine breakdown',
+              flourShort: 'flour',
+              waterShort: 'water',
+              yeastShort: 'yeast',
+              finalMix: 'Final dough:',
+              batchYield: 'Batch yield:',
+              otherIngs: 'Other dough ingredients',
+              directYeast: 'Direct yeast (%)',
+              saltLabel: 'Salt (%)',
+              sugarLabel: 'Sugar (%)',
+              oilLabel: 'Oil (%)',
+              waterIng: 'Water ingredient',
+              selectIng: 'Select ingredient',
+              batchCost: 'Batch cost:',
+              unitCost: 'Unit cost:',
+              suggested: 'Suggested:',
+              yieldPrefix: 'yields in',
+            }
+          : state.locale === 'pt-BR'
+          ? {
+              howBakers: '🍞 Como funcionam as porcentagens de padeiro?',
+              totalFlour: 'Farinha total do lote (g)',
+              totalHydr: 'Hidratação total (% água / farinha)',
+              saltPct: 'Sal (% sobre farinha)',
+              yieldBasis: 'Base de rendimento',
+              basisMeasured: 'Rendimento final medido',
+              basisFlourWater: 'Farinha + água',
+              basisTotal: 'Fórmula completa',
+              measuredYield: 'Rendimento medido (g)',
+              flourBlend: 'Mix de farinhas',
+              addFlour: '+ Adicionar farinha',
+              blendTotal: 'Total do mix:',
+              sum100Err: '· A soma deve ser 100%.',
+              okLabel: '· Correto.',
+              preferment: 'Pré-fermento',
+              typeLabel: 'Tipo',
+              prefNone: 'Sem pré-fermento',
+              prefFlour: 'Farinha do pré-fermento (%)',
+              prefHydr: 'Hidratação do pré-fermento (%)',
+              prefYeast: 'Fermento do pré-fermento (%)',
+              prefYeastIng: 'Insumo de fermento',
+              liveEngine: '⚖️ Detalhamento ao vivo do Cost Engine',
+              flourShort: 'farinha',
+              waterShort: 'água',
+              yeastShort: 'ferm.',
+              finalMix: 'Massa final:',
+              batchYield: 'Rendimento do lote:',
+              otherIngs: 'Outros ingredientes da massa',
+              directYeast: 'Fermento direto (%)',
+              saltLabel: 'Sal (%)',
+              sugarLabel: 'Açúcar (%)',
+              oilLabel: 'Óleo / Azeite (%)',
+              waterIng: 'Insumo de água',
+              selectIng: 'Selecionar insumo',
+              batchCost: 'Custo do lote:',
+              unitCost: 'Custo unitário:',
+              suggested: 'Sugerido:',
+              yieldPrefix: 'rende em',
+            }
+          : {
+              howBakers: '🍞 ¿Cómo funcionan los porcentajes de panadero?',
+              totalFlour: 'Harina Total del Batch (g)',
+              totalHydr: 'Hidratación Total (% agua s/ harina)',
+              saltPct: 'Sal (% sobre harina)',
+              yieldBasis: 'Base de rendimiento',
+              basisMeasured: 'Rendimiento final medido',
+              basisFlourWater: 'Harina + agua',
+              basisTotal: 'Fórmula completa',
+              measuredYield: 'Rendimiento medido (g)',
+              flourBlend: 'Mezcla de harinas',
+              addFlour: '+ Agregar harina',
+              blendTotal: 'Total de mezcla:',
+              sum100Err: '· La suma debe ser 100%.',
+              okLabel: '· Correcto.',
+              preferment: 'Prefermento',
+              typeLabel: 'Tipo',
+              prefNone: 'Sin prefermento',
+              prefBiga: 'Biga',
+              prefFlour: 'Harina del prefermento (%)',
+              prefHydr: 'Hidratación del prefermento (%)',
+              prefYeast: 'Levadura del prefermento (%)',
+              prefYeastIng: 'Insumo de levadura',
+              liveEngine: '⚖️ Desglose en vivo del Cost Engine (expandBakersDoughSpec)',
+              flourShort: 'harina',
+              waterShort: 'agua',
+              yeastShort: 'lev.',
+              finalMix: 'Amasado final:',
+              batchYield: 'Rendimiento Batch:',
+              otherIngs: 'Otros ingredientes de la masa',
+              directYeast: 'Levadura directa (%)',
+              saltLabel: 'Sal (%)',
+              sugarLabel: 'Azúcar (%)',
+              oilLabel: 'Aceite (%)',
+              waterIng: 'Insumo de agua',
+              selectIng: 'Seleccionar insumo',
+              batchCost: 'Costo batch:',
+              unitCost: 'Costo unitario:',
+              suggested: 'Sugerido:',
+              yieldPrefix: 'rinde en',
+            };
+        let livePreviewCost: ReturnType<CostEngine['calculateRecipeCost']> | null = null;
+        let livePreviewPricing: ReturnType<typeof calculatePricingScenario> | null = null;
+        try {
+          const tempRecipes = state.catalog.recipes.some((r) => r.id === editingRecipe.id)
+            ? state.catalog.recipes.map((r) => (r.id === editingRecipe.id ? editingRecipe : r))
+            : [...state.catalog.recipes, editingRecipe];
+          livePreviewCost = new CostEngine({
+            ...state.catalog,
+            recipes: tempRecipes,
+          }).calculateRecipeCost(editingRecipe.id);
+          if (editingRecipe.recipe_type === 'product') {
+            livePreviewPricing = calculatePricingScenario({
+              unit_cost: livePreviewCost.raw_unit_cost,
+              status: livePreviewCost.status,
+              currency: state.currency,
+              target_food_cost_pct: editingRecipe.target_food_cost_pct ?? state.defaultTargetFoodCostPct,
+              rounding_increment: state.defaultRoundingIncrement,
+              rounding_mode: 'ceil',
+              packaging_cost: state.defaultPackagingCost,
+              channel_fee_pct: state.defaultChannelFeePct,
+            });
+          }
+        } catch {
+          livePreviewCost = null;
+        }
+        const availableSubrecipes = state.catalog.recipes.filter(
+          (r) => r.recipe_type === 'subrecipe' && r.id !== editingRecipe.id
+        );
+        return (
         <div className="modal-backdrop" onClick={() => setEditingRecipe(null)}>
           <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3>
                 {isDoughMode
-                  ? '🥣 Constructor Panadero (Biga / Poolish / Hidratación)'
+                  ? t.builderDoughTitle
                   : editingRecipe.recipe_type === 'product'
-                  ? '🍕 Constructor Visual de Receta de Producto'
-                  : '🥫 Constructor Visual de Subreceta'}
+                  ? t.builderProductTitle
+                  : t.builderSubrecipeTitle}
               </h3>
               <button type="button" className="btn btn--sm" onClick={() => setEditingRecipe(null)}>
-                ✕ Cerrar
+                ✕ {t.closeBtn}
               </button>
             </div>
 
@@ -4541,7 +5143,7 @@ export function App({
 
             <div className="builder-grid">
               <label className="field">
-                <span>Nombre</span>
+                <span>{t.builderNameLabel}</span>
                 <input
                   type="text"
                   value={editingRecipe.name}
@@ -4549,7 +5151,7 @@ export function App({
                 />
               </label>
               <label className="field">
-                <span>Rendimiento (Yield)</span>
+                <span>{t.builderYieldLabel}</span>
                 <input
                   type="number"
                   min={0.001}
@@ -4570,7 +5172,7 @@ export function App({
                 />
               </label>
               <label className="field">
-                <span>Unidad de Rendimiento</span>
+                <span>{t.builderYieldUnitLabel}</span>
                 <select
                   value={editingRecipe.yield_unit}
                   onChange={(e) =>
@@ -4586,7 +5188,7 @@ export function App({
               </label>
               {editingRecipe.recipe_type === 'product' && (
                 <label className="field">
-                  <span>Food Cost Objetivo (%)</span>
+                  <span>{t.targetFoodCostLabel}</span>
                   <input
                     type="number"
                     min={5}
@@ -4611,12 +5213,12 @@ export function App({
                   className="btn btn--sm btn--secondary"
                   onClick={() => { setHelpTopic('bakers'); setShowHelpModal(true); }}
                 >
-                  🍞 ¿Cómo funcionan los porcentajes de panadero?
+                  {b.howBakers}
                 </button>
               </div>
               <div className="builder-grid">
                 <label className="field">
-                  <span>Harina Total del Batch (g)</span>
+                  <span>{b.totalFlour}</span>
                   <input
                     type="number"
                     min={100}
@@ -4634,7 +5236,7 @@ export function App({
                   />
                 </label>
                 <label className="field">
-                  <span>Hidratación Total (% agua s/ harina)</span>
+                  <span>{b.totalHydr}</span>
                   <input
                     type="number"
                     min={30}
@@ -4653,7 +5255,7 @@ export function App({
                   />
                 </label>
                 <label className="field">
-                  <span>Sal (% sobre harina)</span>
+                  <span>{b.saltPct}</span>
                   <input
                     type="number"
                     min={0}
@@ -4672,7 +5274,7 @@ export function App({
                   />
                 </label>
                 <label className="field">
-                  <span>Base de rendimiento</span>
+                  <span>{b.yieldBasis}</span>
                   <select
                     value={editingRecipe.bakers_dough.yield_basis}
                     onChange={(e) =>
@@ -4685,14 +5287,14 @@ export function App({
                       })
                     }
                   >
-                    <option value="measured_yield">Rendimiento final medido</option>
-                    <option value="flour_plus_water">Harina + agua</option>
-                    <option value="total_formula">Fórmula completa</option>
+                    <option value="measured_yield">{b.basisMeasured}</option>
+                    <option value="flour_plus_water">{b.basisFlourWater}</option>
+                    <option value="total_formula">{b.basisTotal}</option>
                   </select>
                 </label>
                 {editingRecipe.bakers_dough.yield_basis === 'measured_yield' && (
                   <label className="field">
-                    <span>Rendimiento medido (g)</span>
+                    <span>{b.measuredYield}</span>
                     <input
                       type="number"
                       min={1}
@@ -4714,7 +5316,7 @@ export function App({
 
               <div className="card" style={{ marginTop: 12 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-                  <strong>Mezcla de harinas</strong>
+                  <strong>{b.flourBlend}</strong>
                   <button
                     type="button"
                     className="btn btn--sm"
@@ -4732,7 +5334,7 @@ export function App({
                     }
                     disabled={state.catalog.ingredients.length === 0}
                   >
-                    + Agregar harina
+                    {b.addFlour}
                   </button>
                 </div>
                 {(editingRecipe.bakers_dough.flours ?? []).map((flour, index) => (
@@ -4750,7 +5352,7 @@ export function App({
                       ))}
                     </select>
                     <input
-                      aria-label="Porcentaje de harina"
+                      aria-label={b.flourBlend}
                       type="number"
                       min={0}
                       max={100}
@@ -4778,18 +5380,18 @@ export function App({
                   </div>
                 ))}
                 <small>
-                  Total de mezcla: {formatDecimal(editingRecipe.bakers_dough.flours.reduce((sum, flour) => sum + (flour.share_pct ?? 0), 0), 1)}%
+                  {b.blendTotal} {fmt(editingRecipe.bakers_dough.flours.reduce((sum, flour) => sum + (flour.share_pct ?? 0), 0), 1)}%
                   {Math.abs(editingRecipe.bakers_dough.flours.reduce((sum, flour) => sum + (flour.share_pct ?? 0), 0) - 100) > 0.01
-                    ? ' · La suma debe ser 100%.'
-                    : ' · Correcto.'}
+                    ? ` ${b.sum100Err}`
+                    : ` ${b.okLabel}`}
                 </small>
               </div>
 
               <div className="card" style={{ marginTop: 12 }}>
-                <strong>Prefermento</strong>
+                <strong>{b.preferment}</strong>
                 <div className="builder-grid">
                   <label className="field">
-                    <span>Tipo</span>
+                    <span>{b.typeLabel}</span>
                     <select
                       value={editingRecipe.bakers_dough.biga ? 'biga' : editingRecipe.bakers_dough.poolish ? 'poolish' : 'none'}
                       onChange={(e) => {
@@ -4810,7 +5412,7 @@ export function App({
                         });
                       }}
                     >
-                      <option value="none">Sin prefermento</option>
+                      <option value="none">{b.prefNone}</option>
                       <option value="biga">Biga</option>
                       <option value="poolish">Poolish</option>
                     </select>
@@ -4821,7 +5423,7 @@ export function App({
                     return (
                       <>
                         <label className="field">
-                          <span>Harina del prefermento (%)</span>
+                          <span>{b.prefFlour}</span>
                           <input type="number" min={0} max={100} step={0.1} value={spec.flour_pct}
                             onChange={(e) => setEditingRecipe({ ...editingRecipe, bakers_dough: {
                               ...editingRecipe.bakers_dough!, [key]: { ...spec, flour_pct: Math.max(0, Math.min(100, Number(e.target.value) || 0)) },
@@ -4829,7 +5431,7 @@ export function App({
                           />
                         </label>
                         <label className="field">
-                          <span>Hidratación del prefermento (%)</span>
+                          <span>{b.prefHydr}</span>
                           <input type="number" min={0} max={200} step={0.1} value={spec.water_pct}
                             onChange={(e) => setEditingRecipe({ ...editingRecipe, bakers_dough: {
                               ...editingRecipe.bakers_dough!, [key]: { ...spec, water_pct: Math.max(0, Math.min(200, Number(e.target.value) || 0)) },
@@ -4837,7 +5439,7 @@ export function App({
                           />
                         </label>
                         <label className="field">
-                          <span>Levadura del prefermento (%)</span>
+                          <span>{b.prefYeast}</span>
                           <input type="number" min={0} max={20} step={0.01} value={spec.yeast_pct}
                             onChange={(e) => setEditingRecipe({ ...editingRecipe, bakers_dough: {
                               ...editingRecipe.bakers_dough!, [key]: { ...spec, yeast_pct: Math.max(0, Number(e.target.value) || 0) },
@@ -4845,7 +5447,7 @@ export function App({
                           />
                         </label>
                         <label className="field">
-                          <span>Insumo de levadura</span>
+                          <span>{b.prefYeastIng}</span>
                           <select value={spec.yeast_ingredient_id}
                             onChange={(e) => setEditingRecipe({ ...editingRecipe, bakers_dough: {
                               ...editingRecipe.bakers_dough!, [key]: { ...spec, yeast_ingredient_id: e.target.value },
@@ -4865,18 +5467,18 @@ export function App({
                   const exp = expandBakersDoughSpec(editingRecipe.bakers_dough!);
                   return (
                     <div className="card" style={{ marginTop: 12, background: '#f8fafc', borderColor: '#cbd5e1' }}>
-                      <strong>⚖️ Desglose en vivo del Cost Engine (expandBakersDoughSpec)</strong>
+                      <strong>{b.liveEngine}</strong>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginTop: 8, fontSize: '0.84rem' }}>
-                        <span>Harina Total: <strong>{formatDecimal(exp.flourTotalG, 1)} g</strong></span>
-                        <span>Agua Total: <strong>{formatDecimal(exp.waterTotalG, 1)} g</strong></span>
+                        <span>{b.flourShort}: <strong>{fmt(exp.flourTotalG, 1)} g</strong></span>
+                        <span>{b.waterShort}: <strong>{fmt(exp.waterTotalG, 1)} g</strong></span>
                         {exp.biga.totalG > 0 && (
-                          <span>Biga: <strong>{formatDecimal(exp.biga.totalG, 1)} g</strong> ({formatDecimal(exp.biga.flourG, 0)}g harina + {formatDecimal(exp.biga.waterG, 0)}g agua + {formatDecimal(exp.biga.yeastG, 2)}g lev.)</span>
+                          <span>Biga: <strong>{fmt(exp.biga.totalG, 1)} g</strong> ({fmt(exp.biga.flourG, 0)}g {b.flourShort} + {fmt(exp.biga.waterG, 0)}g {b.waterShort} + {fmt(exp.biga.yeastG, 2)}g {b.yeastShort})</span>
                         )}
                         {exp.poolish.totalG > 0 && (
-                          <span>Poolish: <strong>{formatDecimal(exp.poolish.totalG, 1)} g</strong> ({formatDecimal(exp.poolish.flourG, 0)}g harina + {formatDecimal(exp.poolish.waterG, 0)}g agua + {formatDecimal(exp.poolish.yeastG, 2)}g lev.)</span>
+                          <span>Poolish: <strong>{fmt(exp.poolish.totalG, 1)} g</strong> ({fmt(exp.poolish.flourG, 0)}g {b.flourShort} + {fmt(exp.poolish.waterG, 0)}g {b.waterShort} + {fmt(exp.poolish.yeastG, 2)}g {b.yeastShort})</span>
                         )}
-                        <span>Amasado final: <strong>{formatDecimal(exp.final.flourG, 1)}g harina + {formatDecimal(exp.final.waterG, 1)}g agua</strong></span>
-                        <span>Rendimiento Batch: <strong>{formatDecimal(exp.yieldQuantityG, 1)} g</strong></span>
+                        <span>{b.finalMix} <strong>{fmt(exp.final.flourG, 1)}g {b.flourShort} + {fmt(exp.final.waterG, 1)}g {b.waterShort}</strong></span>
+                        <span>{b.batchYield} <strong>{fmt(exp.yieldQuantityG, 1)} g</strong></span>
                       </div>
                     </div>
                   );
@@ -4886,13 +5488,13 @@ export function App({
               })()}
 
               <div className="card" style={{ marginTop: 12 }}>
-                <strong>Otros ingredientes de la masa</strong>
+                <strong>{b.otherIngs}</strong>
                 <div className="builder-grid">
                   {([
-                    ['direct_yeast_pct', 'yeast_ingredient_id', 'Levadura directa (%)'],
-                    ['salt_pct', 'salt_ingredient_id', 'Sal (%)'],
-                    ['sugar_pct', 'sugar_ingredient_id', 'Azúcar (%)'],
-                    ['oil_pct', 'oil_ingredient_id', 'Aceite (%)'],
+                    ['direct_yeast_pct', 'yeast_ingredient_id', b.directYeast],
+                    ['salt_pct', 'salt_ingredient_id', b.saltLabel],
+                    ['sugar_pct', 'sugar_ingredient_id', b.sugarLabel],
+                    ['oil_pct', 'oil_ingredient_id', b.oilLabel],
                   ] as const).map(([pctKey, ingredientKey, label]) => (
                     <div className="field" key={pctKey}>
                       <label>{label}</label>
@@ -4907,19 +5509,19 @@ export function App({
                           ...editingRecipe.bakers_dough!, [ingredientKey]: e.target.value,
                         }})}
                       >
-                        <option value="">Seleccionar insumo</option>
+                        <option value="">{b.selectIng}</option>
                         {state.catalog.ingredients.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
                       </select>
                     </div>
                   ))}
                   <label className="field">
-                    <span>Insumo de agua</span>
+                    <span>{b.waterIng}</span>
                     <select value={editingRecipe.bakers_dough.water_ingredient_id ?? ''}
                       onChange={(e) => setEditingRecipe({ ...editingRecipe, bakers_dough: {
                         ...editingRecipe.bakers_dough!, water_ingredient_id: e.target.value,
                       }})}
                     >
-                      <option value="">Seleccionar insumo</option>
+                      <option value="">{b.selectIng}</option>
                       {state.catalog.ingredients.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
                     </select>
                   </label>
@@ -4929,24 +5531,25 @@ export function App({
             ) : (
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                  <strong>Componentes de la Receta (Insumos y Subrecetas)</strong>
+                  <strong>{t.builderComponentsHeading}</strong>
                   <button
                     type="button"
                     className="btn btn--sm btn--primary"
                     onClick={() => {
+                      const firstIng = state.catalog.ingredients[0];
                       const nextComps: RecipeComponent[] = [
                         ...(editingRecipe.components ?? []),
                         {
                           component_type: 'ingredient',
-                          ingredient_id: state.catalog.ingredients[0]?.id ?? '',
+                          ingredient_id: firstIng?.id ?? '',
                           quantity: 100,
-                          unit: 'g',
+                          unit: firstIng?.base_unit ?? 'g',
                         },
                       ];
                       setEditingRecipe({ ...editingRecipe, components: nextComps });
                     }}
                   >
-                    + Agregar Componente
+                    {t.builderAddCompBtn}
                   </button>
                 </div>
 
@@ -4956,17 +5559,16 @@ export function App({
                       value={comp.component_type}
                       onChange={(e) => {
                         const newType = e.target.value as 'ingredient' | 'subrecipe';
-                        const firstSub = state.catalog.recipes.find(
-                          (r) => r.recipe_type === 'subrecipe' && r.id !== editingRecipe.id
-                        );
+                        const firstSub = availableSubrecipes[0];
+                        const firstIng = state.catalog.ingredients[0];
                         const updated = [...(editingRecipe.components ?? [])];
                         updated[idx] =
                           newType === 'ingredient'
                             ? {
                                 component_type: 'ingredient',
-                                ingredient_id: state.catalog.ingredients[0]?.id ?? '',
+                                ingredient_id: firstIng?.id ?? '',
                                 quantity: comp.quantity,
-                                unit: 'g',
+                                unit: firstIng?.base_unit ?? 'g',
                               }
                             : {
                                 component_type: 'subrecipe',
@@ -4977,16 +5579,21 @@ export function App({
                         setEditingRecipe({ ...editingRecipe, components: updated });
                       }}
                     >
-                      <option value="ingredient">Insumo</option>
-                      <option value="subrecipe">Subreceta</option>
+                      <option value="ingredient">{t.builderTypeIngredient}</option>
+                      <option value="subrecipe">{t.builderTypeSubrecipe}</option>
                     </select>
 
                     {comp.component_type === 'ingredient' ? (
                       <select
                         value={comp.ingredient_id ?? ''}
                         onChange={(e) => {
+                          const targetIng = state.catalog.ingredients.find((item) => item.id === e.target.value);
                           const updated = [...(editingRecipe.components ?? [])];
-                          updated[idx] = { ...comp, ingredient_id: e.target.value };
+                          const nextUnit =
+                            targetIng && !areUnitsCompatible(comp.unit, targetIng.base_unit, targetIng)
+                              ? targetIng.base_unit
+                              : comp.unit;
+                          updated[idx] = { ...comp, ingredient_id: e.target.value, unit: nextUnit };
                           setEditingRecipe({ ...editingRecipe, components: updated });
                         }}
                       >
@@ -5000,18 +5607,21 @@ export function App({
                       <select
                         value={comp.recipe_id ?? ''}
                         onChange={(e) => {
+                          const targetSub = availableSubrecipes.find((r) => r.id === e.target.value);
                           const updated = [...(editingRecipe.components ?? [])];
-                          updated[idx] = { ...comp, recipe_id: e.target.value };
+                          const nextUnit = targetSub?.yield_unit ?? comp.unit;
+                          updated[idx] = { ...comp, recipe_id: e.target.value, unit: nextUnit };
                           setEditingRecipe({ ...editingRecipe, components: updated });
                         }}
                       >
-                        {state.catalog.recipes
-                          .filter((r) => r.recipe_type === 'subrecipe' && r.id !== editingRecipe.id)
-                          .map((sub) => (
-                            <option key={sub.id} value={sub.id}>
-                              {sub.name} (rinde en {sub.yield_unit})
-                            </option>
-                          ))}
+                        {availableSubrecipes.length === 0 && (
+                          <option value="">{t.builderNoSubrecipesOption}</option>
+                        )}
+                        {availableSubrecipes.map((sub) => (
+                          <option key={sub.id} value={sub.id}>
+                            {sub.name} ({b.yieldPrefix} {sub.yield_unit})
+                          </option>
+                        ))}
                       </select>
                     )}
 
@@ -5045,6 +5655,7 @@ export function App({
                     <button
                       type="button"
                       className="btn btn--sm btn--danger"
+                      title={t.deleteTitle}
                       onClick={() => {
                         const updated = (editingRecipe.components ?? []).filter((_, i) => i !== idx);
                         setEditingRecipe({ ...editingRecipe, components: updated });
@@ -5057,31 +5668,52 @@ export function App({
               </div>
             )}
 
+            {livePreviewCost && (
+              <div className="card" style={{ marginTop: 14, background: 'var(--surface-alt)', padding: 12 }}>
+                <strong>{t.builderLiveCostLabel}</strong>{' '}
+                {livePreviewCost.status === 'complete' && livePreviewCost.raw_unit_cost != null ? (
+                  <span>
+                    {b.batchCost} <strong>{state.currency} {fmt(livePreviewCost.raw_batch_cost ?? 0, 2)}</strong> ·{' '}
+                    {b.unitCost} <strong>{state.currency} {fmt(livePreviewCost.raw_unit_cost, 2)} / {editingRecipe.yield_unit}</strong>
+                    {livePreviewPricing?.raw_suggested_price != null && (
+                      <> · {b.suggested} <strong style={{ color: 'var(--brand)' }}>{state.currency} {fmt(livePreviewPricing.raw_suggested_price, 0)}</strong></>
+                    )}
+                  </span>
+                ) : (
+                  <span style={{ color: 'var(--warn)', fontWeight: 600 }}>
+                    {t.statusIncomplete}
+                    {livePreviewCost.missing_inputs.length > 0 && ` (${livePreviewCost.missing_inputs.map((m) => m.ingredient_name).join(', ')})`}
+                  </span>
+                )}
+              </div>
+            )}
+
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18 }}>
               <button type="button" className="btn" onClick={() => setEditingRecipe(null)}>
-                Cancelar
+                {t.cancelBtn}
               </button>
               <button type="button" className="btn btn--primary" onClick={saveEditedRecipe}>
-                💾 Validar y Guardar Receta
+                {t.builderValidateSaveBtn}
               </button>
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Modal de Confirmación para Limpiar Datos Demo */}
       {showClearDemoConfirm && (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="clear-demo-title">
           <div className="modal-panel" style={{ maxWidth: 520 }}>
             <div className="modal-header">
-              <h3 id="clear-demo-title" style={{ color: '#b91c1c' }}>⚠️ ¿Limpiar datos de demostración?</h3>
+              <h3 id="clear-demo-title" style={{ color: '#b91c1c' }}>{t.clearDemoTitle}</h3>
               <button type="button" className="btn btn--secondary" onClick={() => setShowClearDemoConfirm(false)}>✕</button>
             </div>
             <p style={{ margin: '14px 0', fontSize: '0.92rem', lineHeight: 1.5 }}>
-              Esta acción vaciará las recetas, insumos, gastos y ventas de ejemplo de <strong>«Pizzería Demo — Il Forno»</strong>, dejándote un espacio de trabajo en blanco listo para cargar los datos reales de tu negocio.
+              {t.clearDemoDesc1}
             </p>
             <p style={{ fontSize: '0.84rem', color: 'var(--muted)', margin: '0 0 18px' }}>
-              Se conservarán tu moneda ({state.currency}), idioma y decimales. Siempre podrás volver a restaurar los datos de demo desde la barra superior.
+              {t.clearDemoDesc2} ({state.currency} · {state.locale})
             </p>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
               <button
@@ -5089,22 +5721,66 @@ export function App({
                 className="btn btn--secondary"
                 onClick={() => setShowClearDemoConfirm(false)}
               >
-                Cancelar
+                {t.cancelBtn}
               </button>
               <button
                 type="button"
                 className="btn btn--primary"
                 style={{ background: '#b91c1c', borderColor: '#991b1b' }}
                 onClick={() => {
-                  setState(createEmptyWorkspace(state.locale, state.currency));
+                  setState({
+                    ...createEmptyWorkspace(state.locale, state.currency),
+                    unitSystem: state.unitSystem,
+                  });
                   setShowClearDemoConfirm(false);
                 }}
               >
-                Sí, vaciar y empezar de cero
+                {t.clearDemoConfirmBtn}
               </button>
             </div>
           </div>
         </div>
+      )}
+
+      {/* Modal de Historial de Precios del Insumo */}
+      {priceHistoryIngredientId && (() => {
+        const targetIng = state.catalog.ingredients.find((i) => i.id === priceHistoryIngredientId);
+        if (!targetIng) return null;
+        return (
+          <PriceHistoryModal
+            ingredient={targetIng}
+            purchasePrices={state.catalog.purchase_prices}
+            workspaceCurrency={state.currency}
+            exchangeRates={state.catalog.exchange_rates}
+            asOfDate={state.catalog.as_of_date}
+            locale={state.locale}
+            t={t}
+            onSavePrices={(nextAllPrices) =>
+              setState((prev) => ({
+                ...prev,
+                catalog: { ...prev.catalog, purchase_prices: nextAllPrices },
+              }))
+            }
+            onClose={() => setPriceHistoryIngredientId(null)}
+          />
+        );
+      })()}
+
+      {/* Modal de Tipos de Cambio Explícitos */}
+      {showExchangeRatesModal && (
+        <ExchangeRatesModal
+          baseCurrency={state.currency}
+          rates={state.catalog.exchange_rates ?? []}
+          locale={state.locale}
+          t={t}
+          onSave={(nextRates) =>
+            setState((prev) => ({
+              ...prev,
+              catalog: { ...prev.catalog, exchange_rates: nextRates },
+            }))
+          }
+          onClose={() => setShowExchangeRatesModal(false)}
+        />
       )}
 
       {/* Modal Comercial de Planes y Suscripción */}

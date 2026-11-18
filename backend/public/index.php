@@ -77,6 +77,7 @@ $router->put('/tools/workspace', [ToolsWorkspaceController::class, 'save'], [$to
 $router->post('/tools/workspace', [ToolsWorkspaceController::class, 'save'], [$toolsAuth]);
 $router->get('/tools/workspace/backups', [ToolsWorkspaceController::class, 'backups'], [$toolsAuth]);
 $router->post('/tools/workspace/restore', [ToolsWorkspaceController::class, 'restore'], [$toolsAuth]);
+$router->get('/tools/import/limits', [ToolsImportController::class, 'limits'], [$toolsAuth]);
 $router->post('/tools/import/preview', [ToolsImportController::class, 'preview'], [$toolsAuth]);
 $router->get('/tools/sync/status', [ToolsSyncController::class, 'status'], [$toolsAuth]);
 $router->post('/tools/sync/link-app', [ToolsSyncController::class, 'linkApp'], [$toolsAuth]);

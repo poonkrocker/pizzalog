@@ -101,9 +101,9 @@ export function ContextualHelpModal({ initialTopic = 'units', locale = 'es-AR', 
                   : 'Pizzalog Cost Engine opera con dimensiones físicas estrictas para evitar errores culinarios y de costeo:'}
               </p>
               <ul>
-                <li><strong>Mass:</strong> <code>mg</code>, <code>g</code>, <code>kg</code>, <code>oz</code>, <code>lb</code> (1 kg = 1,000 g).</li>
-                <li><strong>Volume:</strong> <code>ml</code>, <code>cc</code>, <code>L</code>, <code>fl_oz_us</code>, <code>gal_us</code> (1 L = 1,000 ml).</li>
-                <li><strong>Count:</strong> <code>unit</code>, <code>dozen</code> (1 dozen = 12 units).</li>
+                <li><strong>{loc === 'en' ? 'Mass' : loc === 'pt-BR' ? 'Massa' : 'Masa'}:</strong> <code>mg</code>, <code>g</code>, <code>kg</code>, <code>oz</code>, <code>lb</code> ({loc === 'en' ? '1 kg = 1,000 g' : '1 kg = 1.000 g'}).</li>
+                <li><strong>{loc === 'en' ? 'Volume' : 'Volume'}:</strong> <code>ml</code>, <code>cc</code>, <code>L</code>, <code>fl_oz_us</code>, <code>gal_us</code> ({loc === 'en' ? '1 L = 1,000 ml' : '1 L = 1.000 ml'}).</li>
+                <li><strong>{loc === 'en' ? 'Count' : loc === 'pt-BR' ? 'Contagem' : 'Conteo'}:</strong> <code>unit</code>, <code>dozen</code> ({loc === 'en' ? '1 dozen = 12 units' : loc === 'pt-BR' ? '1 dúzia = 12 unidades' : '1 docena = 12 unidades'}).</li>
               </ul>
             </div>
           )}
@@ -158,9 +158,9 @@ export function ContextualHelpModal({ initialTopic = 'units', locale = 'es-AR', 
                 {loc === 'en' ? 'Smart Importer: Verified 20 MB Capacity' : loc === 'pt-BR' ? 'Importador Inteligente: Capacidade de até 20 MB' : 'Importador Inteligente: Capacidad de hasta 20 MB'}
               </h4>
               <ul>
-                <li><strong>Max file size:</strong> <strong>20 MB</strong> (.xlsx / .csv).</li>
-                <li><strong>Max sheets:</strong> <strong>30 sheets</strong> per workbook.</li>
-                <li><strong>Max rows:</strong> <strong>10,000 rows</strong>.</li>
+                <li><strong>{loc === 'en' ? 'Max file size:' : loc === 'pt-BR' ? 'Tamanho máximo:' : 'Tamaño máximo:'}</strong> <strong>20 MB</strong> (.xlsx / .csv).</li>
+                <li><strong>{loc === 'en' ? 'Max sheets:' : loc === 'pt-BR' ? 'Máximo de abas:' : 'Máximo de hojas:'}</strong> <strong>30 {loc === 'en' ? 'sheets' : loc === 'pt-BR' ? 'abas' : 'hojas'}</strong>.</li>
+                <li><strong>{loc === 'en' ? 'Max rows:' : loc === 'pt-BR' ? 'Máximo de linhas:' : 'Máximo de filas:'}</strong> <strong>{loc === 'en' ? '10,000 rows' : loc === 'pt-BR' ? '10.000 linhas' : '10.000 filas'}</strong>.</li>
               </ul>
             </div>
           )}

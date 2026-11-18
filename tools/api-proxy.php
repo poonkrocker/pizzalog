@@ -7,6 +7,37 @@
  */
 declare(strict_types=1);
 
+@ini_set('max_execution_time', '120');
+@set_time_limit(120);
+@ini_set('memory_limit', '256M');
+
+$parseIniBytes = static function (string $val): int {
+    $val = trim($val);
+    if ($val === '' || $val === '-1') return 0;
+    if (preg_match('/^(\d+)\s*([kmgt])?b?$/i', $val, $m)) {
+        $n = (int) $m[1];
+        return match (strtolower($m[2] ?? '')) {
+            'k' => $n * 1024,
+            'm' => $n * 1048576,
+            'g' => $n * 1073741824,
+            default => $n,
+        };
+    }
+    return (int) $val;
+};
+
+$contentLength = (int) ($_SERVER['CONTENT_LENGTH'] ?? 0);
+$postMaxBytes = $parseIniBytes((string) ini_get('post_max_size'));
+if ($contentLength > 0 && $postMaxBytes > 0 && $contentLength > $postMaxBytes) {
+    http_response_code(413);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode([
+        'ok' => false,
+        'error' => 'El envío supera el límite configurado del servidor (post_max_size / 20 MB)',
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 $endpoint = (string) ($_GET['endpoint'] ?? '');
 if ($endpoint === '' || $endpoint[0] !== '/' || str_starts_with($endpoint, '//')) {
     http_response_code(400);
@@ -52,8 +83,15 @@ foreach ($candidateBackends as $backendIndex) {
     }
 }
 
-// 2. Fallback HTTP hacia https://api.pizzalog.net
-$targetUrl = 'https://api.pizzalog.net' . $endpoint;
+// 2. Fallback HTTP hacia API de staging (si está definida PIZZALOG_TOOLS_STAGING_API_URL) o producción
+$hostName = strtolower((string) ($_SERVER['HTTP_HOST'] ?? 'tools.pizzalog.net'));
+$isStagingHost = str_contains($hostName, 'staging');
+$configuredApi = $isStagingHost
+    ? (getenv('PIZZALOG_TOOLS_STAGING_API_URL') ?: getenv('PIZZALOG_TOOLS_API_URL') ?: '')
+    : (getenv('PIZZALOG_TOOLS_API_URL') ?: '');
+$apiBase = rtrim($configuredApi !== '' ? $configuredApi : 'https://api.pizzalog.net', '/');
+$apiHostHeader = parse_url($apiBase, PHP_URL_HOST) ?: 'api.pizzalog.net';
+$targetUrl = $apiBase . $endpoint;
 $rawBody = file_get_contents('php://input');
 
 $authHeader = $_SERVER['HTTP_X_PIZZALOG_AUTHORIZATION']
@@ -110,11 +148,11 @@ if (function_exists('curl_init')) {
     curl_setopt($ch, CURLOPT_HEADER, false);
     curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
     curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 120);
     curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
 
     if (!empty($_SERVER['SERVER_ADDR']) && filter_var($_SERVER['SERVER_ADDR'], FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-        curl_setopt($ch, CURLOPT_RESOLVE, ['api.pizzalog.net:443:' . $_SERVER['SERVER_ADDR']]);
+        curl_setopt($ch, CURLOPT_RESOLVE, [$apiHostHeader . ':443:' . $_SERVER['SERVER_ADDR']]);
     }
 
     if ($method !== 'GET' && $method !== 'HEAD' && $rawBody !== false && $rawBody !== '') {
@@ -142,7 +180,7 @@ $opts = [
         'header' => implode("\r\n", $forwardHeaders),
         'content' => ($method !== 'GET' && $method !== 'HEAD' && $rawBody !== false) ? $rawBody : '',
         'ignore_errors' => true,
-        'timeout' => 30,
+        'timeout' => 120,
     ],
     'ssl' => [
         'verify_peer' => false,
@@ -162,7 +200,7 @@ if (isset($http_response_header) && is_array($http_response_header)) {
 if ($responseBody === false) {
     http_response_code(502);
     header('Content-Type: application/json; charset=utf-8');
-    echo json_encode(['ok' => false, 'error' => 'No se pudo contactar a api.pizzalog.net desde el servidor'], JSON_UNESCAPED_UNICODE);
+    echo json_encode(['ok' => false, 'error' => 'No se pudo contactar con la API desde el servidor'], JSON_UNESCAPED_UNICODE);
     exit;
 }
 emitProxyResponse($statusCode, (string) $responseBody);

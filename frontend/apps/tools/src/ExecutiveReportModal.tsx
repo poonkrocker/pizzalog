@@ -1,5 +1,5 @@
 import React from 'react';
-import { formatDecimal } from '@pizzalog/cost-engine';
+import { formatCalendarDate, formatLocaleNumber, todayLocalDateString } from '@pizzalog/cost-engine';
 import type { LocaleCode, ToolsWorkspaceState } from './demoData';
 
 interface ExecutiveReportModalProps {
@@ -188,13 +188,10 @@ export function ExecutiveReportModal({
 }: ExecutiveReportModalProps) {
   const loc: LocaleCode = state.locale === 'pt-BR' || state.locale === 'en' ? state.locale : 'es-AR';
   const rText = REPORT_TEXT[loc];
-  const currentDate = new Date().toLocaleDateString(loc === 'en' ? 'en-US' : loc, {
-    day: '2-digit',
-    month: 'long',
-    year: 'numeric',
-  });
+  const currentDate = formatCalendarDate(todayLocalDateString(), loc);
+  const fmt = (n: number, dec = 2) => formatLocaleNumber(n, loc, dec);
 
-  const breakEvenUnits = monthlySummary.rows.length > 0 && monthlySummary.totalUnits > 0
+  const breakEvenUnits = monthlySummary.rows.length > 0 && monthlySummary.totalUnits > 0 && monthlySummary.totalContribution > 0
     ? Math.round(totalMonthlyExpenses / (monthlySummary.totalContribution / monthlySummary.totalUnits))
     : 0;
 
@@ -205,12 +202,12 @@ export function ExecutiveReportModal({
   return (
     <div className="modal-backdrop" onClick={onClose} role="dialog" aria-modal="true" aria-labelledby="report-modal-title">
       <div className="modal-panel" style={{ maxWidth: 960, background: '#ffffff', color: '#111827' }} onClick={(e) => e.stopPropagation()}>
-        <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, paddingBottom: 12, borderBottom: '1px solid var(--line)' }}>
+        <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 20, paddingBottom: 12, borderBottom: '1px solid var(--line)' }}>
           <div>
             <h3 id="report-modal-title" style={{ margin: 0, fontSize: '1.2rem' }}>{rText.modalTitle}</h3>
             <span style={{ fontSize: '0.84rem', color: 'var(--muted)' }}>{rText.modalSub}</span>
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button type="button" className="btn btn--primary" onClick={() => window.print()}>
               {rText.printBtn}
             </button>
@@ -221,7 +218,7 @@ export function ExecutiveReportModal({
         </div>
 
         <div className="printable-report" style={{ padding: '8px 4px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #111827', paddingBottom: 14, marginBottom: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12, borderBottom: '2px solid #111827', paddingBottom: 14, marginBottom: 20 }}>
             <div>
               <h1 style={{ margin: '0 0 4px', fontSize: '1.6rem', fontWeight: 800, color: '#111827' }}>
                 {state.businessName || 'Mi Restaurante'}
@@ -235,42 +232,42 @@ export function ExecutiveReportModal({
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 24 }}>
+          <div className="report-kpi-grid">
             <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 8, padding: 12 }}>
               <span style={{ display: 'block', fontSize: '0.78rem', color: '#6b7280', textTransform: 'uppercase', fontWeight: 600 }}>{rText.kpiRevenue}</span>
               <strong style={{ fontSize: '1.25rem', color: '#111827' }}>
-                {state.currency} {formatDecimal(monthlySummary.totalRevenue, 2)}
+                {state.currency} {fmt(monthlySummary.totalRevenue, 2)}
               </strong>
-              <small style={{ display: 'block', color: '#6b7280', marginTop: 2 }}>{formatDecimal(monthlySummary.totalUnits, 0)} {rText.kpiUnitsSold}</small>
+              <small style={{ display: 'block', color: '#6b7280', marginTop: 2 }}>{fmt(monthlySummary.totalUnits, 0)} {rText.kpiUnitsSold}</small>
             </div>
 
             <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 8, padding: 12 }}>
               <span style={{ display: 'block', fontSize: '0.78rem', color: '#6b7280', textTransform: 'uppercase', fontWeight: 600 }}>{rText.kpiCogs}</span>
               <strong style={{ fontSize: '1.25rem', color: '#b91c1c' }}>
-                {state.currency} {formatDecimal(monthlySummary.totalCogs, 2)}
+                {state.currency} {fmt(monthlySummary.totalCogs, 2)}
               </strong>
               <small style={{ display: 'block', color: '#6b7280', marginTop: 2 }}>
-                Food Cost: {monthlySummary.totalRevenue > 0 ? formatDecimal((monthlySummary.totalCogs / monthlySummary.totalRevenue) * 100, 1) : 0}%
+                Food Cost: {monthlySummary.totalRevenue > 0 ? fmt((monthlySummary.totalCogs / monthlySummary.totalRevenue) * 100, 1) : fmt(0, 1)}%
               </small>
             </div>
 
             <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 8, padding: 12 }}>
               <span style={{ display: 'block', fontSize: '0.78rem', color: '#6b7280', textTransform: 'uppercase', fontWeight: 600 }}>{rText.kpiContribution}</span>
               <strong style={{ fontSize: '1.25rem', color: '#15803d' }}>
-                {state.currency} {formatDecimal(monthlySummary.totalContribution, 2)}
+                {state.currency} {fmt(monthlySummary.totalContribution, 2)}
               </strong>
               <small style={{ display: 'block', color: '#6b7280', marginTop: 2 }}>
-                {rText.kpiWeightedMargin} {formatDecimal(monthlySummary.weightedMarginPct, 1)}%
+                {rText.kpiWeightedMargin} {fmt(monthlySummary.weightedMarginPct, 1)}%
               </small>
             </div>
 
             <div style={{ background: '#f9fafb', border: '1px solid #e5e7eb', borderRadius: 8, padding: 12 }}>
               <span style={{ display: 'block', fontSize: '0.78rem', color: '#6b7280', textTransform: 'uppercase', fontWeight: 600 }}>{rText.kpiNetProfit}</span>
               <strong style={{ fontSize: '1.25rem', color: (netOperatingProfit ?? 0) >= 0 ? '#15803d' : '#b91c1c' }}>
-                {netOperatingProfit === null ? '—' : `${state.currency} ${formatDecimal(netOperatingProfit, 2)}`}
+                {netOperatingProfit === null ? '—' : `${state.currency} ${fmt(netOperatingProfit, 2)}`}
               </strong>
               <small style={{ display: 'block', color: '#6b7280', marginTop: 2 }}>
-                {rText.kpiFixedExpenses} {state.currency} {formatDecimal(totalMonthlyExpenses, 0)}
+                {rText.kpiFixedExpenses} {state.currency} {fmt(totalMonthlyExpenses, 0)}
               </small>
             </div>
           </div>
@@ -280,19 +277,19 @@ export function ExecutiveReportModal({
             <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', fontSize: '0.88rem' }}>
               <div>
                 <strong>{rText.minRevenueLabel}</strong>{' '}
-                <span>{state.currency} {formatDecimal(breakEvenRevenue, 2)}</span>
+                <span>{state.currency} {fmt(breakEvenRevenue, 2)}</span>
               </div>
               {breakEvenUnits > 0 && (
                 <div>
                   <strong>{rText.minUnitsLabel}</strong>{' '}
-                  <span>{formatDecimal(breakEvenUnits, 0)} {rText.unitsMonth}</span>
+                  <span>{fmt(breakEvenUnits, 0)} {rText.unitsMonth}</span>
                 </div>
               )}
               {safetyMarginPct !== null && (
                 <div>
                   <strong>{rText.safetyMarginLabel}</strong>{' '}
                   <span style={{ color: safetyMarginPct >= 0 ? '#15803d' : '#b91c1c', fontWeight: 700 }}>
-                    {safetyMarginPct >= 0 ? `+${formatDecimal(safetyMarginPct, 1)}%` : `${formatDecimal(safetyMarginPct, 1)}%`}
+                    {safetyMarginPct >= 0 ? `+${fmt(safetyMarginPct, 1)}%` : `${fmt(safetyMarginPct, 1)}%`}
                     {safetyMarginPct >= 0 ? rText.profitZone : rText.deficitZone}
                   </span>
                 </div>
@@ -301,53 +298,55 @@ export function ExecutiveReportModal({
           </div>
 
           <h4 style={{ margin: '0 0 10px', fontSize: '1rem', color: '#111827' }}>{rText.tableTitle}</h4>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.84rem', textAlign: 'left', marginBottom: 24 }}>
-            <thead>
-              <tr style={{ borderBottom: '2px solid #374151', background: '#f9fafb' }}>
-                <th style={{ padding: '8px 10px' }}>{rText.colProduct}</th>
-                <th style={{ padding: '8px 10px', textAlign: 'right' }}>{rText.colUnits}</th>
-                <th style={{ padding: '8px 10px', textAlign: 'right' }}>{rText.colPrice}</th>
-                <th style={{ padding: '8px 10px', textAlign: 'right' }}>{rText.colCost}</th>
-                <th style={{ padding: '8px 10px', textAlign: 'right' }}>{rText.colFc}</th>
-                <th style={{ padding: '8px 10px', textAlign: 'right' }}>{rText.colUnitContrib}</th>
-                <th style={{ padding: '8px 10px', textAlign: 'right' }}>{rText.colTotalContrib}</th>
-                <th style={{ padding: '8px 10px', textAlign: 'center' }}>{rText.colClass}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {monthlySummary.rows.map((row) => {
-                const fcPct = row.evaluatedPrice > 0 ? (row.unitCost / row.evaluatedPrice) * 100 : null;
-                return (
-                  <tr key={row.prod.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                    <td style={{ padding: '8px 10px', fontWeight: 600 }}>{row.prod.name}</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right' }}>
-                      {row.units !== null ? formatDecimal(row.units, 0) : '—'}
-                    </td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right' }}>
-                      {row.isComplete ? `${state.currency} ${formatDecimal(row.evaluatedPrice, 2)}` : '—'}
-                    </td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right' }}>
-                      {row.isComplete ? `${state.currency} ${formatDecimal(row.unitCost, 2)}` : rText.incomplete}
-                    </td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right' }}>
-                      {fcPct !== null ? `${formatDecimal(fcPct, 1)}%` : '—'}
-                    </td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right' }}>
-                      {row.isComplete ? `${state.currency} ${formatDecimal(row.unitGrossProfit, 2)}` : '—'}
-                    </td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600 }}>
-                      {row.monthlyContribution !== null ? `${state.currency} ${formatDecimal(row.monthlyContribution, 2)}` : '—'}
-                    </td>
-                    <td style={{ padding: '8px 10px', textAlign: 'center' }}>
-                      {row.isComplete ? row.matrixLabel : rText.incomplete}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <div className="table-wrap" style={{ marginBottom: 24 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.84rem', textAlign: 'left' }}>
+              <thead>
+                <tr style={{ borderBottom: '2px solid #374151', background: '#f9fafb' }}>
+                  <th style={{ padding: '8px 10px' }}>{rText.colProduct}</th>
+                  <th style={{ padding: '8px 10px', textAlign: 'right' }}>{rText.colUnits}</th>
+                  <th style={{ padding: '8px 10px', textAlign: 'right' }}>{rText.colPrice}</th>
+                  <th style={{ padding: '8px 10px', textAlign: 'right' }}>{rText.colCost}</th>
+                  <th style={{ padding: '8px 10px', textAlign: 'right' }}>{rText.colFc}</th>
+                  <th style={{ padding: '8px 10px', textAlign: 'right' }}>{rText.colUnitContrib}</th>
+                  <th style={{ padding: '8px 10px', textAlign: 'right' }}>{rText.colTotalContrib}</th>
+                  <th style={{ padding: '8px 10px', textAlign: 'center' }}>{rText.colClass}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {monthlySummary.rows.map((row) => {
+                  const fcPct = row.evaluatedPrice > 0 ? (row.unitCost / row.evaluatedPrice) * 100 : null;
+                  return (
+                    <tr key={row.prod.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                      <td style={{ padding: '8px 10px', fontWeight: 600 }}>{row.prod.name}</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                        {row.units !== null ? fmt(row.units, 0) : '—'}
+                      </td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                        {row.isComplete ? `${state.currency} ${fmt(row.evaluatedPrice, 2)}` : '—'}
+                      </td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                        {row.isComplete ? `${state.currency} ${fmt(row.unitCost, 2)}` : rText.incomplete}
+                      </td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                        {fcPct !== null ? `${fmt(fcPct, 1)}%` : '—'}
+                      </td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                        {row.isComplete ? `${state.currency} ${fmt(row.unitGrossProfit, 2)}` : '—'}
+                      </td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600 }}>
+                        {row.monthlyContribution !== null ? `${state.currency} ${fmt(row.monthlyContribution, 2)}` : '—'}
+                      </td>
+                      <td style={{ padding: '8px 10px', textAlign: 'center' }}>
+                        {row.isComplete ? row.matrixLabel : rText.incomplete}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
 
-          <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 12, fontSize: '0.78rem', color: '#9ca3af', display: 'flex', justifyContent: 'space-between' }}>
+          <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 12, fontSize: '0.78rem', color: '#9ca3af', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
             <span>{rText.footerLeft}</span>
             <span>{rText.footerRight}</span>
           </div>

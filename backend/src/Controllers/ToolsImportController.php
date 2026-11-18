@@ -8,14 +8,54 @@ use Pizzalog\Core\Response;
 
 class ToolsImportController
 {
+    private const MAX_FILE_BYTES = 20 * 1024 * 1024;
     private const MAX_SHEETS = 30;
     private const MAX_ROWS = 10000;
     private const MAX_COLUMNS = 200;
     private const MAX_CELLS = 500000;
     private const DAILY_AI_LIMIT = 20;
 
+    /**
+     * GET /tools/import/limits
+     * Devuelve los límites efectivos del servidor PHP y de la API para validar soporte real de archivos hasta 20 MB.
+     */
+    public function limits(Request $req): void
+    {
+        $uploadMaxBytes = Request::parseIniSizeToBytes((string) ini_get('upload_max_filesize'));
+        $postMaxBytes = Request::parseIniSizeToBytes((string) ini_get('post_max_size'));
+        $memoryLimitBytes = Request::parseIniSizeToBytes((string) ini_get('memory_limit'));
+        $maxExecTime = (int) ini_get('max_execution_time');
+        $maxInputTime = (int) ini_get('max_input_time');
+
+        $supportsUpload20Mb = ($uploadMaxBytes === 0 || $uploadMaxBytes >= self::MAX_FILE_BYTES)
+            && ($postMaxBytes === 0 || $postMaxBytes >= self::MAX_FILE_BYTES);
+
+        Response::ok([
+            'max_file_bytes' => self::MAX_FILE_BYTES,
+            'max_sheets' => self::MAX_SHEETS,
+            'max_rows' => self::MAX_ROWS,
+            'max_columns' => self::MAX_COLUMNS,
+            'max_cells' => self::MAX_CELLS,
+            'php_upload_max_filesize_bytes' => $uploadMaxBytes,
+            'php_post_max_size_bytes' => $postMaxBytes,
+            'php_memory_limit_bytes' => $memoryLimitBytes,
+            'php_max_execution_time_s' => $maxExecTime,
+            'php_max_input_time_s' => $maxInputTime,
+            'supports_20mb_upload' => $supportsUpload20Mb,
+            'environment' => (string) ($req->auth['tools_environment'] ?? 'production'),
+        ]);
+    }
+
     public function preview(Request $req): void
     {
+        @ini_set('max_execution_time', '120');
+        @set_time_limit(120);
+        @ini_set('memory_limit', '256M');
+
+        if ($req->postMaxExceeded) {
+            Response::error('El envío supera el límite configurado en el servidor (post_max_size / 20 MB)', 413);
+        }
+
         $sheets = $req->input('sheets');
         if (!is_array($sheets) || count($sheets) < 1 || count($sheets) > self::MAX_SHEETS) {
             Response::error('El archivo debe contener entre 1 y 30 hojas con datos', 422);

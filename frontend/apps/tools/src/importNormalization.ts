@@ -1,4 +1,4 @@
-import { areUnitsCompatible, type BakersDoughSpec, type Ingredient, type PurchasePrice, type Recipe, type UnitCode } from '@pizzalog/cost-engine';
+import { areUnitsCompatible, parseLocaleNumber, toLocalIsoTimestamp, type BakersDoughSpec, type Ingredient, type PurchasePrice, type Recipe, type UnitCode } from '@pizzalog/cost-engine';
 import type { ParsedDoughProfile, ParsedImportSheet } from './importFileParser';
 import type { ToolsWorkspaceState, OperatingExpenseItem } from './demoData';
 
@@ -31,28 +31,7 @@ function cell(row: string[], mapping: ImportSheetMapping, ...fields: string[]): 
 }
 
 function parseNumber(raw: string): number | null {
-  let value = raw.trim().replace(/[^0-9,.-]/g, '');
-  if (!value || !/[0-9]/.test(value)) return null;
-  const comma = value.lastIndexOf(',');
-  const dot = value.lastIndexOf('.');
-  if (comma >= 0 && dot >= 0) {
-    const decimal = comma > dot ? ',' : '.';
-    const thousands = decimal === ',' ? /\./g : /,/g;
-    value = value.replace(thousands, '').replace(decimal, '.');
-  } else if (comma >= 0) {
-    const decimals = value.length - comma - 1;
-    value = decimals > 0 && decimals <= 2 ? value.replace(',', '.') : value.replace(/,/g, '');
-  } else if (dot >= 0) {
-    // XLSX numeric values use "." as the decimal separator, including es-AR files.
-    // Preserve long decimals such as 932.298871562119; repeated dot groups or
-    // canonical thousands groups like "8.000" / "68.500" are interpreted as thousands separators.
-    const dotCount = (value.match(/\./g) ?? []).length;
-    if (dotCount > 1 || /^[1-9]\d{0,2}(\.\d{3})+$/.test(value)) {
-      value = value.replace(/\./g, '');
-    }
-  }
-  const number = Number(value);
-  return Number.isFinite(number) ? number : null;
+  return parseLocaleNumber(raw);
 }
 
 function dimensionForUnit(unit: string): Ingredient['base_dimension'] | null {
@@ -565,7 +544,7 @@ export function applyImportMappings(
           ...(grossRevenue !== null ? { gross_revenue: grossRevenue } : {}),
           ...(netRevenue !== null ? { net_revenue: netRevenue } : {}),
           source,
-          imported_at: new Date().toISOString(),
+          imported_at: toLocalIsoTimestamp(),
         };
         salesHistory.push(saleRecord);
         importedSalesRecords.push(saleRecord);

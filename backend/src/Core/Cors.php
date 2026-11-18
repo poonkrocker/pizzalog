@@ -10,6 +10,8 @@ class Cors
     /** Orígenes por defecto autorizados en producción, staging y desarrollo local */
     public const DEFAULT_ALLOWED_ORIGINS = [
         'https://tools.pizzalog.net',
+        'https://tools-staging.pizzalog.net',
+        'https://staging-tools.pizzalog.net',
         'https://staging.pizzalog.net',
         'https://app-staging.pizzalog.net',
         'https://app.pizzalog.net',

@@ -37,22 +37,30 @@ class ToolsAuthController
             ");
             $pdo->exec("
                 CREATE TABLE IF NOT EXISTS tools_workspaces (
-                    account_id INT UNSIGNED NOT NULL PRIMARY KEY,
+                    account_id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
                     workspace_json LONGTEXT NOT NULL,
                     schema_version INT UNSIGNED NOT NULL DEFAULT 1,
                     version INT UNSIGNED NOT NULL DEFAULT 1,
                     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
             ");
-            try {
-                $pdo->exec("ALTER TABLE tools_workspaces ADD COLUMN version INT UNSIGNED NOT NULL DEFAULT 1");
-            } catch (\Throwable $ignore) {
-                // La columna version ya existe
+            foreach ([
+                "ALTER TABLE tools_accounts ADD COLUMN activation_token VARCHAR(128) NULL",
+                "ALTER TABLE tools_accounts ADD COLUMN activation_token_expires_at DATETIME NULL",
+                "ALTER TABLE tools_accounts ADD COLUMN subscription_status VARCHAR(32) NOT NULL DEFAULT 'none'",
+                "ALTER TABLE tools_accounts ADD COLUMN subscription_plan VARCHAR(64) NULL",
+                "ALTER TABLE tools_workspaces ADD COLUMN version INT UNSIGNED NOT NULL DEFAULT 1",
+            ] as $alterSql) {
+                try {
+                    $pdo->exec($alterSql);
+                } catch (\Throwable $ignore) {
+                    // La columna ya existe en este entorno
+                }
             }
             $pdo->exec("
                 CREATE TABLE IF NOT EXISTS tools_workspace_backups (
                     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-                    account_id INT UNSIGNED NOT NULL,
+                    account_id BIGINT UNSIGNED NOT NULL,
                     version INT UNSIGNED NOT NULL DEFAULT 1,
                     workspace_json LONGTEXT NOT NULL,
                     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

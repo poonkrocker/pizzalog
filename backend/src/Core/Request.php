@@ -14,6 +14,29 @@ class Request
     public array $params = [];   // parámetros de ruta, ej. {id}
     public array $headers = [];
     public ?array $auth = null;  // ['user_id' => , 'business_id' => , 'role' => ]
+    public bool $postMaxExceeded = false;
+    public int $contentLengthBytes = 0;
+    public int $postMaxBytes = 0;
+
+    public static function parseIniSizeToBytes(string $value): int
+    {
+        $trimmed = trim($value);
+        if ($trimmed === '' || $trimmed === '-1') {
+            return 0;
+        }
+        if (preg_match('/^(\d+)\s*([kmgtp])?b?$/i', $trimmed, $m)) {
+            $num = (int) $m[1];
+            $unit = strtolower($m[2] ?? '');
+            return match ($unit) {
+                'k' => $num * 1024,
+                'm' => $num * 1024 * 1024,
+                'g' => $num * 1024 * 1024 * 1024,
+                't' => $num * 1024 * 1024 * 1024 * 1024,
+                default => $num,
+            };
+        }
+        return (int) $trimmed;
+    }
 
     public static function capture(): self
     {
@@ -26,6 +49,8 @@ class Request
 
         $r->query = $_GET;
         $r->headers = self::captureHeaders();
+        $r->contentLengthBytes = (int) ($_SERVER['CONTENT_LENGTH'] ?? 0);
+        $r->postMaxBytes = self::parseIniSizeToBytes((string) ini_get('post_max_size'));
 
         $raw = file_get_contents('php://input');
         if ($raw !== false && $raw !== '') {
@@ -33,6 +58,8 @@ class Request
             if (is_array($decoded)) {
                 $r->body = $decoded;
             }
+        } elseif ($r->contentLengthBytes > 0 && $r->postMaxBytes > 0 && $r->contentLengthBytes > $r->postMaxBytes && empty($_POST)) {
+            $r->postMaxExceeded = true;
         }
         return $r;
     }

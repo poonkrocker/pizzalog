@@ -20,14 +20,10 @@ import {
   type UnitCode,
 } from './types.js';
 import { convertQuantity, getUnitDefinition } from './units.js';
+import { formatDecimal, toLocalIsoTimestamp } from './formatting.js';
 
 export const ENGINE_VERSION = '1.0.0';
-
-export function formatDecimal(value: number, decimals = 2): string {
-  // Evitar artefactos de punto flotante tipo 200.00000000000003 antes de redondear para salida
-  const epsilon = Math.sign(value) * 1e-12;
-  return (value + epsilon).toFixed(decimals);
-}
+export { formatDecimal };
 
 /**
  * Hash determinístico FNV-1a 64-bit en hex para identificar de forma reproducible el snapshot de inputs
@@ -970,7 +966,7 @@ export class CostEngine {
       components: breakdowns,
       missing_inputs: missingInputs,
       warnings,
-      calculated_at: new Date().toISOString(),
+      calculated_at: toLocalIsoTimestamp(),
       input_snapshot_hash: snapshotHash,
       engine_version: ENGINE_VERSION,
     };

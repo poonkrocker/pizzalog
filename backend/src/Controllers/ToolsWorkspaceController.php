@@ -69,6 +69,14 @@ class ToolsWorkspaceController
      */
     public function save(Request $req): void
     {
+        @ini_set('max_execution_time', '120');
+        @set_time_limit(120);
+        @ini_set('memory_limit', '256M');
+
+        if ($req->postMaxExceeded) {
+            Response::error('El espacio de trabajo supera el límite configurado del servidor (post_max_size / 20 MB)', 413);
+        }
+
         $accountId = (int) $req->auth['tools_account_id'];
         $workspace = $req->input('workspace');
         $expectedUpdatedAt = $req->input('updated_at');
@@ -184,7 +192,12 @@ class ToolsWorkspaceController
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
             }
-            Response::error('No se pudo guardar el espacio de trabajo: ' . $e->getMessage(), 500);
+            error_log('[pizzalog-tools] Error saving workspace for account ' . $accountId . ': ' . $e->getMessage());
+            $debug = (bool) \Pizzalog\Core\Config::get('debug', false);
+            Response::error(
+                $debug ? ('No se pudo guardar el espacio de trabajo: ' . $e->getMessage()) : 'No se pudo guardar el espacio de trabajo en este momento. Reintentá en unos segundos.',
+                500
+            );
         }
     }
 
@@ -290,7 +303,12 @@ class ToolsWorkspaceController
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
             }
-            Response::error('No se pudo restaurar el backup: ' . $e->getMessage(), 500);
+            error_log('[pizzalog-tools] Error restoring backup for account ' . $accountId . ': ' . $e->getMessage());
+            $debug = (bool) \Pizzalog\Core\Config::get('debug', false);
+            Response::error(
+                $debug ? ('No se pudo restaurar el backup: ' . $e->getMessage()) : 'No se pudo restaurar la copia de seguridad en este momento.',
+                500
+            );
         }
     }
 }

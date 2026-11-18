@@ -1,10 +1,27 @@
 import { Component, useEffect, useState, type ErrorInfo, type FormEvent, type ReactNode } from 'react';
-import { createInitialDemoWorkspace, normalizeWorkspace, type ToolsWorkspaceState } from './demoData';
+import { todayLocalDateString } from '@pizzalog/cost-engine';
+import { createInitialDemoWorkspace, normalizeWorkspace, type LocaleCode, type ToolsWorkspaceState } from './demoData';
 import { App } from './App';
 import { CommercialPlansModal } from './CommercialPlansModal';
+import { AUTH_I18N } from './i18n';
+
+const AUTH_LOCALE_KEY = 'pizzalog_tools_locale';
+
+function readPreferredAuthLocale(): LocaleCode {
+  try {
+    const saved = localStorage.getItem(AUTH_LOCALE_KEY);
+    if (saved === 'es-AR' || saved === 'pt-BR' || saved === 'en') return saved;
+  } catch { /* ignore */ }
+  if (typeof navigator !== 'undefined') {
+    const lang = (navigator.language || '').toLowerCase();
+    if (lang.startsWith('pt')) return 'pt-BR';
+    if (lang.startsWith('en')) return 'en';
+  }
+  return 'es-AR';
+}
 
 class ToolsErrorBoundary extends Component<
-  { children: ReactNode; workspace: ToolsWorkspaceState; onResetDemo: () => void; onLogout: () => void },
+  { children: ReactNode; workspace: ToolsWorkspaceState; locale: LocaleCode; onResetDemo: () => void; onLogout: () => void },
   { error: Error | null }
 > {
   override state: { error: Error | null } = { error: null };
@@ -19,14 +36,15 @@ class ToolsErrorBoundary extends Component<
 
   override render() {
     if (this.state.error) {
+      const aText = AUTH_I18N[this.props.locale] ?? AUTH_I18N['es-AR'];
       return (
         <main className="tools-auth">
           <section className="tools-auth-card" style={{ maxWidth: 580 }}>
-            <div className="tools-auth-kicker">PIZZALOG / TOOLS — RECUPERACIÓN</div>
-            <h1>Se detectó un problema al mostrar el espacio de trabajo</h1>
-            <p>Tus datos siguen guardados. Podés descargar un respaldo JSON, reintentar o cerrar sesión.</p>
+            <div className="tools-auth-kicker">{aText.recoveryKicker}</div>
+            <h1>{aText.recoveryTitle}</h1>
+            <p>{aText.recoveryDesc}</p>
             <div className="alert-banner" style={{ wordBreak: 'break-word' }}>
-              {this.state.error.message || 'Error inesperado de renderizado'}
+              {this.state.error.message || aText.errGeneric}
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
               <button
@@ -37,7 +55,7 @@ class ToolsErrorBoundary extends Component<
                   window.location.reload();
                 }}
               >
-                🔄 Reintentar carga
+                {aText.recoveryRetry}
               </button>
               <button
                 className="btn btn--secondary tools-auth-submit"
@@ -47,12 +65,12 @@ class ToolsErrorBoundary extends Component<
                   const url = URL.createObjectURL(blob);
                   const a = document.createElement('a');
                   a.href = url;
-                  a.download = `pizzalog-tools-recovery-${new Date().toISOString().slice(0, 10)}.json`;
+                  a.download = `pizzalog-tools-recovery-${todayLocalDateString()}.json`;
                   a.click();
                   URL.revokeObjectURL(url);
                 }}
               >
-                💾 Descargar respaldo JSON
+                {aText.recoveryDownload}
               </button>
               <button
                 className="btn btn--secondary tools-auth-submit"
@@ -62,10 +80,10 @@ class ToolsErrorBoundary extends Component<
                   this.props.onResetDemo();
                 }}
               >
-                🧪 Restaurar espacio de trabajo base
+                {aText.recoveryReset}
               </button>
               <button className="btn tools-auth-submit" type="button" onClick={this.props.onLogout}>
-                Cerrar sesión
+                {aText.signOutBtn}
               </button>
             </div>
           </section>
@@ -76,10 +94,13 @@ class ToolsErrorBoundary extends Component<
   }
 }
 
-const API_URL = ((import.meta.env.VITE_API_URL as string | undefined) ?? 'https://api.pizzalog.net').replace(/\/+$/, '');
-const TOKEN_KEY = 'pizzalog_tools_session';
 const isStagingHost = typeof window !== 'undefined' && window.location.hostname.toLowerCase().includes('staging');
-const TOOLS_ENVIRONMENT = (isStagingHost || ((import.meta.env.VITE_TOOLS_ENV as string | undefined) === 'staging')) ? 'staging' : 'production';
+export const TOOLS_ENVIRONMENT: 'staging' | 'production' =
+  (isStagingHost || ((import.meta.env.VITE_TOOLS_ENV as string | undefined) === 'staging')) ? 'staging' : 'production';
+const RAW_PROD_API = (import.meta.env.VITE_API_URL as string | undefined) ?? 'https://api.pizzalog.net';
+const RAW_STAGING_API = (import.meta.env.VITE_STAGING_API_URL as string | undefined) ?? RAW_PROD_API;
+const API_URL = (TOOLS_ENVIRONMENT === 'staging' ? RAW_STAGING_API : RAW_PROD_API).replace(/\/+$/, '');
+const TOKEN_KEY = 'pizzalog_tools_session';
 
 const LEGACY_WORKSPACE_KEY = 'pizzalog_tools_workspace_v2';
 
@@ -99,7 +120,7 @@ export async function parseToolsJsonResponse<T = any>(response: Response): Promi
     throw new ToolsApiError(
       response.status >= 400
         ? `El servidor rechazó o interrumpió la solicitud (HTTP ${response.status})`
-        : 'El servidor devolvió una respuesta HTML inesperada en lugar de JSON',
+        : 'El servidor devolvió una respuesta no válida en lugar de JSON',
       response.status || 502
     );
   }
@@ -218,7 +239,8 @@ function readAccountRecoveryBackup(accountId?: number): {
 
 async function restoreOrMigrateWorkspace(
   token: string,
-  accountId?: number
+  accountId?: number,
+  fallbackLocale: LocaleCode = 'es-AR'
 ): Promise<{ workspace: ToolsWorkspaceState; updatedAt: string | null; version: number | null }> {
   const localRecovery = readAccountRecoveryBackup(accountId);
   try {
@@ -284,7 +306,13 @@ async function restoreOrMigrateWorkspace(
   }
 
   const legacy = readLegacyWorkspace();
-  if (!legacy) return { workspace: createInitialDemoWorkspace(), updatedAt: null, version: 1 };
+  if (!legacy) {
+    return {
+      workspace: { ...createInitialDemoWorkspace(), locale: fallbackLocale },
+      updatedAt: null,
+      version: 1,
+    };
+  }
 
   const normalizedLegacy = normalizeWorkspace(legacy);
   const saved = await api<{ saved: boolean; updated_at?: string | null; version?: number | null }>('/tools/workspace', token, {
@@ -348,6 +376,7 @@ export function ToolsAuthGate() {
   const [workspaceError, setWorkspaceError] = useState('');
 
   // Form states
+  const [authLocale, setAuthLocale] = useState<LocaleCode>(() => readPreferredAuthLocale());
   const [mode, setMode] = useState<'login' | 'activate' | 'reset' | 'forgot'>('login');
   const [actionToken, setActionToken] = useState('');
   const [email, setEmail] = useState('');
@@ -355,8 +384,34 @@ export function ToolsAuthGate() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPlans, setShowPlans] = useState(false);
 
+  const aText = AUTH_I18N[authLocale] ?? AUTH_I18N['es-AR'];
+  const selectAuthLocale = (next: LocaleCode) => {
+    setAuthLocale(next);
+    try { localStorage.setItem(AUTH_LOCALE_KEY, next); } catch { /* ignore */ }
+  };
+
+  const renderAuthKicker = () => (
+    <div className="tools-auth-kicker">
+      <span>
+        {aText.kicker}
+        {TOOLS_ENVIRONMENT === 'staging' ? ` · ${aText.stagingBadge}` : ''}
+      </span>
+      <div className="auth-lang-bar" role="group" aria-label="Language">
+        {(['es-AR', 'pt-BR', 'en'] as const).map((loc) => (
+          <button
+            key={loc}
+            type="button"
+            className={`auth-lang-btn ${authLocale === loc ? 'auth-lang-btn--active' : ''}`}
+            onClick={() => selectAuthLocale(loc)}
+          >
+            {loc === 'es-AR' ? 'ES' : loc === 'pt-BR' ? 'PT' : 'EN'}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
   useEffect(() => {
-    // Detectar parámetros URL (?activate=TOKEN o ?reset=TOKEN)
     const params = new URLSearchParams(window.location.search);
     const act = params.get('activate');
     const rst = params.get('reset');
@@ -390,9 +445,9 @@ export function ToolsAuthGate() {
       let demoWs: ToolsWorkspaceState;
       try {
         const raw = localStorage.getItem('pizzalog_tools_guest_workspace');
-        demoWs = raw ? (JSON.parse(raw) as ToolsWorkspaceState) : createInitialDemoWorkspace();
+        demoWs = raw ? normalizeWorkspace(JSON.parse(raw) as ToolsWorkspaceState) : { ...createInitialDemoWorkspace(), locale: authLocale };
       } catch {
-        demoWs = createInitialDemoWorkspace();
+        demoWs = { ...createInitialDemoWorkspace(), locale: authLocale };
       }
       setToken('guest-demo-token');
       setAccount(guestAccount);
@@ -407,21 +462,21 @@ export function ToolsAuthGate() {
         setToken(savedToken);
         setAccount(me.account);
         try {
-          const restored = await restoreOrMigrateWorkspace(savedToken, me.account.id);
+          const restored = await restoreOrMigrateWorkspace(savedToken, me.account.id, authLocale);
           setWorkspace(restored.workspace);
           setWorkspaceUpdatedAt(restored.updatedAt);
           setWorkspaceVersion(restored.version);
           setWorkspaceError('');
         } catch (err) {
-          setWorkspaceError(err instanceof Error ? err.message : 'No se pudo recuperar el espacio de trabajo');
+          setWorkspaceError(err instanceof Error ? err.message : aText.errLoadWorkspaceTitle);
         }
       } catch (err) {
         const status = err instanceof ToolsApiError ? err.status : 0;
         if (status === 401 || status === 403) {
           clearSessionToken();
-          setError(err instanceof Error ? err.message : 'La sesión ya no es válida. Ingresá nuevamente.');
+          setError(err instanceof Error ? err.message : aText.errInvalidSession);
         } else {
-          setError(err instanceof Error ? err.message : 'No se pudo verificar la sesión guardada');
+          setError(err instanceof Error ? err.message : aText.errVerifySession);
         }
       } finally {
         setLoading(false);
@@ -445,15 +500,15 @@ export function ToolsAuthGate() {
       setToken(result.token);
       setAccount(result.account);
       try {
-        const restored = await restoreOrMigrateWorkspace(result.token, result.account.id);
+        const restored = await restoreOrMigrateWorkspace(result.token, result.account.id, authLocale);
         setWorkspace(restored.workspace);
         setWorkspaceUpdatedAt(restored.updatedAt);
         setWorkspaceVersion(restored.version);
       } catch (err) {
-        setWorkspaceError(err instanceof Error ? err.message : 'No se pudo recuperar el espacio de trabajo');
+        setWorkspaceError(err instanceof Error ? err.message : aText.errLoadWorkspaceTitle);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo iniciar sesión');
+      setError(err instanceof Error ? err.message : aText.errLoginFailed);
     } finally {
       setLoading(false);
     }
@@ -462,11 +517,11 @@ export function ToolsAuthGate() {
   async function handleActivateOrReset(event: FormEvent) {
     event.preventDefault();
     if (password.length < 8) {
-      setError('La contraseña debe tener al menos 8 caracteres');
+      setError(aText.errPassMinLen);
       return;
     }
     if (password !== confirmPassword) {
-      setError('Las contraseñas no coinciden');
+      setError(aText.errPassMismatch);
       return;
     }
 
@@ -480,21 +535,20 @@ export function ToolsAuthGate() {
         method: 'POST',
         body: JSON.stringify({ token: actionToken, password }),
       });
-      // Limpiar query params de la URL para que no quede el token expuesto
       window.history.replaceState({}, document.title, window.location.pathname);
       writeSessionToken(result.token);
       setToken(result.token);
       setAccount(result.account);
       try {
-        const restored = await restoreOrMigrateWorkspace(result.token, result.account.id);
+        const restored = await restoreOrMigrateWorkspace(result.token, result.account.id, authLocale);
         setWorkspace(restored.workspace);
         setWorkspaceUpdatedAt(restored.updatedAt);
         setWorkspaceVersion(restored.version);
       } catch (err) {
-        setWorkspaceError(err instanceof Error ? err.message : 'No se pudo recuperar el espacio de trabajo');
+        setWorkspaceError(err instanceof Error ? err.message : aText.errLoadWorkspaceTitle);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo procesar la solicitud');
+      setError(err instanceof Error ? err.message : aText.errGeneric);
     } finally {
       setLoading(false);
     }
@@ -510,9 +564,9 @@ export function ToolsAuthGate() {
         method: 'POST',
         body: JSON.stringify({ email, environment: TOOLS_ENVIRONMENT }),
       });
-      setNotice('Si el correo corresponde a una cuenta activa, te enviamos un enlace para restablecer tu contraseña.');
+      setNotice(aText.forgotSentNotice);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo procesar la solicitud');
+      setError(err instanceof Error ? err.message : aText.errGeneric);
     } finally {
       setLoading(false);
     }
@@ -523,12 +577,12 @@ export function ToolsAuthGate() {
     setLoading(true);
     setWorkspaceError('');
     try {
-      const restored = await restoreOrMigrateWorkspace(token, account?.id);
+      const restored = await restoreOrMigrateWorkspace(token, account?.id, authLocale);
       setWorkspace(restored.workspace);
       setWorkspaceUpdatedAt(restored.updatedAt);
       setWorkspaceVersion(restored.version);
     } catch (err) {
-      setWorkspaceError(err instanceof Error ? err.message : 'No se pudo recuperar el espacio de trabajo');
+      setWorkspaceError(err instanceof Error ? err.message : aText.errLoadWorkspaceTitle);
     } finally {
       setLoading(false);
     }
@@ -558,9 +612,9 @@ export function ToolsAuthGate() {
     let demoWs: ToolsWorkspaceState;
     try {
       const raw = localStorage.getItem('pizzalog_tools_guest_workspace');
-      demoWs = raw ? (JSON.parse(raw) as ToolsWorkspaceState) : createInitialDemoWorkspace();
+      demoWs = raw ? normalizeWorkspace(JSON.parse(raw) as ToolsWorkspaceState) : { ...createInitialDemoWorkspace(), locale: authLocale };
     } catch {
-      demoWs = createInitialDemoWorkspace();
+      demoWs = { ...createInitialDemoWorkspace(), locale: authLocale };
     }
     writeSessionToken('guest-demo-token');
     setToken('guest-demo-token');
@@ -570,21 +624,21 @@ export function ToolsAuthGate() {
   }
 
   if (loading) {
-    return <main className="tools-auth"><div className="tools-auth-card">Verificando acceso…</div></main>;
+    return <main className="tools-auth"><div className="tools-auth-card">{aText.verifyingAccess}</div></main>;
   }
 
   if (token && account && workspaceError) {
     return (
       <main className="tools-auth">
         <section className="tools-auth-card">
-          <div className="tools-auth-kicker">PIZZALOG / TOOLS</div>
-          <h1>No pudimos cargar tu espacio de trabajo</h1>
-          <p>Tu sesión sigue activa y no se reemplazaron tus datos guardados.</p>
+          {renderAuthKicker()}
+          <h1>{aText.errLoadWorkspaceTitle}</h1>
+          <p>{aText.errLoadWorkspaceDesc}</p>
           <div className="alert-banner">{workspaceError}</div>
           <button className="btn btn--primary tools-auth-submit" type="button" onClick={() => void retryWorkspaceLoad()} disabled={loading}>
-            {loading ? 'Reintentando…' : 'Reintentar'}
+            {loading ? aText.retryingBtn : aText.retryBtn}
           </button>
-          <button className="btn tools-auth-submit" type="button" onClick={logout}>Cerrar sesión</button>
+          <button className="btn tools-auth-submit" type="button" onClick={logout}>{aText.signOutBtn}</button>
         </section>
       </main>
     );
@@ -594,6 +648,7 @@ export function ToolsAuthGate() {
     return (
       <ToolsErrorBoundary
         workspace={workspace}
+        locale={workspace.locale ?? authLocale}
         onResetDemo={() => setWorkspace(createInitialDemoWorkspace())}
         onLogout={logout}
       >
@@ -603,6 +658,7 @@ export function ToolsAuthGate() {
           initialWorkspace={workspace}
           initialUpdatedAt={workspaceUpdatedAt}
           initialVersion={workspaceVersion}
+          toolsEnvironment={TOOLS_ENVIRONMENT}
           onLogout={logout}
         />
       </ToolsErrorBoundary>
@@ -613,15 +669,11 @@ export function ToolsAuthGate() {
     return (
       <main className="tools-auth">
         <form className="tools-auth-card" onSubmit={handleActivateOrReset}>
-          <div className="tools-auth-kicker">PIZZALOG / TOOLS</div>
-          <h1>{mode === 'activate' ? '¡Bienvenido! Creá tu contraseña' : 'Restablecer contraseña'}</h1>
-          <p>
-            {mode === 'activate'
-              ? 'Definí la contraseña para acceder a tu Restaurant Profit Kit.'
-              : 'Ingresá tu nueva contraseña para volver a acceder a tu cuenta.'}
-          </p>
+          {renderAuthKicker()}
+          <h1>{mode === 'activate' ? aText.titleActivate : aText.titleReset}</h1>
+          <p>{mode === 'activate' ? aText.leadActivate : aText.leadReset}</p>
           <label className="field">
-            <span>Nueva Contraseña (mínimo 8 caracteres)</span>
+            <span>{aText.newPassword}</span>
             <input
               type="password"
               autoComplete="new-password"
@@ -632,7 +684,7 @@ export function ToolsAuthGate() {
             />
           </label>
           <label className="field">
-            <span>Confirmar Contraseña</span>
+            <span>{aText.confirmPassword}</span>
             <input
               type="password"
               autoComplete="new-password"
@@ -644,7 +696,7 @@ export function ToolsAuthGate() {
           </label>
           {error && <div className="alert-banner">{error}</div>}
           <button className="btn btn--primary tools-auth-submit" type="submit" disabled={loading}>
-            {loading ? 'Guardando…' : mode === 'activate' ? 'Activar cuenta y acceder' : 'Guardar nueva contraseña'}
+            {loading ? aText.savingBtn : mode === 'activate' ? aText.activateBtn : aText.resetSaveBtn}
           </button>
           <div style={{ marginTop: '1rem', textAlign: 'center' }}>
             <button
@@ -655,7 +707,7 @@ export function ToolsAuthGate() {
                 window.history.replaceState({}, document.title, window.location.pathname);
               }}
             >
-              Volver al inicio de sesión
+              {aText.backToLogin}
             </button>
           </div>
         </form>
@@ -667,11 +719,11 @@ export function ToolsAuthGate() {
     return (
       <main className="tools-auth">
         <form className="tools-auth-card" onSubmit={handleForgotPassword}>
-          <div className="tools-auth-kicker">PIZZALOG / TOOLS</div>
-          <h1>Recuperar Contraseña</h1>
-          <p>Ingresá tu email registrado y te enviaremos un enlace seguro para restablecer tu contraseña.</p>
+          {renderAuthKicker()}
+          <h1>{aText.titleForgot}</h1>
+          <p>{aText.leadForgot}</p>
           <label className="field">
-            <span>Email</span>
+            <span>{aText.emailLabel}</span>
             <input
               type="email"
               autoComplete="email"
@@ -683,7 +735,7 @@ export function ToolsAuthGate() {
           {error && <div className="alert-banner">{error}</div>}
           {notice && <div className="alert-banner alert-banner--success" style={{ background: '#e8f5e9', color: '#2e7d32' }}>{notice}</div>}
           <button className="btn btn--primary tools-auth-submit" type="submit" disabled={loading}>
-            {loading ? 'Enviando…' : 'Enviar enlace de recuperación'}
+            {loading ? aText.sendingBtn : aText.sendResetBtn}
           </button>
           <div style={{ marginTop: '1rem', textAlign: 'center' }}>
             <button
@@ -695,7 +747,7 @@ export function ToolsAuthGate() {
                 setNotice('');
               }}
             >
-              ← Volver al inicio de sesión
+              {aText.backToLogin}
             </button>
           </div>
         </form>
@@ -706,20 +758,20 @@ export function ToolsAuthGate() {
   return (
     <main className="tools-auth">
       <form className="tools-auth-card" onSubmit={handleLogin}>
-        <div className="tools-auth-kicker">PIZZALOG / TOOLS</div>
-        <h1>Restaurant Profit Kit</h1>
-        <p>Ingresá con la cuenta que recibiste al adquirir el producto o vinculá tu usuario de Pizzalog App.</p>
+        {renderAuthKicker()}
+        <h1>{aText.titleLogin}</h1>
+        <p>{aText.leadLogin}</p>
         <label className="field">
-          <span>Email o Usuario</span>
+          <span>{aText.emailOrUser}</span>
           <input type="text" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} />
         </label>
         <label className="field">
-          <span>Contraseña</span>
+          <span>{aText.password}</span>
           <input type="password" autoComplete="current-password" required value={password} onChange={(e) => setPassword(e.target.value)} />
         </label>
         {error && <div className="alert-banner">{error}</div>}
         <button className="btn btn--primary tools-auth-submit" type="submit" disabled={loading}>
-          {loading ? 'Ingresando…' : 'Ingresar a mis herramientas'}
+          {loading ? aText.signingInBtn : aText.signInBtn}
         </button>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '1rem', fontSize: '0.82rem' }}>
           <button
@@ -731,21 +783,21 @@ export function ToolsAuthGate() {
               setNotice('');
             }}
           >
-            ¿Olvidaste tu contraseña?
+            {aText.forgotLink}
           </button>
-          <span style={{ color: '#888' }}>Tools v1.0</span>
+          <span style={{ color: '#b9a99a' }}>Tools v1.0</span>
         </div>
-        <small style={{ marginTop: '0.75rem', display: 'block', color: '#666' }}>
-          ¿Todavía no tenés cuenta? Podés probar la demo interactiva en vivo o suscribirte para acceso permanente.
+        <small style={{ marginTop: '0.75rem', display: 'block' }}>
+          {aText.noAccountHint}
         </small>
         <div style={{ marginTop: '0.85rem', borderTop: '1px solid #44372e', paddingTop: '0.85rem', display: 'flex', flexDirection: 'column', gap: 10 }}>
           <button
             type="button"
             className="btn btn--secondary"
-            style={{ width: '100%', padding: '10px 14px', fontSize: '0.88rem', borderColor: '#d7a35a', color: '#f7d399', fontWeight: 600, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8 }}
+            style={{ width: '100%', padding: '10px 14px', fontSize: '0.88rem', borderColor: '#d7a35a', color: '#f7d399', background: '#3a2d24', fontWeight: 600 }}
             onClick={startGuestDemo}
           >
-            🚀 Explorar Demo en Vivo (Sin Registro)
+            {aText.demoBtn}
           </button>
           <button
             type="button"
@@ -753,7 +805,7 @@ export function ToolsAuthGate() {
             style={{ color: '#d7a35a', fontWeight: 600, fontSize: '0.86rem', textAlign: 'center' }}
             onClick={() => setShowPlans(true)}
           >
-            ✨ Ver Planes, Precios y Medios de Pago
+            {aText.plansBtn}
           </button>
         </div>
       </form>

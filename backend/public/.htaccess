@@ -15,6 +15,25 @@ RewriteEngine On
 RewriteCond %{HTTP:Authorization} ^(.+)$
 RewriteRule .* - [E=HTTP_AUTHORIZATION:%1]
 
+# Límites de carga y ejecución para importaciones y espacios de trabajo de hasta 20 MB
+LimitRequestBody 26214400
+<IfModule mod_php8.c>
+    php_value upload_max_filesize 25M
+    php_value post_max_size 25M
+    php_value max_execution_time 120
+    php_value max_input_time 120
+    php_value memory_limit 256M
+    php_value max_input_vars 5000
+</IfModule>
+<IfModule lsapi_module>
+    php_value upload_max_filesize 25M
+    php_value post_max_size 25M
+    php_value max_execution_time 120
+    php_value max_input_time 120
+    php_value memory_limit 256M
+    php_value max_input_vars 5000
+</IfModule>
+
 # Si el archivo o carpeta existe físicamente, servirlo tal cual.
 RewriteCond %{REQUEST_FILENAME} -f [OR]
 RewriteCond %{REQUEST_FILENAME} -d
