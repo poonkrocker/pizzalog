@@ -1,4 +1,4 @@
-name: CI — Cost Engine Golden Tests & Typecheck
+name: CI — Cost Engine, Price List, Tools & PHP Lint
 
 on:
   push:
@@ -12,15 +12,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Set up PHP 8.2 & Lint Backend
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.2'
-
-      - name: PHP Syntax Check
-        run: |
-          find backend -name "*.php" -print0 | xargs -0 -n1 php -l
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -42,10 +33,31 @@ jobs:
         working-directory: frontend
         run: pnpm run typecheck
 
-      - name: Run Cost Engine v1 Golden Tests (CE-001..CE-008)
+      - name: Set up PHP 8.2
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+
+      - name: PHP Syntax Check
+        run: |
+          find backend -name "*.php" -print0 | xargs -0 -n1 php -l
+
+      - name: Build required packages
         working-directory: frontend
-        run: pnpm run test
+        run: |
+          pnpm --filter @pizzalog/cost-engine build
+          pnpm --filter @pizzalog/price-list build
 
       - name: Build Pizzalog Tools Web Companion
         working-directory: frontend
         run: pnpm --filter @pizzalog/tools build
+
+      - name: Verify Tools deployment parity with dist/ present
+        working-directory: frontend
+        run: |
+          test -f apps/tools/dist/index.html
+          pnpm --filter @pizzalog/cost-engine exec node --test tests/production-infra-7-2-to-7-7.test.mjs
+
+      - name: Run all workspace test suites
+        working-directory: frontend
+        run: pnpm run test
