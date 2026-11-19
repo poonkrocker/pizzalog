@@ -45,6 +45,7 @@ jobs:
       - name: PHP Backup Error Handling Integration Tests (SQLite)
         run: |
           php docs/audit/release-candidate/tests-php/test_workspace_backup_errors.php
+          php docs/audit/release-candidate/scripts/test_mysql_isolation.php --sqlite-in-memory
 
       - name: Build required packages
         working-directory: frontend

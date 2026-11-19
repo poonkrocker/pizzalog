@@ -1,0 +1,197 @@
+{
+  "businessName": "Pizzería Demo RC",
+  "currency": "ARS",
+  "locale": "es-AR",
+  "unitSystem": "metric",
+  "defaultTargetFoodCostPct": 30,
+  "defaultRoundingIncrement": 100,
+  "defaultPackagingCost": 450,
+  "defaultChannelFeePct": 0,
+  "catalog": {
+    "ingredients": [
+      {
+        "id": "rc-harina",
+        "name": "Harina 0000",
+        "category": "Harinas",
+        "base_unit": "kg",
+        "yield_pct": 100,
+        "is_active": true
+      },
+      {
+        "id": "rc-muzza",
+        "name": "Muzzarella",
+        "category": "Lácteos",
+        "base_unit": "kg",
+        "yield_pct": 92,
+        "is_active": true
+      },
+      {
+        "id": "rc-tomate",
+        "name": "Tomate Triturado",
+        "category": "Salsas",
+        "base_unit": "kg",
+        "yield_pct": 100,
+        "is_active": true
+      },
+      {
+        "id": "rc-jamon",
+        "name": "Jamón Cocido",
+        "category": "Fiambres",
+        "base_unit": "kg",
+        "yield_pct": 95,
+        "is_active": true
+      }
+    ],
+    "purchase_prices": [
+      {
+        "id": "rc-pp-1",
+        "ingredient_id": "rc-harina",
+        "purchase_price": 28500,
+        "pack_quantity": 25,
+        "pack_unit": "kg",
+        "currency": "ARS",
+        "effective_date": "2026-11-01",
+        "supplier": "Molino Demo"
+      },
+      {
+        "id": "rc-pp-2",
+        "ingredient_id": "rc-muzza",
+        "purchase_price": 9200,
+        "pack_quantity": 1,
+        "pack_unit": "kg",
+        "currency": "ARS",
+        "effective_date": "2026-11-01",
+        "supplier": "Lácteos Demo"
+      },
+      {
+        "id": "rc-pp-3",
+        "ingredient_id": "rc-tomate",
+        "purchase_price": 14400,
+        "pack_quantity": 8,
+        "pack_unit": "kg",
+        "currency": "ARS",
+        "effective_date": "2026-11-01",
+        "supplier": "Huerta Demo"
+      },
+      {
+        "id": "rc-pp-4",
+        "ingredient_id": "rc-jamon",
+        "purchase_price": 13500,
+        "pack_quantity": 1,
+        "pack_unit": "kg",
+        "currency": "ARS",
+        "effective_date": "2026-11-01",
+        "supplier": "Frigorífico Demo"
+      }
+    ],
+    "recipes": [
+      {
+        "id": "rc-sub-bollo",
+        "name": "Bollo Masa 260g",
+        "type": "subrecipe",
+        "currency": "ARS",
+        "yield_quantity": 1,
+        "yield_unit": "unit",
+        "components": [
+          {
+            "component_type": "ingredient",
+            "ingredient_id": "rc-harina",
+            "quantity": 0.16,
+            "unit": "kg"
+          }
+        ]
+      },
+      {
+        "id": "rc-prod-muzza",
+        "name": "Pizza Muzzarella",
+        "type": "product",
+        "currency": "ARS",
+        "yield_quantity": 1,
+        "yield_unit": "unit",
+        "components": [
+          {
+            "component_type": "subrecipe",
+            "recipe_id": "rc-sub-bollo",
+            "quantity": 1,
+            "unit": "unit"
+          },
+          {
+            "component_type": "ingredient",
+            "ingredient_id": "rc-muzza",
+            "quantity": 0.25,
+            "unit": "kg"
+          },
+          {
+            "component_type": "ingredient",
+            "ingredient_id": "rc-tomate",
+            "quantity": 0.1,
+            "unit": "kg"
+          }
+        ]
+      },
+      {
+        "id": "rc-prod-especial",
+        "name": "Pizza Especial Jamón",
+        "type": "product",
+        "currency": "ARS",
+        "yield_quantity": 1,
+        "yield_unit": "unit",
+        "components": [
+          {
+            "component_type": "subrecipe",
+            "recipe_id": "rc-sub-bollo",
+            "quantity": 1,
+            "unit": "unit"
+          },
+          {
+            "component_type": "ingredient",
+            "ingredient_id": "rc-muzza",
+            "quantity": 0.25,
+            "unit": "kg"
+          },
+          {
+            "component_type": "ingredient",
+            "ingredient_id": "rc-tomate",
+            "quantity": 0.1,
+            "unit": "kg"
+          },
+          {
+            "component_type": "ingredient",
+            "ingredient_id": "rc-jamon",
+            "quantity": 0.12,
+            "unit": "kg"
+          }
+        ]
+      }
+    ]
+  },
+  "operatingExpenses": [
+    {
+      "id": "rc-g1",
+      "name": "Alquiler",
+      "category": "Fijos",
+      "monthlyAmount": 850000
+    },
+    {
+      "id": "rc-g2",
+      "name": "Servicios (Luz/Gas)",
+      "category": "Fijos",
+      "monthlyAmount": 320000
+    }
+  ],
+  "salesHistory": [],
+  "productSalesMap": {
+    "rc-prod-muzza": {
+      "currentPrice": 12500,
+      "monthlyUnits": 480,
+      "targetFoodCostPct": 30
+    },
+    "rc-prod-especial": {
+      "currentPrice": 16200,
+      "monthlyUnits": 260,
+      "targetFoodCostPct": 30
+    }
+  },
+  "snapshots": [],
+  "equivalences": {}
+}
