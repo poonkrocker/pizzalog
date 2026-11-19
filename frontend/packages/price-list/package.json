@@ -11,7 +11,7 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json",
-    "test": "tsc -p tsconfig.build.json && node --test tests/price-list.test.mjs"
+    "test": "tsc -p tsconfig.build.json && node --test tests/price-list.test.mjs tests/xlsx-parser-p0.test.mjs"
   },
   "devDependencies": {
     "typescript": "^5.6.3"

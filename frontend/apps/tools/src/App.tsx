@@ -290,7 +290,7 @@ export function App({
                 updated_at: workspaceUpdatedAtRef.current,
               }),
             });
-            const payload = await parseToolsJsonResponse<{ ok?: boolean; error?: string; data?: { updated_at?: string; version?: number } }>(response);
+            const payload = await parseToolsJsonResponse<{ ok?: boolean; error?: string; data?: { updated_at?: string; version?: number; backup_created?: boolean; backup_warning?: string | null; backup_cleanup_warning?: string | null } }>(response);
             if (response.status === 409) {
               setWorkspaceConflict(
                 'El espacio de trabajo fue modificado en otra sesión o pestaña. Para evitar sobreescribir datos ajenos, recargá la versión más reciente del servidor o descargá una copia de seguridad.'
@@ -305,6 +305,11 @@ export function App({
             }
             if (typeof payload.data?.version === 'number') {
               workspaceVersionRef.current = payload.data.version;
+            }
+            if (payload.data?.backup_warning) {
+              setBackupNotice(payload.data.backup_warning);
+            } else if (payload.data?.backup_cleanup_warning) {
+              setBackupNotice(payload.data.backup_cleanup_warning);
             }
             lastSavedJsonRef.current = serialized;
             try {

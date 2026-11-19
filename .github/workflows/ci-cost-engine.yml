@@ -42,6 +42,10 @@ jobs:
         run: |
           find backend -name "*.php" -print0 | xargs -0 -n1 php -l
 
+      - name: PHP Backup Error Handling Integration Tests (SQLite)
+        run: |
+          php docs/audit/release-candidate/tests-php/test_workspace_backup_errors.php
+
       - name: Build required packages
         working-directory: frontend
         run: |

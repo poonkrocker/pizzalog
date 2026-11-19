@@ -100,6 +100,9 @@ function xmlDocument(source: string, name: string): XMLDocument {
 }
 
 async function inflateRaw(data: Uint8Array): Promise<Uint8Array> {
+  if (typeof DecompressionStream !== 'function') {
+    throw new Error('Tu navegador no soporta descompresión XLSX nativa (DecompressionStream). Actualizá el navegador o importá el archivo en formato CSV.');
+  }
   const bytes = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
   const stream = new Blob([bytes]).stream().pipeThrough(
     new DecompressionStream('deflate-raw' as CompressionFormat)
@@ -439,16 +442,34 @@ async function parseXlsx(buffer: ArrayBuffer, options: ParseImportOptions = {}):
 
   for (const sheet of sheetNodes) {
     const name = sheet.getAttribute('name') ?? `Hoja ${sheets.length + 1}`;
+    const state = (sheet.getAttribute('state') ?? '').toLowerCase();
+    const isHiddenSheet = state === 'hidden' || state === 'veryhidden';
     const relationId =
       sheet.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id') ??
       sheet.getAttribute('r:id') ??
       '';
-    const target = relationships.get(relationId);
-    if (!target) continue;
-    const path = target.startsWith('/') ? target.slice(1) : `xl/${target.replace(/^\.\//, '')}`;
+    const target = relationId ? relationships.get(relationId) : undefined;
+    if (!relationId || !target) {
+      throw new Error(
+        `La hoja "${name}" no tiene una relación interna válida (${relationId || 'sin r:id'}). Se interrumpió la importación para evitar omitir hojas silenciosamente.`
+      );
+    }
+    const normalizedTarget = target.replace(/\\/g, '/').trim();
+    if (!normalizedTarget || normalizedTarget.includes('..')) {
+      throw new Error(
+        `La hoja "${name}" apunta a una ruta interna inválida ("${target}"). Se interrumpió la importación para evitar omitir hojas silenciosamente.`
+      );
+    }
+    const path = normalizedTarget.startsWith('/') ? normalizedTarget.slice(1) : `xl/${normalizedTarget.replace(/^\.\//, '')}`;
+    if (!files.has(path)) {
+      throw new Error(
+        `La hoja "${name}" hace referencia a "${path}", pero ese archivo no existe dentro del XLSX. Se interrumpió la importación para evitar omitir hojas silenciosamente.`
+      );
+    }
     const document = decodeXml(files, path);
     const rows: string[][] = [];
     let hasFormulaCells = false;
+    let crossSheetFormulas = 0;
     let evaluatedArithmeticFormulas = 0;
     let formulasWithoutCachedValues = 0;
 
@@ -460,14 +481,18 @@ async function parseXlsx(buffer: ArrayBuffer, options: ParseImportOptions = {}):
         const type = cell.getAttribute('t');
         const formulaNode = cell.getElementsByTagNameNS('*', 'f')[0];
         const hasFormula = Boolean(formulaNode);
+        const formulaText = (formulaNode?.textContent ?? '').trim();
         const valueNode = cell.getElementsByTagNameNS('*', 'v')[0];
         const inlineText = type === 'inlineStr' ? elementText(cell, 't') : '';
         if (!hasFormula && !valueNode?.textContent && !inlineText) continue;
         if (index >= MAX_COLUMNS) throw new Error(`El XLSX supera el límite seguro de ${MAX_COLUMNS} columnas; no se recortaron datos.`);
-        if (hasFormula) hasFormulaCells = true;
+        if (hasFormula) {
+          hasFormulaCells = true;
+          if (formulaText.includes('!')) crossSheetFormulas += 1;
+        }
         let value = valueNode?.textContent ?? '';
         if (hasFormula && !value) {
-          const evaluated = evaluateSafeArithmeticFormula(formulaNode?.textContent ?? '');
+          const evaluated = evaluateSafeArithmeticFormula(formulaText);
           if (evaluated !== null) { value = evaluated; evaluatedArithmeticFormulas += 1; }
           else formulasWithoutCachedValues += 1;
         }
@@ -483,26 +508,35 @@ async function parseXlsx(buffer: ArrayBuffer, options: ParseImportOptions = {}):
       }
     }
     if (rows.length && options.raw) {
-      sheets.push({ name, rows, ...(hasFormulaCells ? { warnings: ['La hoja contiene fórmulas; se conservaron sus valores guardados.'] } : {}) });
+      const rawWarnings = [
+        ...(isHiddenSheet ? ['La hoja estaba oculta en el libro original y se incluyó completa para no descartar datos.'] : []),
+        ...(hasFormulaCells ? ['La hoja contiene fórmulas; se conservaron sus valores guardados.'] : []),
+        ...(crossSheetFormulas ? [`La hoja contiene ${crossSheetFormulas} fórmulas con referencias entre hojas.`] : []),
+        ...(formulasWithoutCachedValues ? [`Quedaron ${formulasWithoutCachedValues} fórmulas sin valor guardado que requieren revisar sus dependencias entre hojas.`] : []),
+      ];
+      sheets.push({ name, rows, ...(rawWarnings.length ? { warnings: rawWarnings } : {}) });
     } else if (rows.length) {
       const matrixRows = normalizeRecipeMatrix(rows);
       const ingredientPriceRows = matrixRows ? null : normalizeIngredientPriceRows(rows);
       const normalizedRows = matrixRows ?? ingredientPriceRows ?? rows;
       const doughProfiles = name.toLowerCase().includes('masa') ? extractDoughProfiles(rows) : [];
+      const warnings = [
+        ...(isHiddenSheet ? ['La hoja estaba oculta en el libro original y se incluyó completa para no descartar datos.'] : []),
+        ...(hasFormulaCells ? ['La hoja contiene fórmulas; se conservaron sus valores guardados y se evaluaron únicamente fórmulas aritméticas simples sin referencias externas.'] : []),
+        ...(crossSheetFormulas ? [`La hoja contiene ${crossSheetFormulas} fórmulas con referencias entre hojas.`] : []),
+        ...(evaluatedArithmeticFormulas ? [`Se calcularon ${evaluatedArithmeticFormulas} fórmulas aritméticas simples sin valor guardado.`] : []),
+        ...(formulasWithoutCachedValues ? [`Quedaron ${formulasWithoutCachedValues} fórmulas sin valor guardado que requieren revisar sus dependencias entre hojas.`] : []),
+        ...(matrixRows ? ['Se detectó una matriz de recetas por producto y se normalizó a filas de ingredientes sin modificar cantidades.'] : []),
+        ...(ingredientPriceRows ? ['Se detectó una tabla de precios por unidad y se normalizó para importar insumos y sus precios unitarios.'] : []),
+        ...(doughProfiles.length ? ['Se detectó un perfil de masa con fórmula de panadería; se conservarán sus parámetros como subreceta calculada.'] : []),
+      ];
       sheets.push({
         name: matrixRows
           ? `${name} — recetas normalizadas`
           : ingredientPriceRows ? `${name} — insumos normalizados` : name,
         rows: normalizedRows,
         ...(doughProfiles.length ? { doughProfiles } : {}),
-        ...((hasFormulaCells || matrixRows || ingredientPriceRows || doughProfiles.length) ? { warnings: [
-          ...(hasFormulaCells ? ['La hoja contiene fórmulas; se conservaron sus valores guardados y se evaluaron únicamente fórmulas aritméticas simples sin referencias externas.'] : []),
-          ...(evaluatedArithmeticFormulas ? [`Se calcularon ${evaluatedArithmeticFormulas} fórmulas aritméticas simples sin valor guardado.`] : []),
-          ...(formulasWithoutCachedValues ? [`Quedaron ${formulasWithoutCachedValues} fórmulas sin valor guardado que requieren revisar sus dependencias entre hojas.`] : []),
-          ...(matrixRows ? ['Se detectó una matriz de recetas por producto y se normalizó a filas de ingredientes sin modificar cantidades.'] : []),
-          ...(ingredientPriceRows ? ['Se detectó una tabla de precios por unidad y se normalizó para importar insumos y sus precios unitarios.'] : []),
-          ...(doughProfiles.length ? ['Se detectó un perfil de masa con fórmula de panadería; se conservarán sus parámetros como subreceta calculada.'] : []),
-        ] } : {}),
+        ...(warnings.length ? { warnings } : {}),
       });
     }
   }

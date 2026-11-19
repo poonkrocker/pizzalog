@@ -307,41 +307,72 @@ test('Bloque 7 (Tareas 7.2 a 7.7): CORS/API, logs sin secretos, rendimiento masi
     assert.ok(eng instanceof CostEngine);
   });
 
-  await t.test('Tarea 7.7: Compilación y despliegue en tools/ coinciden con dist/ generado desde main', () => {
+  await t.test('Tarea 7.7: Compilación y despliegue en tools/ coinciden estrictamente con dist/ generado desde main', () => {
     const normalizeNl = (value) => value.replace(/\r\n/g, '\n');
-    const deployedHtml = readRepoFile('tools/index.html');
+    const deployedHtmlPath = path.resolve(REPO_ROOT, 'tools/index.html');
     const distHtmlPath = path.resolve(REPO_ROOT, 'frontend/apps/tools/dist/index.html');
-    const hasLocalDist = fs.existsSync(distHtmlPath);
 
-    if (hasLocalDist) {
-      const distHtml = fs.readFileSync(distHtmlPath, 'utf8');
+    assert.ok(fs.existsSync(deployedHtmlPath), 'Falta archivo publicado tools/index.html');
+    assert.ok(
+      fs.existsSync(distHtmlPath),
+      'Falta frontend/apps/tools/dist/index.html: ejecutá `pnpm --filter @pizzalog/tools build` antes de validar paridad de despliegue'
+    );
+
+    const deployedHtml = fs.readFileSync(deployedHtmlPath, 'utf8');
+    const distHtml = fs.readFileSync(distHtmlPath, 'utf8');
+    assert.equal(
+      normalizeNl(deployedHtml),
+      normalizeNl(distHtml),
+      'tools/index.html debe ser idéntico al frontend/apps/tools/dist/index.html generado'
+    );
+
+    const extractAssetRefs = (html) => [
+      ...Array.from(html.matchAll(/src="(?:\.?\/)?(assets\/[^"]+)"/g)).map((m) => m[1]),
+      ...Array.from(html.matchAll(/href="(?:\.?\/)?(assets\/[^"]+)"/g)).map((m) => m[1]),
+    ];
+
+    const deployedAssetRefs = extractAssetRefs(deployedHtml);
+    const distAssetRefs = extractAssetRefs(distHtml);
+    assert.ok(deployedAssetRefs.length >= 2, 'tools/index.html debe referenciar bundle JS y CSS compilados');
+    assert.deepEqual(
+      deployedAssetRefs,
+      distAssetRefs,
+      'Las referencias a assets en tools/index.html deben coincidir exactamente con dist/index.html'
+    );
+
+    for (const relAsset of deployedAssetRefs) {
+      const deployedAssetPath = path.resolve(REPO_ROOT, 'tools', relAsset);
+      const distAssetPath = path.resolve(REPO_ROOT, 'frontend/apps/tools/dist', relAsset);
+      assert.ok(fs.existsSync(deployedAssetPath), `Falta asset publicado: tools/${relAsset}`);
+      assert.ok(fs.existsSync(distAssetPath), `Falta asset en dist/: ${relAsset}`);
+      const deployedAssetContent = fs.readFileSync(deployedAssetPath, 'utf8');
+      const distAssetContent = fs.readFileSync(distAssetPath, 'utf8');
+      assert.ok(deployedAssetContent.length > 0, `Asset publicado vacío: tools/${relAsset}`);
       assert.equal(
-        normalizeNl(deployedHtml),
-        normalizeNl(distHtml),
-        'tools/index.html debe ser idéntico al dist/ generado'
+        normalizeNl(deployedAssetContent),
+        normalizeNl(distAssetContent),
+        `El archivo publicado tools/${relAsset} debe coincidir con el build actual`
       );
     }
 
-    const assetRefs = [
-      ...Array.from(deployedHtml.matchAll(/src="(?:\.?\/)?(assets\/[^"]+)"/g)).map((m) => m[1]),
-      ...Array.from(deployedHtml.matchAll(/href="(?:\.?\/)?(assets\/[^"]+)"/g)).map((m) => m[1]),
-    ];
-    assert.ok(assetRefs.length >= 2, 'tools/index.html debe referenciar bundle JS y CSS compilados');
-    for (const relAsset of assetRefs) {
-      const deployedAssetPath = path.resolve(REPO_ROOT, 'tools', relAsset);
-      assert.ok(fs.existsSync(deployedAssetPath), `Falta asset publicado: tools/${relAsset}`);
-      const deployedAssetContent = fs.readFileSync(deployedAssetPath, 'utf8');
-      assert.ok(deployedAssetContent.length > 0, `Asset publicado vacío: tools/${relAsset}`);
-
-      if (hasLocalDist) {
-        const distAssetPath = path.resolve(REPO_ROOT, 'frontend/apps/tools/dist', relAsset);
-        assert.ok(fs.existsSync(distAssetPath), `Falta asset en dist/: ${relAsset}`);
-        assert.equal(
-          normalizeNl(deployedAssetContent),
-          normalizeNl(fs.readFileSync(distAssetPath, 'utf8')),
-          `El archivo publicado tools/${relAsset} debe coincidir con el build actual`
-        );
-      }
+    // Verificar que no queden assets publicados obsoletos en tools/assets/ sin referencia en HTML/dist
+    const deployedAssetsDir = path.resolve(REPO_ROOT, 'tools/assets');
+    const distAssetsDir = path.resolve(REPO_ROOT, 'frontend/apps/tools/dist/assets');
+    assert.ok(fs.existsSync(deployedAssetsDir), 'Falta carpeta tools/assets');
+    assert.ok(fs.existsSync(distAssetsDir), 'Falta carpeta frontend/apps/tools/dist/assets');
+    const deployedFiles = fs.readdirSync(deployedAssetsDir).sort();
+    const distFiles = fs.readdirSync(distAssetsDir).sort();
+    assert.deepEqual(
+      deployedFiles,
+      distFiles,
+      'tools/assets/ no debe contener assets obsoletos ni omitir archivos generados en dist/assets/'
+    );
+    const referencedFileNames = new Set(deployedAssetRefs.map((ref) => path.basename(ref)));
+    for (const fileName of deployedFiles) {
+      assert.ok(
+        referencedFileNames.has(fileName),
+        `Asset publicado obsoleto no referenciado por tools/index.html: tools/assets/${fileName}`
+      );
     }
 
     assert.ok(fs.existsSync(path.resolve(REPO_ROOT, 'tools/.htaccess')));

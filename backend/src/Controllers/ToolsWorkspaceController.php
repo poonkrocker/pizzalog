@@ -63,6 +63,73 @@ class ToolsWorkspaceController
     }
 
     /**
+     * Registra una copia de seguridad automática de la versión previa del espacio de trabajo.
+     * Separa explícitamente el alta del backup de la limpieza de respaldos antiguos y nunca
+     * oculta fallos ni expone datos sensibles en logs.
+     *
+     * @return array{backup_created: bool, backup_warning: ?string, backup_cleanup_warning: ?string}
+     */
+    public static function recordAutomaticBackup(
+        \PDO $pdo,
+        int $accountId,
+        int $previousVersion,
+        string $previousJson,
+        string $nowExpr
+    ): array {
+        $backupCreated = false;
+        $backupWarning = null;
+        $backupCleanupWarning = null;
+
+        try {
+            $bkpStmt = $pdo->prepare(
+                "INSERT INTO tools_workspace_backups (account_id, version, workspace_json, created_at)
+                 VALUES (?, ?, ?, {$nowExpr})"
+            );
+            $bkpStmt->execute([$accountId, $previousVersion, $previousJson]);
+            $backupCreated = true;
+        } catch (\Throwable $bkpErr) {
+            error_log(sprintf(
+                '[pizzalog-tools-backup] Automatic backup insert failed account=%d version=%d code=%s',
+                $accountId,
+                $previousVersion,
+                (string) $bkpErr->getCode()
+            ));
+            return [
+                'backup_created' => false,
+                'backup_warning' => 'El espacio de trabajo se guardó correctamente, pero no se pudo generar la copia de seguridad automática.',
+                'backup_cleanup_warning' => null,
+            ];
+        }
+
+        // Conservar los últimos 10 backups por cuenta sin invalidar el respaldo recién creado
+        try {
+            $keepStmt = $pdo->prepare(
+                'SELECT id FROM tools_workspace_backups WHERE account_id = ? ORDER BY id DESC LIMIT 1 OFFSET 10'
+            );
+            $keepStmt->execute([$accountId]);
+            $cutoffId = $keepStmt->fetchColumn();
+            if ($cutoffId) {
+                $pdo->prepare('DELETE FROM tools_workspace_backups WHERE account_id = ? AND id <= ?')
+                    ->execute([$accountId, (int) $cutoffId]);
+            }
+        } catch (\Throwable $cleanupErr) {
+            error_log(sprintf(
+                '[pizzalog-tools-backup] Automatic backup cleanup failed account=%d version=%d code=%s',
+                $accountId,
+                $previousVersion,
+                (string) $cleanupErr->getCode()
+            ));
+            $backupCleanupWarning = 'La copia de seguridad automática se creó, pero falló la limpieza de respaldos antiguos.';
+        }
+
+        return [
+            'backup_created' => $backupCreated,
+            'backup_warning' => $backupWarning,
+            'backup_cleanup_warning' => $backupCleanupWarning,
+        ];
+    }
+
+    /**
      * PUT / POST /tools/workspace
      * Guarda el espacio de trabajo con control de concurrencia optimista (version incremental + updated_at),
      * bloqueo de fila (SELECT ... FOR UPDATE) y respaldo automático en tools_workspace_backups.
@@ -115,6 +182,12 @@ class ToolsWorkspaceController
             $checkStmt->execute([$accountId]);
             $existing = $checkStmt->fetch(\PDO::FETCH_ASSOC);
 
+            $backupResult = [
+                'backup_created' => false,
+                'backup_warning' => null,
+                'backup_cleanup_warning' => null,
+            ];
+
             if ($existing) {
                 $currentVersion = (int) ($existing['version'] ?? 1);
                 $currentUpdatedAt = (string) $existing['updated_at'];
@@ -137,27 +210,14 @@ class ToolsWorkspaceController
                     ]);
                 }
 
-                // Guardar backup automático del estado anterior antes de sobrescribir
-                try {
-                    $bkpStmt = $pdo->prepare(
-                        "INSERT INTO tools_workspace_backups (account_id, version, workspace_json, created_at)
-                         VALUES (?, ?, ?, {$nowExpr})"
-                    );
-                    $bkpStmt->execute([$accountId, $currentVersion, (string) $existing['workspace_json']]);
-
-                    // Conservar los últimos 10 backups por cuenta
-                    $keepStmt = $pdo->prepare(
-                        'SELECT id FROM tools_workspace_backups WHERE account_id = ? ORDER BY id DESC LIMIT 1 OFFSET 10'
-                    );
-                    $keepStmt->execute([$accountId]);
-                    $cutoffId = $keepStmt->fetchColumn();
-                    if ($cutoffId) {
-                        $pdo->prepare('DELETE FROM tools_workspace_backups WHERE account_id = ? AND id <= ?')
-                            ->execute([$accountId, (int) $cutoffId]);
-                    }
-                } catch (\Throwable $ignoreBkp) {
-                    // No abortar guardado principal si la tabla de backups no está disponible
-                }
+                // Guardar backup automático del estado anterior antes de sobrescribir (sin perder el guardado principal si falla)
+                $backupResult = self::recordAutomaticBackup(
+                    $pdo,
+                    $accountId,
+                    $currentVersion,
+                    (string) $existing['workspace_json'],
+                    $nowExpr
+                );
 
                 $newVersion = $currentVersion + 1;
                 $updateStmt = $pdo->prepare(
@@ -187,6 +247,9 @@ class ToolsWorkspaceController
                 'saved' => true,
                 'version' => $finalVersion,
                 'updated_at' => $newUpdatedAt,
+                'backup_created' => $backupResult['backup_created'],
+                'backup_warning' => $backupResult['backup_warning'],
+                'backup_cleanup_warning' => $backupResult['backup_cleanup_warning'],
             ]);
         } catch (\Throwable $e) {
             if ($pdo->inTransaction()) {
